@@ -1,0 +1,53 @@
+import { eq, sql } from 'drizzle-orm'
+import { db } from '@/db'
+import { categories, merchants, transactions } from '@/db/schema'
+import { AppShell } from '@/app/components/AppShell'
+import { CategoriesManager, type CategoryManageRow } from '@/app/components/CategoriesManager'
+
+export const dynamic = 'force-dynamic'
+
+export default async function CategoriesPage() {
+  const [catRows, txnCounts, merchantCats] = await Promise.all([
+    db.select().from(categories).orderBy(categories.name),
+    // Count transactions whose own categoryId is set.
+    db
+      .select({ categoryId: transactions.categoryId, count: sql<number>`count(*)` })
+      .from(transactions)
+      .groupBy(transactions.categoryId),
+    // Count transactions inheriting from their merchant's category.
+    db
+      .select({ categoryId: merchants.categoryId, count: sql<number>`count(*)` })
+      .from(transactions)
+      .innerJoin(merchants, eq(transactions.merchantId, merchants.id))
+      .where(sql`${transactions.categoryId} is null`)
+      .groupBy(merchants.categoryId),
+  ])
+
+  // Effective per-category transaction counts.
+  const counts = new Map<number, number>()
+  for (const r of txnCounts) {
+    if (r.categoryId != null) counts.set(r.categoryId, (counts.get(r.categoryId) ?? 0) + Number(r.count))
+  }
+  for (const r of merchantCats) {
+    if (r.categoryId != null) counts.set(r.categoryId, (counts.get(r.categoryId) ?? 0) + Number(r.count))
+  }
+
+  const rows: CategoryManageRow[] = catRows.map((c) => ({
+    id: c.id,
+    name: c.name,
+    color: c.color,
+    count: counts.get(c.id) ?? 0,
+  }))
+
+  return (
+    <AppShell>
+      <div className="mb-4">
+        <h1 className="text-xl font-bold tracking-tight">Categories</h1>
+        <p className="text-sm text-[var(--muted)]">
+          Organize spending into buckets. Recolor or rename anytime — charts update everywhere.
+        </p>
+      </div>
+      <CategoriesManager categories={rows} />
+    </AppShell>
+  )
+}
