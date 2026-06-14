@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { setTxnCategory, setTxnFlags } from '@/app/actions/transactions'
-import { formatCurrency, formatShortDate } from '@/app/lib/format'
+import { formatCurrency, formatLongDate } from '@/app/lib/format'
 import type { CategoryOption } from '@/app/components/MerchantsManager'
 
 export type TxnRow = {
@@ -227,7 +227,7 @@ function TxnRowView({
               </span>
               {t.person}
             </span>
-            {formatShortDate(t.txnDate)} · {t.source}
+            {formatLongDate(t.txnDate)} · {t.source}
           </span>
         </div>
         {inlineCategory && (
