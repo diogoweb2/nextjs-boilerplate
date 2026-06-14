@@ -10,7 +10,7 @@ import { BarList } from '@/app/components/charts/BarList'
 import { WeekdayChart } from '@/app/components/charts/WeekdayChart'
 import { InsightCard } from '@/app/components/InsightCard'
 import { BatchList } from '@/app/components/BatchList'
-import { loadEnriched, buildOverview } from '@/app/lib/analytics'
+import { loadEnriched, buildOverview, availableMonths } from '@/app/lib/analytics'
 import { buildInsights } from '@/app/lib/insights'
 import { parsePeriodParams } from '@/app/lib/params'
 import {
@@ -27,10 +27,11 @@ export default async function Home({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
-  const { months, excludeSpecial } = parsePeriodParams(await searchParams)
+  const { months, excludeSpecial, month } = parsePeriodParams(await searchParams)
   const all = await loadEnriched()
-  const ov = buildOverview(all, months, excludeSpecial)
-  const insights = buildInsights(all, months, excludeSpecial)
+  const ov = buildOverview(all, months, excludeSpecial, month)
+  const months_available = availableMonths(all)
+  const insights = buildInsights(all, months, excludeSpecial, month)
 
   const batches = await db
     .select()
@@ -44,10 +45,14 @@ export default async function Home({
         <div>
           <h1 className="text-xl font-bold tracking-tight">Overview</h1>
           <p className="text-sm text-[var(--muted)]">
-            {ov.anchor ? `${ov.periodLabel} · through ${formatMonth(ov.anchor)}` : 'Upload a statement to begin'}
+            {ov.anchor
+              ? month
+                ? ov.periodLabel
+                : `${ov.periodLabel} · through ${formatMonth(ov.anchor)}`
+              : 'Upload a statement to begin'}
           </p>
         </div>
-        <PeriodSelector />
+        <PeriodSelector availableMonths={months_available} />
       </div>
 
       {!ov.hasData ? (

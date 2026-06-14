@@ -7,8 +7,10 @@ import {
   setMerchantCategory,
   setMerchantFlags,
   mergeMerchants,
+  getMerchantMonthlySpend,
 } from '@/app/actions/merchants'
 import { formatCurrency } from '@/app/lib/format'
+import { LineChart } from '@/app/components/charts/LineChart'
 
 export type MerchantRow = {
   id: number
@@ -18,6 +20,7 @@ export type MerchantRow = {
   defaultSpecial: boolean
   total: number
   count: number
+  monthCount: number
 }
 export type CategoryOption = { id: number; name: string; color: string }
 
@@ -165,70 +168,120 @@ function MerchantRowView({
   onFlags: (flags: { defaultRecurring?: boolean; defaultSpecial?: boolean }) => void
 }) {
   const [name, setName] = useState(m.name)
+  const [chartOpen, setChartOpen] = useState(false)
+  const [chartData, setChartData] = useState<{ label: string; total: number }[] | null>(null)
+  const [chartLoading, setChartLoading] = useState(false)
+
+  const toggleChart = async () => {
+    if (chartOpen) {
+      setChartOpen(false)
+      return
+    }
+    setChartOpen(true)
+    if (chartData === null) {
+      setChartLoading(true)
+      const data = await getMerchantMonthlySpend(m.id)
+      setChartData(data)
+      setChartLoading(false)
+    }
+  }
 
   return (
-    <div className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center">
-      <div className="flex flex-1 items-center gap-2.5">
-        <input
-          type="checkbox"
-          checked={selected}
-          onChange={onToggleSelect}
-          className="h-4 w-4 shrink-0 accent-[var(--accent)]"
-          title="Select for merge"
-        />
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onBlur={() => name.trim() && name !== m.name && onRename(name)}
-          onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-          className="min-w-0 flex-1 rounded-md bg-transparent px-1 py-0.5 text-sm font-medium outline-none hover:bg-[var(--surface-2)] focus:bg-[var(--surface-2)]"
-        />
+    <div>
+      <div className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center">
+        <div className="flex flex-1 items-center gap-2.5">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelect}
+            className="h-4 w-4 shrink-0 accent-[var(--accent)]"
+            title="Select for merge"
+          />
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={() => name.trim() && name !== m.name && onRename(name)}
+            onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+            className="min-w-0 flex-1 rounded-md bg-transparent px-1 py-0.5 text-sm font-medium outline-none hover:bg-[var(--surface-2)] focus:bg-[var(--surface-2)]"
+          />
+        </div>
+
+        <div className="flex items-center justify-between gap-2 sm:justify-end">
+          <span className="hidden w-24 text-right text-xs tabular-nums text-[var(--muted)] sm:inline">
+            {m.count} txn
+          </span>
+          <span className="w-24 text-right text-sm font-semibold tabular-nums">
+            {formatCurrency(m.total)}
+          </span>
+
+          <select
+            value={m.categoryId ?? ''}
+            onChange={(e) => onCategory(e.target.value ? Number(e.target.value) : null)}
+            className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs"
+          >
+            <option value="">Uncategorized</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+
+          <button
+            onClick={() => onFlags({ defaultRecurring: !m.defaultRecurring })}
+            title="Recurring subscription"
+            className={`rounded-md px-2 py-1 text-xs font-medium transition-colors ${
+              m.defaultRecurring
+                ? 'bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] text-[var(--accent)]'
+                : 'text-[var(--muted)] hover:bg-[var(--surface-2)]'
+            }`}
+          >
+            ↻ Sub
+          </button>
+          <button
+            onClick={() => onFlags({ defaultSpecial: !m.defaultSpecial })}
+            title="Special / reimbursable — excluded from charts when filtered"
+            className={`rounded-md px-2 py-1 text-xs font-medium transition-colors ${
+              m.defaultSpecial
+                ? 'bg-amber-500/15 text-amber-500'
+                : 'text-[var(--muted)] hover:bg-[var(--surface-2)]'
+            }`}
+          >
+            ★ Special
+          </button>
+          {m.monthCount > 1 ? (
+            <button
+              onClick={toggleChart}
+              title="Show spending over time"
+              className={`rounded-md px-2 py-1 text-xs font-medium transition-colors ${
+                chartOpen
+                  ? 'bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] text-[var(--accent)]'
+                  : 'text-[var(--muted)] hover:bg-[var(--surface-2)]'
+              }`}
+            >
+              ▲ Chart
+            </button>
+          ) : (
+            <span className="inline-block w-[60px]" aria-hidden />
+          )}
+        </div>
       </div>
 
-      <div className="flex items-center justify-between gap-2 sm:justify-end">
-        <span className="hidden w-24 text-right text-xs tabular-nums text-[var(--muted)] sm:inline">
-          {m.count} txn
-        </span>
-        <span className="w-24 text-right text-sm font-semibold tabular-nums">
-          {formatCurrency(m.total)}
-        </span>
-
-        <select
-          value={m.categoryId ?? ''}
-          onChange={(e) => onCategory(e.target.value ? Number(e.target.value) : null)}
-          className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs"
-        >
-          <option value="">Uncategorized</option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-
-        <button
-          onClick={() => onFlags({ defaultRecurring: !m.defaultRecurring })}
-          title="Recurring subscription"
-          className={`rounded-md px-2 py-1 text-xs font-medium transition-colors ${
-            m.defaultRecurring
-              ? 'bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] text-[var(--accent)]'
-              : 'text-[var(--muted)] hover:bg-[var(--surface-2)]'
-          }`}
-        >
-          ↻ Sub
-        </button>
-        <button
-          onClick={() => onFlags({ defaultSpecial: !m.defaultSpecial })}
-          title="Special / reimbursable — excluded from charts when filtered"
-          className={`rounded-md px-2 py-1 text-xs font-medium transition-colors ${
-            m.defaultSpecial
-              ? 'bg-amber-500/15 text-amber-500'
-              : 'text-[var(--muted)] hover:bg-[var(--surface-2)]'
-          }`}
-        >
-          ★ Special
-        </button>
-      </div>
+      {chartOpen && (
+        <div className="border-t border-[var(--border)] bg-[var(--surface)] px-4 pb-4 pt-3">
+          {chartLoading || chartData === null ? (
+            <p className="py-6 text-center text-xs text-[var(--muted)]">Loading…</p>
+          ) : chartData.length === 0 ? (
+            <p className="py-6 text-center text-xs text-[var(--muted)]">No data</p>
+          ) : (
+            <LineChart
+              labels={chartData.map((d) => d.label)}
+              series={[{ color: 'var(--accent)', values: chartData.map((d) => d.total) }]}
+              height={160}
+            />
+          )}
+        </div>
+      )}
     </div>
   )
 }

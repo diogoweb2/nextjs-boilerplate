@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { eq, inArray, ne } from 'drizzle-orm'
+import { eq, inArray, ne, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import { merchants, merchantRules, transactions } from '@/db/schema'
 import { requireAuth } from '@/app/lib/auth-guard'
@@ -62,6 +62,22 @@ export async function mergeMerchants(
     .where(inArray(merchantRules.merchantId, losers))
   await db.delete(merchants).where(inArray(merchants.id, losers))
   revalidateAll()
+}
+
+export async function getMerchantMonthlySpend(
+  merchantId: number
+): Promise<{ label: string; total: number }[]> {
+  await requireAuth()
+  const rows = await db
+    .select({
+      label: sql<string>`to_char(${transactions.txnDate}, 'YYYY-MM')`,
+      total: sql<string>`coalesce(sum(${transactions.amount}), 0)`,
+    })
+    .from(transactions)
+    .where(eq(transactions.merchantId, merchantId))
+    .groupBy(sql`to_char(${transactions.txnDate}, 'YYYY-MM')`)
+    .orderBy(sql`to_char(${transactions.txnDate}, 'YYYY-MM')`)
+  return rows.map((r) => ({ label: r.label, total: Number(r.total) }))
 }
 
 /**

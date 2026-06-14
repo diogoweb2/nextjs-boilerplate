@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { transactions, merchants, categories } from '@/db/schema'
+import { formatMonth } from '@/app/lib/format'
 
 export type EnrichedTxn = {
   id: number
@@ -87,6 +88,12 @@ export function addMonths(ym: string, delta: number): string {
   return `${ny}-${String(nm).padStart(2, '0')}`
 }
 
+/** Sorted list of YYYY-MM strings present in the dataset, most recent first. */
+export function availableMonths(txns: EnrichedTxn[]): string[] {
+  const set = new Set(txns.map((t) => t.txnDate.slice(0, 7)))
+  return Array.from(set).sort().reverse()
+}
+
 export function anchorMonth(txns: EnrichedTxn[]): string | null {
   if (txns.length === 0) return null
   return txns.reduce((max, t) => (t.txnDate > max ? t.txnDate : max), txns[0].txnDate).slice(0, 7)
@@ -143,18 +150,26 @@ export type Overview = {
 export function buildOverview(
   all: EnrichedTxn[],
   months: number,
-  excludeSpecial: boolean
+  excludeSpecial: boolean,
+  exactMonth?: string | null
 ): Overview {
   const anchor = anchorMonth(all)
   if (!anchor) {
     return emptyOverview(months)
   }
   const filtered = excludeSpecial ? all.filter((t) => !t.isSpecial) : all
-  const { start, end } = periodWindow(anchor, months)
+
+  let start: string, end: string
+  if (exactMonth) {
+    start = exactMonth
+    end = exactMonth
+  } else {
+    ;({ start, end } = periodWindow(anchor, months))
+  }
   const cur = filtered.filter((t) => inWindow(t, start, end))
 
   const prevEnd = addMonths(start, -1)
-  const prevStart = addMonths(prevEnd, -(months - 1))
+  const prevStart = exactMonth ? prevEnd : addMonths(prevEnd, -(months - 1))
   const prev = filtered.filter((t) => inWindow(t, prevStart, prevEnd))
 
   const purchases = cur.filter((t) => t.amount > 0)
@@ -239,7 +254,7 @@ export function buildOverview(
   return {
     hasData: true,
     anchor,
-    periodLabel: months === 1 ? 'This month' : `Last ${months} months`,
+    periodLabel: exactMonth ? formatMonth(exactMonth) : months === 1 ? 'This month' : `Last ${months} months`,
     months,
     gross,
     net,
@@ -280,30 +295,40 @@ export type Trends = {
   anchor: string | null
   months: number
   total: { ym: string; amount: number }[]
-  categories: { name: string; color: string; series: number[]; total: number }[]
+  categories: { name: string; color: string; categoryId: number | null; series: number[]; total: number }[]
   months_labels: string[]
 }
 
 export function buildTrends(
   all: EnrichedTxn[],
   months: number,
-  excludeSpecial: boolean
+  excludeSpecial: boolean,
+  exactMonth?: string | null
 ): Trends {
   const anchor = anchorMonth(all)
   if (!anchor) return { hasData: false, anchor: null, months, total: [], categories: [], months_labels: [] }
   const filtered = excludeSpecial ? all.filter((t) => !t.isSpecial) : all
 
   const labels: string[] = []
-  for (let i = months - 1; i >= 0; i--) labels.push(addMonths(anchor, -i))
+  if (exactMonth) {
+    labels.push(exactMonth)
+  } else {
+    for (let i = months - 1; i >= 0; i--) labels.push(addMonths(anchor, -i))
+  }
 
-  const total = monthlySeries(filtered, anchor, months)
+  const total = labels.map((ym) => ({
+    ym,
+    amount: sum(filtered.filter((t) => t.amount > 0 && monthKey(t.txnDate) === ym).map((t) => t.amount)),
+  }))
 
   // Per-category series.
-  const catMeta = new Map<string, string>()
-  for (const t of filtered) catMeta.set(t.categoryName, t.categoryColor)
+  const catMeta = new Map<string, { color: string; id: number | null }>()
+  for (const t of filtered) {
+    if (!catMeta.has(t.categoryName)) catMeta.set(t.categoryName, { color: t.categoryColor, id: t.categoryId })
+  }
 
   const categories = [...catMeta.entries()]
-    .map(([name, color]) => {
+    .map(([name, meta]) => {
       const series = labels.map((ym) =>
         sum(
           filtered
@@ -311,7 +336,7 @@ export function buildTrends(
             .map((t) => t.amount)
         )
       )
-      return { name, color, series, total: sum(series) }
+      return { name, color: meta.color, categoryId: meta.id, series, total: sum(series) }
     })
     .filter((c) => c.total > 0)
     .sort((a, b) => b.total - a.total)

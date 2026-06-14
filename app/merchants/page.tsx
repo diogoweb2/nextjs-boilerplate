@@ -8,7 +8,7 @@ import { MerchantsManager, type MerchantRow } from '@/app/components/MerchantsMa
 export const dynamic = 'force-dynamic'
 
 export default async function MerchantsPage() {
-  const [merchantRows, catRows, totals] = await Promise.all([
+  const [merchantRows, catRows, totals, monthCounts] = await Promise.all([
     db.select().from(merchants),
     db.select().from(categories).orderBy(categories.name),
     db
@@ -20,10 +20,21 @@ export default async function MerchantsPage() {
       .from(transactions)
       .where(eq(transactions.isPayment, false))
       .groupBy(transactions.merchantId),
+    db
+      .select({
+        merchantId: transactions.merchantId,
+        monthCount: sql<number>`count(distinct to_char(${transactions.txnDate}, 'YYYY-MM'))`,
+      })
+      .from(transactions)
+      .where(eq(transactions.isPayment, false))
+      .groupBy(transactions.merchantId),
   ])
 
   const totalsMap = new Map(
     totals.map((t) => [t.merchantId, { total: Number(t.total), count: Number(t.count) }])
+  )
+  const monthCountMap = new Map(
+    monthCounts.map((r) => [r.merchantId, Number(r.monthCount)])
   )
 
   // Only show merchants that actually have non-payment transactions.
@@ -38,6 +49,7 @@ export default async function MerchantsPage() {
         defaultSpecial: m.defaultSpecial,
         total: agg?.total ?? 0,
         count: agg?.count ?? 0,
+        monthCount: monthCountMap.get(m.id) ?? 0,
       }
     })
     .filter((m) => m.count > 0)

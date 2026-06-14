@@ -26,18 +26,22 @@ export type TxnRow = {
 export function TransactionsTable({
   transactions,
   categories,
+  initialCategoryFilter = '',
 }: {
   transactions: TxnRow[]
   categories: CategoryOption[]
+  initialCategoryFilter?: string
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [query, setQuery] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState<string>('')
+  const [categoryFilter, setCategoryFilter] = useState<string>(
+    initialCategoryFilter === 'uncategorized' ? '' : initialCategoryFilter
+  )
   const [hidePayments, setHidePayments] = useState(true)
   const [hideSpecial, setHideSpecial] = useState(false)
   const [recurringOnly, setRecurringOnly] = useState(false)
-  const [uncategorizedOnly, setUncategorizedOnly] = useState(false)
+  const [uncategorizedOnly, setUncategorizedOnly] = useState(initialCategoryFilter === 'uncategorized')
   const [personFilter, setPersonFilter] = useState<string>('')
   const [sortBy, setSortBy] = useState<'date' | 'amount'>('date')
 

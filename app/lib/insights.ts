@@ -25,18 +25,26 @@ function sum(nums: number[]): number {
 export function buildInsights(
   all: EnrichedTxn[],
   months: number,
-  excludeSpecial: boolean
+  excludeSpecial: boolean,
+  exactMonth?: string | null
 ): Insights {
   const anchor = anchorMonth(all)
   if (!anchor) {
     return { cards: [], newMerchants: [], movers: [], subscriptions: [], outliers: [] }
   }
   const data = excludeSpecial ? all.filter((t) => !t.isSpecial) : all
-  const { start, end } = periodWindow(anchor, months)
+
+  let start: string, end: string
+  if (exactMonth) {
+    start = exactMonth
+    end = exactMonth
+  } else {
+    ;({ start, end } = periodWindow(anchor, months))
+  }
   const inCur = (t: EnrichedTxn) => monthKey(t.txnDate) >= start && monthKey(t.txnDate) <= end
 
   const prevEnd = addMonths(start, -1)
-  const prevStart = addMonths(prevEnd, -(months - 1))
+  const prevStart = exactMonth ? prevEnd : addMonths(prevEnd, -(months - 1))
   const inPrev = (t: EnrichedTxn) =>
     monthKey(t.txnDate) >= prevStart && monthKey(t.txnDate) <= prevEnd
 
@@ -56,10 +64,12 @@ export function buildInsights(
     if (Math.abs(pct) >= 3) {
       cards.push({
         title: diff > 0 ? `Spending up ${pct}%` : `Spending down ${Math.abs(pct)}%`,
-        detail:
-          diff > 0
-            ? `You spent ${formatCurrency(Math.abs(diff))} more than the previous ${months === 1 ? 'month' : `${months} months`}.`
-            : `You spent ${formatCurrency(Math.abs(diff))} less than the previous ${months === 1 ? 'month' : `${months} months`}. Nice work.`,
+        detail: (() => {
+          const periodLabel = exactMonth ? 'month' : months === 1 ? 'month' : `${months} months`
+          return diff > 0
+            ? `You spent ${formatCurrency(Math.abs(diff))} more than the previous ${periodLabel}.`
+            : `You spent ${formatCurrency(Math.abs(diff))} less than the previous ${periodLabel}. Nice work.`
+        })(),
         tone: diff > 0 ? 'up' : 'good',
       })
     }

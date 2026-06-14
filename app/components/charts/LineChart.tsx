@@ -73,11 +73,30 @@ export function LineChart({
               strokeLinejoin="round"
               strokeLinecap="round"
             />
-            {s.values.map((v, i) => (
-              <circle key={i} cx={x(i)} cy={y(v)} r={2.8} fill={s.color}>
-                <title>{`${formatMonth(labels[i])}: ${formatCurrencyCompact(v)}`}</title>
-              </circle>
-            ))}
+            {s.values.map((v, i) => {
+              const cx = x(i)
+              const cy = y(v)
+              const labelOffset = 12
+              const nearTop = cy - padTop < labelOffset + 4
+              const labelY = nearTop ? cy + labelOffset + 4 : cy - labelOffset + 4
+              return (
+                <g key={i}>
+                  <circle cx={cx} cy={cy} r={2.8} fill={s.color}>
+                    <title>{`${formatMonth(labels[i])}: ${formatCurrencyCompact(v)}`}</title>
+                  </circle>
+                  <text
+                    x={cx}
+                    y={labelY}
+                    textAnchor="middle"
+                    style={{ fontSize: 8 }}
+                    className="fill-[var(--foreground)]"
+                    pointerEvents="none"
+                  >
+                    {formatCurrencyCompact(v)}
+                  </text>
+                </g>
+              )
+            })}
           </g>
         )
       })}

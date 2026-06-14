@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useSearchParams } from 'next/navigation'
 import { logout } from '@/app/actions/auth'
 
 const LINKS = [
@@ -18,13 +18,30 @@ function isActive(pathname: string, href: string): boolean {
 
 export function NavBar() {
   const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  function navHref(href: string): string {
+    const preserved: string[] = []
+    const month = searchParams.get('month')
+    const months = searchParams.get('months')
+    const special = searchParams.get('special')
+    if (href === '/trends') {
+      // month has no meaning in trends; default to 2M (skip 1M, it's not useful for trends)
+      const trendsMonths = months && months !== '1' ? months : '2'
+      preserved.push(`months=${trendsMonths}`)
+    } else {
+      if (month) preserved.push(`month=${encodeURIComponent(month)}`)
+    }
+    if (special) preserved.push(`special=${encodeURIComponent(special)}`)
+    return preserved.length ? `${href}?${preserved.join('&')}` : href
+  }
 
   return (
     <>
       {/* Top bar (all viewports) */}
       <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[color-mix(in_srgb,var(--background)_85%,transparent)] backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
-          <Link href="/" className="flex items-center gap-2 font-bold tracking-tight">
+          <Link href={navHref('/')} className="flex items-center gap-2 font-bold tracking-tight">
             <span className="grid h-7 w-7 place-items-center rounded-lg bg-[var(--accent)] text-sm text-[var(--accent-fg)]">
               $
             </span>
@@ -35,7 +52,7 @@ export function NavBar() {
             {LINKS.map((l) => (
               <Link
                 key={l.href}
-                href={l.href}
+                href={navHref(l.href)}
                 className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
                   isActive(pathname, l.href)
                     ? 'bg-[var(--surface-2)] text-[var(--foreground)]'
@@ -73,7 +90,7 @@ export function NavBar() {
           return (
             <Link
               key={l.href}
-              href={l.href}
+              href={navHref(l.href)}
               className={`flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium ${
                 active ? 'text-[var(--accent)]' : 'text-[var(--muted)]'
               }`}

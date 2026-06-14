@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { AppShell, Card, EmptyHint } from '@/app/components/AppShell'
 import { PeriodSelector } from '@/app/components/PeriodSelector'
 import { LineChart } from '@/app/components/charts/LineChart'
@@ -35,7 +36,7 @@ export default async function TrendsPage({
           <h1 className="text-xl font-bold tracking-tight">Trends</h1>
           <p className="text-sm text-[var(--muted)]">How spending evolves month over month</p>
         </div>
-        <PeriodSelector />
+        <PeriodSelector periodOptions={[2, 3, 6, 12]} />
       </div>
 
       {!trends.hasData ? (
@@ -75,18 +76,23 @@ export default async function TrendsPage({
                       </div>
                       {/* Mini sparkline bars */}
                       <div className="flex h-8 items-end gap-0.5">
-                        {c.series.map((v, i) => (
-                          <div
-                            key={i}
-                            className="flex-1 rounded-sm"
-                            style={{
-                              height: `${Math.max(4, (v / max) * 100)}%`,
-                              background: c.color,
-                              opacity: i === c.series.length - 1 ? 1 : 0.45,
-                            }}
-                            title={`${formatMonth(trends.months_labels[i])}: ${formatCurrency(v)}`}
-                          />
-                        ))}
+                        {c.series.map((v, i) => {
+                          const catParam = c.categoryId != null ? String(c.categoryId) : 'uncategorized'
+                          const href = `/transactions?month=${trends.months_labels[i]}&category=${catParam}`
+                          return (
+                            <Link
+                              key={i}
+                              href={href}
+                              className="flex-1 rounded-sm transition-opacity hover:opacity-100"
+                              style={{
+                                height: `${Math.max(4, (v / max) * 100)}%`,
+                                background: c.color,
+                                opacity: i === c.series.length - 1 ? 1 : 0.45,
+                              }}
+                              title={`${formatMonth(trends.months_labels[i])}: ${formatCurrency(v)} — click to view transactions`}
+                            />
+                          )
+                        })}
                       </div>
                     </li>
                   )
