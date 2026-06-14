@@ -8,9 +8,12 @@ import { categories, merchants, merchantRules } from './schema'
 import { CATEGORY_SEED, BRAND_SEED } from '../app/lib/seed-data'
 
 async function seed() {
-  // 1. Categories (unique by name).
+  // 1. Categories (unique by name). kind defaults to 'expense' when omitted.
   for (const c of CATEGORY_SEED) {
-    await db.insert(categories).values(c).onConflictDoNothing({ target: categories.name })
+    await db
+      .insert(categories)
+      .values({ name: c.name, color: c.color, kind: c.kind ?? 'expense' })
+      .onConflictDoNothing({ target: categories.name })
   }
   const catRows = await db.select().from(categories)
   const catId = new Map(catRows.map((c) => [c.name, c.id]))

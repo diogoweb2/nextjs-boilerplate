@@ -11,9 +11,11 @@ spending, and computes analytics & insights. Keep this in sync with code changes
 
 ## 1. Data sources & CSV formats
 
-Each month the user uploads two credit-card CSV exports. Source is auto-detected from the
-header row (`app/lib/csv.ts` → `detectSource`), and the two upload buttons pass a hint that
-the server validates (mismatch = clear error).
+The user uploads four CSV exports: two **credit cards** (Master, Amex) and two **banks**
+(Tangerine chequing, Scotia chequing). Source is auto-detected from the header row
+(`app/lib/csv.ts` → `detectSource`), and each upload button passes a hint that the server
+validates (mismatch = clear error). Type alias `ImportSource = 'master' | 'amex' |
+'tangerine' | 'scotia'`.
 
 ### Master card (RBC-style)
 Header includes `Merchant Category Description` and `Reference Number`.
@@ -29,9 +31,56 @@ Columns used: `Date` (`10 Jun 2026`), `Date Processed`, `Description`, `Account 
 Dropped (PII): `Card Member`. The `Description` is fixed-width
 (`<merchant>   <city/phone>`); we keep the part before the first run of 2+ spaces.
 
+### Tangerine (bank)
+Header `Date,Transaction,Name,Memo,Amount`. Date is `MM/DD/YYYY`; `Name` is the
+description, `Memo` the sub-description; `Amount` is signed (`+` deposit, `−` debit).
+
+### Scotia (bank)
+Header `Filter,Date,Description,Sub-description,Type of Transaction,Amount,Balance`. The
+leading `Filter` cell is ignored. Date is ISO; `Amount` is signed. `Balance` is **never**
+used (so duplicate rows collapse — see Dedup).
+
 ### Sign convention (unified)
-- **Positive = money out** (expense). **Negative = money in** (refund or card payment).
-- Both exports already follow this, so amounts are stored verbatim (as `numeric(10,2)`).
+- **Positive = money out** (expense). **Negative = money in** (income / refund / card payment).
+- Card exports already follow this and are stored verbatim. Bank CSVs use the opposite sign
+  (`+` = deposit), so bank amounts are **negated** on import (`app/lib/csv.ts` → `bankRow`).
+- Stored as `numeric(10,2)`.
+
+### Flow (`transactions.flow`)
+Every row has a `flow`: `expense` | `income` | `transfer`.
+- **expense** — all spending (cards + bank bills/purchases/mortgage/investment). Drives every
+  existing spend page (Overview, Trends, Custom, Insights), which now `filter(flow ===
+  'expense')` via `loadEnriched`.
+- **income** — bank deposits (salary, family support, insurance, benefits, …). Powers the
+  Income page only; never netted against spend.
+- **transfer** — inter-account moves and ignored card payments. Excluded from all analytics
+  but still visible on Activity. `loadAllFlows` returns every non-payment row (all flows) for
+  the Income page.
+
+### Bank classification (`app/lib/bank-classify.ts`)
+`classifyBank(row)` is pure and maps each bank row → `{ flow, category, merchant, recurring }`
+by description + sub-description + sign. Highlights (owner-confirmed):
+- **Income**: BGRS/Sirva/PAYROLL → Salary (self, Tangerine); UHN payroll → Salary (partner,
+  Scotia); PEREIRA/Aparecida/TransferWise → Family Support; Canada Life/Manulife/Sun Life →
+  Insurance; CCB/carbon rebate → Benefits; tax refund → Tax Refund; Interest Paid → Interest;
+  unknown deposits → Other Income.
+- **Inter-account transfer (ignored)**: Tangerine "EFT Withdrawal to THE BANK OF NO[VA
+  SCOTIA]" ↔ the matching Scotia "investment / Tangerine" credit.
+- **Bank expenses**: mortgage payment → Mortgage; Toronto Tax → Property Tax; Toronto
+  Hydro/Water → Utilities; Goodlife/Planet Fitness → Health; New Haven/Kumon → Kids; Koodo →
+  Utilities; Highway 407 → Transport; service charge → Bank Fees; abm withdrawal → Cash; `pos
+  purchase` → the normal merchant-learning path (merchant text in the sub-description).
+- **Scotia "customer transfer dr."** split: **−$1,100 → Mortgage**, **−$900 → Investment**;
+  `Mb-Credit Card/Loc Pay` → CC Payment; any other amount → **Investment** (legacy lump
+  transfers default here and can be reclassified per-transaction).
+- **Investment** (incl. Scotia iTrade) is an **expense** in category `Investment` (so the
+  income−spend gap reflects it; trivially re-bucketed later).
+
+### Credit-card payments from banks (avoid double counting)
+A bank payment toward a card whose own statement we import is a duplicate of tracked spending,
+so it is marked `transfer` (ignored). Before we have a statement it is a real **CC Payment**
+expense. Cutoffs (`CARD_TRACKED_SINCE`): **Amex `2024-12-01`**, **Rogers Mastercard
+`2025-06-01`**. Visa & MBNA have no statements → always CC Payment.
 
 ### Payments vs refunds
 - **Card payments** ("PAYMENT THANK YOU" / "PAYMENT RECEIVED - THANK YOU", or a Master
@@ -43,7 +92,11 @@ Dropped (PII): `Card Member`. The `Description` is fixed-width
 ### Dedup (`external_id`, unique)
 - Master: `master:<Reference Number>`.
 - Amex (no stable ref): `amex:<sha256(date|description|amount|account)[:24]>`.
-Re-uploading the same file is idempotent — duplicates are counted as "skipped".
+- Tangerine: `tangerine:<sha256(date|name|amount)>`.
+- Scotia: `scotia:<sha256(date|description|subdesc|amount)>` (Balance excluded).
+Re-uploading the same file — or re-uploading a fuller month that overlaps an earlier partial
+upload — is idempotent; duplicates are counted as "skipped". The intended rule is **same
+date + vendor + amount ⇒ duplicate**, so two genuinely-identical same-day rows collapse to one.
 
 ### Import batches
 Every upload creates an `import_batches` row (source, filename, period label = latest
@@ -113,6 +166,14 @@ Run after a schema change: `npm run db:push && npm run db:seed`.
 ## 4. Categories & effective resolution
 
 - A **merchant** has an optional default category. A **transaction** may override it.
+- Each category has a **`kind`**: `expense` | `income` | `neutral` (default `expense`). It
+  groups the Income page's source lines and keeps income/transfer buckets out of spend pickers.
+  Income kinds: Salary, Family Support, Insurance, Benefits, Tax Refund, Interest, Other
+  Income. Neutral: Transfer. Everything else is `expense` (incl. Mortgage, Property Tax,
+  Investment, CC Payment, Bank Fees, Cash).
+- Bank payees are resolved as fixed merchants by name (classifier-provided); a new one is
+  seeded with the classifier's default category + recurring, then the transaction inherits
+  them — so later edits to the merchant still win.
 - **Effective category** = `transaction.category_id ?? merchant.category_id ?? Uncategorized`.
 - **Effective recurring/special** = `coalesce(txn flag, merchant default, false)`.
   Transaction flags are tri-state (`true` / `false` / `null = inherit`).
@@ -194,8 +255,22 @@ less?". Stored in `custom_reports` (`db/schema.ts`); all logic is pure in
 
 Run after adding the table: `npm run db:push` (no seed change).
 
-## 9. Future (part 2, not built yet)
+## 9. Income page (`/income`)
 
-Bank statements / income & mortgage. The schema is ready: `transactions.source` is an open
-enum and the sign/payment conventions already separate money-in from money-out, so a `bank`
-source can be added without reworking analytics.
+Answers "are we ahead or behind, and which way is it trending?" Logic is pure in
+`app/lib/income.ts` (`buildIncome`), fed by `loadAllFlows()`; the page is
+`app/income/page.tsx`, charts in `app/components/IncomeCharts.tsx`.
+
+- **Lines**: per-source income (self salary = Tangerine BGRS/Sirva, partner salary = Scotia
+  payroll, Family, Insurance, Benefits, Other) + a bold **Total income** + a single dashed
+  **Spending** line. Self/partner labels come from `SELF_NAME`/`PARTNER_NAME` in `.env.local`
+  (privacy: never hardcoded). `incomeSourceOf()` maps (category, source) → line.
+- **Net per month** = income − spending, drawn as a diverging bar chart (green ahead / red
+  behind). KPIs: total income, total spend, net, **savings rate** (net/income), **best** and
+  **worst** month (by net, over complete months), avg income/spend per month.
+- **Filters** (URL-driven, server recomputes): range (`1|2|3|6|12|ytd|all`, reusing
+  `monthsForRange`), account (Both / Tangerine / Scotia), exclude-special. Line visibility is
+  local UI state.
+- **Common-start clamp**: when viewing both accounts, the lower bound is the first month both
+  accounts have data (≈ 2024-06, the oldest Scotia month) so Tangerine-only history doesn't
+  skew the Net.

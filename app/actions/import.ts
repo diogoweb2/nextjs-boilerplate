@@ -11,12 +11,14 @@ import {
   importBatches,
 } from '@/db/schema'
 import { requireAuth } from '@/app/lib/auth-guard'
-import { parseStatement, type CardSource, type ParsedRow } from '@/app/lib/csv'
+import { parseStatement, type ImportSource, type ParsedRow } from '@/app/lib/csv'
 import { normalizeKey, prettify, masterCategoryFor } from '@/app/lib/normalize'
 
 export type ImportResult =
-  | { ok: true; source: CardSource; inserted: number; skipped: number; period: string }
+  | { ok: true; source: ImportSource; inserted: number; skipped: number; period: string }
   | { ok: false; error: string }
+
+const IMPORT_SOURCES: ImportSource[] = ['master', 'amex', 'tangerine', 'scotia']
 
 type ContainsRule = { pattern: string; merchantId: number; priority: number }
 
@@ -44,6 +46,11 @@ async function resolveMerchants(rows: ParsedRow[]): Promise<Map<number, number>>
   const catRows = await db.select().from(categories)
   const catId = new Map(catRows.map((c) => [c.name, c.id]))
 
+  // Existing merchants by exact name, for resolving fixed bank payees
+  // (Mortgage, Toronto Hydro, BGRS / Sirva, …) created by the classifier.
+  const merchRows = await db.select({ id: merchants.id, name: merchants.name }).from(merchants)
+  const merchantByName = new Map(merchRows.map((m) => [m.name, m.id]))
+
   const matchContains = (key: string): number | undefined => {
     for (const rule of containsRules) {
       if (key.includes(rule.pattern)) return rule.merchantId
@@ -55,15 +62,41 @@ async function resolveMerchants(rows: ParsedRow[]): Promise<Map<number, number>>
   const result = new Map<number, number>()
 
   for (let i = 0; i < rows.length; i++) {
-    const key = normalizeKey(rows[i].rawDescription)
+    const row = rows[i]
+
+    // Bank rows with a fixed payee: find-or-create by name; on creation seed the
+    // merchant's default category/recurring from the classifier (then the
+    // transaction inherits them, so user edits to the merchant still win later).
+    if (row.suggestedMerchant) {
+      let merchantId = merchantByName.get(row.suggestedMerchant)
+      if (merchantId === undefined) {
+        const catName = row.suggestedCategory
+        const [created] = await db
+          .insert(merchants)
+          .values({
+            name: row.suggestedMerchant,
+            categoryId: catName ? catId.get(catName) ?? null : null,
+            defaultRecurring: row.isRecurring ?? false,
+          })
+          .returning({ id: merchants.id })
+        merchantId = created.id
+        merchantByName.set(row.suggestedMerchant, merchantId)
+      }
+      result.set(i, merchantId)
+      continue
+    }
+
+    // Learning path: card rows and bank "pos purchase" rows resolve by key.
+    const key = normalizeKey(row.rawDescription)
     let merchantId = exactMap.get(key) ?? matchContains(key)
 
     if (merchantId === undefined) {
-      const categoryName = masterCategoryFor(rows[i].rawCategory)
+      const categoryName = masterCategoryFor(row.rawCategory)
+      const name = prettify(key) || row.rawDescription
       const [created] = await db
         .insert(merchants)
         .values({
-          name: prettify(key) || rows[i].rawDescription,
+          name,
           categoryId: categoryName ? catId.get(categoryName) ?? null : null,
         })
         .returning({ id: merchants.id })
@@ -75,6 +108,7 @@ async function resolveMerchants(rows: ParsedRow[]): Promise<Map<number, number>>
       })
       // Make it visible to later rows in this same batch.
       exactMap.set(key, merchantId)
+      merchantByName.set(name, merchantId)
     }
     result.set(i, merchantId)
   }
@@ -87,7 +121,9 @@ export async function importCsv(formData: FormData): Promise<ImportResult> {
   const file = formData.get('file')
   const expectedRaw = formData.get('source')
   const expected =
-    expectedRaw === 'master' || expectedRaw === 'amex' ? (expectedRaw as CardSource) : undefined
+    typeof expectedRaw === 'string' && IMPORT_SOURCES.includes(expectedRaw as ImportSource)
+      ? (expectedRaw as ImportSource)
+      : undefined
 
   if (!(file instanceof File) || file.size === 0) {
     return { ok: false, error: 'Please choose a CSV file.' }
@@ -99,6 +135,7 @@ export async function importCsv(formData: FormData): Promise<ImportResult> {
   if (result.ok) {
     revalidatePath('/')
     revalidatePath('/trends')
+    revalidatePath('/income')
     revalidatePath('/merchants')
     revalidatePath('/transactions')
   }
@@ -113,7 +150,7 @@ export async function importCsv(formData: FormData): Promise<ImportResult> {
 export async function ingestStatement(
   text: string,
   filename: string,
-  expected?: CardSource
+  expected?: ImportSource
 ): Promise<ImportResult> {
   let parsed
   try {
@@ -144,6 +181,7 @@ export async function ingestStatement(
 
   const values = rows.map((r, i) => ({
     source: r.source,
+    flow: r.flow ?? 'expense',
     externalId: r.externalId,
     txnDate: r.txnDate,
     postedDate: r.postedDate,
@@ -182,6 +220,7 @@ export async function deleteBatch(batchId: number): Promise<void> {
   await db.delete(importBatches).where(eq(importBatches.id, batchId))
   revalidatePath('/')
   revalidatePath('/trends')
+  revalidatePath('/income')
   revalidatePath('/merchants')
   revalidatePath('/transactions')
 }

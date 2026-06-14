@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { importCsv, type ImportResult } from '@/app/actions/import'
+import type { ImportSource } from '@/app/lib/csv'
 import { formatMonth } from '@/app/lib/format'
 
 type Status =
@@ -18,9 +19,11 @@ export function UploadDialog() {
   const router = useRouter()
   const masterRef = useRef<HTMLInputElement>(null)
   const amexRef = useRef<HTMLInputElement>(null)
+  const tangerineRef = useRef<HTMLInputElement>(null)
+  const scotiaRef = useRef<HTMLInputElement>(null)
   const [status, setStatus] = useState<Status>({ state: 'idle' })
 
-  async function handleFile(file: File | undefined, source: 'master' | 'amex') {
+  async function handleFile(file: File | undefined, source: ImportSource) {
     if (!file) return
     setStatus({ state: 'uploading', name: file.name })
     const fd = new FormData()
@@ -44,6 +47,16 @@ export function UploadDialog() {
           subtitle="American Express activity"
           onClick={() => amexRef.current?.click()}
         />
+        <UploadButton
+          label="Upload Tangerine CSV"
+          subtitle="Tangerine chequing export"
+          onClick={() => tangerineRef.current?.click()}
+        />
+        <UploadButton
+          label="Upload Scotia CSV"
+          subtitle="Scotiabank chequing export"
+          onClick={() => scotiaRef.current?.click()}
+        />
       </div>
 
       <input
@@ -59,6 +72,20 @@ export function UploadDialog() {
         accept=".csv,text/csv"
         className="hidden"
         onChange={(e) => handleFile(e.target.files?.[0], 'amex')}
+      />
+      <input
+        ref={tangerineRef}
+        type="file"
+        accept=".csv,text/csv"
+        className="hidden"
+        onChange={(e) => handleFile(e.target.files?.[0], 'tangerine')}
+      />
+      <input
+        ref={scotiaRef}
+        type="file"
+        accept=".csv,text/csv"
+        className="hidden"
+        onChange={(e) => handleFile(e.target.files?.[0], 'scotia')}
       />
 
       {status.state === 'uploading' && (

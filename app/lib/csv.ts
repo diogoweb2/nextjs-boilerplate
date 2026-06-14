@@ -1,24 +1,31 @@
 import { createHash } from 'crypto'
 import { fixMojibake, isPaymentDescription, stripTrailingLocation } from '@/app/lib/normalize'
+import { classifyBank, type BankSource } from '@/app/lib/bank-classify'
 
 export type CardSource = 'master' | 'amex'
+export type ImportSource = CardSource | BankSource
 
 /** A normalized row ready to become a transaction (merchant resolved later). */
 export type ParsedRow = {
-  source: CardSource
+  source: ImportSource
   externalId: string
   txnDate: string // YYYY-MM-DD
   postedDate: string | null
   rawDescription: string
-  amount: number // positive = expense, negative = refund/payment
+  amount: number // positive = expense, negative = income/refund/payment
   rawCategory: string | null
   cardLast4: string | null
   country: string | null
   isPayment: boolean
+  // Bank rows carry a precomputed classification (cards leave these undefined).
+  flow?: 'expense' | 'income' | 'transfer'
+  suggestedCategory?: string | null
+  suggestedMerchant?: string | null
+  isRecurring?: boolean
 }
 
 export type ParseResult = {
-  source: CardSource
+  source: ImportSource
   rows: ParsedRow[]
 }
 
@@ -73,14 +80,22 @@ export function parseCsv(text: string): string[][] {
   return rows.filter((r) => r.some((cell) => cell.trim() !== ''))
 }
 
-/** Inspect the header row to decide which card export this is. */
-export function detectSource(header: string[]): CardSource | null {
+/** Inspect the header row to decide which export this is. */
+export function detectSource(header: string[]): ImportSource | null {
   const h = header.map((c) => c.trim().toLowerCase())
   if (h.includes('merchant category description') || h.includes('reference number')) {
     return 'master'
   }
   if (h.includes('card member') || h.includes('account #')) {
     return 'amex'
+  }
+  // Scotia: "Filter,Date,Description,Sub-description,Type of Transaction,Amount,Balance".
+  if (h.includes('sub-description') && h.includes('type of transaction')) {
+    return 'scotia'
+  }
+  // Tangerine: "Date,Transaction,Name,Memo,Amount".
+  if (h.includes('transaction') && h.includes('memo') && h.includes('name')) {
+    return 'tangerine'
   }
   return null
 }
@@ -107,7 +122,12 @@ const MONTH_INDEX: Record<string, string> = {
   dec: '12',
 }
 
-/** Amex date "10 Jun 2026" -> "2026-06-10". Master dates are already ISO. */
+/**
+ * Normalize the date formats we ingest to ISO `YYYY-MM-DD`:
+ *  - Master / Scotia: already ISO.
+ *  - Amex: "10 Jun 2026".
+ *  - Tangerine: "MM/DD/YYYY".
+ */
 function parseDate(raw: string): string | null {
   const s = raw.trim()
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
@@ -116,6 +136,10 @@ function parseDate(raw: string): string | null {
     const day = m[1].padStart(2, '0')
     const mon = MONTH_INDEX[m[2].toLowerCase()]
     if (mon) return `${m[3]}-${mon}-${day}`
+  }
+  const slash = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (slash) {
+    return `${slash[3]}-${slash[1].padStart(2, '0')}-${slash[2].padStart(2, '0')}`
   }
   return null
 }
@@ -199,23 +223,112 @@ function parseAmex(rows: string[][]): ParsedRow[] {
   return out
 }
 
+/**
+ * Turn one classified bank row into a ParsedRow. The CSV amount is signed
+ * (+ in, - out); we negate it so the unified convention holds (positive = money
+ * out). For card-present "pos purchase" rows the classifier returns no merchant,
+ * so we keep the merchant text as the description for the learning layer.
+ */
+function bankRow(
+  source: BankSource,
+  date: string,
+  description: string,
+  subDescription: string,
+  csvAmount: number,
+  externalId: string
+): ParsedRow {
+  const cls = classifyBank({ source, date, description, subDescription, amount: csvAmount })
+  const usesLearning = cls.merchant === null
+  const rawDescription = usesLearning
+    ? subDescription || description
+    : [description, subDescription].filter(Boolean).join(' · ')
+  return {
+    source,
+    externalId,
+    txnDate: date,
+    postedDate: null,
+    rawDescription,
+    amount: -csvAmount, // unified: positive = money out
+    rawCategory: null,
+    cardLast4: null,
+    country: null,
+    isPayment: false,
+    flow: cls.flow,
+    suggestedCategory: cls.category,
+    suggestedMerchant: cls.merchant,
+    isRecurring: cls.recurring,
+  }
+}
+
+/** Tangerine export: Date (MM/DD/YYYY), Transaction, Name, Memo, Amount. */
+function parseTangerine(rows: string[][]): ParsedRow[] {
+  const header = rows[0]
+  const idx = {
+    date: colIndex(header, 'Date'),
+    name: colIndex(header, 'Name'),
+    memo: colIndex(header, 'Memo'),
+    amount: colIndex(header, 'Amount'),
+  }
+  const out: ParsedRow[] = []
+  for (const r of rows.slice(1)) {
+    const txnDate = parseDate(r[idx.date] ?? '')
+    const name = fixMojibake(r[idx.name] ?? '')
+    if (!txnDate || !name) continue
+    const memo = fixMojibake(r[idx.memo] ?? '')
+    const amount = parseAmount(r[idx.amount] ?? '0')
+    const externalId = `tangerine:${hashRow(['tangerine', txnDate, name, amount.toFixed(2)])}`
+    out.push(bankRow('tangerine', txnDate, name, memo, amount, externalId))
+  }
+  return out
+}
+
+/** Scotia export: Filter, Date (ISO), Description, Sub-description, Type, Amount, Balance. */
+function parseScotia(rows: string[][]): ParsedRow[] {
+  const header = rows[0]
+  const idx = {
+    date: colIndex(header, 'Date'),
+    description: colIndex(header, 'Description'),
+    sub: colIndex(header, 'Sub-description'),
+    amount: colIndex(header, 'Amount'),
+  }
+  const out: ParsedRow[] = []
+  for (const r of rows.slice(1)) {
+    const txnDate = parseDate(r[idx.date] ?? '')
+    const description = fixMojibake(r[idx.description] ?? '')
+    if (!txnDate || !description) continue
+    const sub = fixMojibake(r[idx.sub] ?? '')
+    const amount = parseAmount(r[idx.amount] ?? '0')
+    // Balance is deliberately excluded from the id so duplicates collapse.
+    const externalId = `scotia:${hashRow(['scotia', txnDate, description, sub, amount.toFixed(2)])}`
+    out.push(bankRow('scotia', txnDate, description, sub, amount, externalId))
+  }
+  return out
+}
+
 function hashRow(parts: string[]): string {
   return createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 24)
 }
 
-/** Parse a full CSV file, auto-detecting the card source. */
-export function parseStatement(text: string, expected?: CardSource): ParseResult {
+/** Parse a full CSV file, auto-detecting the source (card or bank). */
+export function parseStatement(text: string, expected?: ImportSource): ParseResult {
   const rows = parseCsv(text)
   if (rows.length < 2) throw new Error('The file has no data rows.')
   const source = detectSource(rows[0])
   if (!source) {
-    throw new Error('Could not recognize this CSV. Expected a Master or Amex export.')
+    throw new Error('Could not recognize this CSV. Expected a Master, Amex, Scotia, or Tangerine export.')
   }
   if (expected && expected !== source) {
     throw new Error(
       `This looks like a ${source.toUpperCase()} file, but it was uploaded as ${expected.toUpperCase()}.`
     )
   }
-  const parsed = source === 'master' ? parseMaster(rows) : parseAmex(rows)
+  const parsed =
+    source === 'master'
+      ? parseMaster(rows)
+      : source === 'amex'
+        ? parseAmex(rows)
+        : source === 'tangerine'
+          ? parseTangerine(rows)
+          : parseScotia(rows)
   return { source, rows: parsed }
 }

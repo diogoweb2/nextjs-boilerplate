@@ -7,7 +7,7 @@ import { formatMonth } from '@/app/lib/format'
 
 export type BatchRow = {
   id: number
-  source: 'master' | 'amex'
+  source: 'master' | 'amex' | 'tangerine' | 'scotia'
   filename: string
   periodLabel: string
   insertedCount: number

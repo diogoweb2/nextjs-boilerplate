@@ -3,9 +3,13 @@ import { db } from '@/db'
 import { transactions, merchants, categories } from '@/db/schema'
 import { formatMonth } from '@/app/lib/format'
 
+export type ImportSource = 'master' | 'amex' | 'tangerine' | 'scotia'
+export type Flow = 'expense' | 'income' | 'transfer'
+
 export type EnrichedTxn = {
   id: number
-  source: 'master' | 'amex'
+  source: ImportSource
+  flow: Flow
   txnDate: string
   rawDescription: string
   amount: number
@@ -22,11 +26,11 @@ export type EnrichedTxn = {
 const NO_CATEGORY = { name: 'Uncategorized', color: '#94a3b8' }
 
 /**
- * Load all non-payment transactions, joined with their merchant and effective
- * category. Card payments are always excluded from analytics. The dataset is
- * small (hundreds of rows/year) so we aggregate in JS for flexibility.
+ * Load every non-payment transaction (all flows), joined with its merchant and
+ * effective category. Card payments are always excluded. The dataset is small
+ * (hundreds of rows/year) so we aggregate in JS for flexibility.
  */
-export async function loadEnriched(): Promise<EnrichedTxn[]> {
+export async function loadAllFlows(): Promise<EnrichedTxn[]> {
   const cats = await db.select().from(categories)
   const catMap = new Map(cats.map((c) => [c.id, c]))
 
@@ -34,6 +38,7 @@ export async function loadEnriched(): Promise<EnrichedTxn[]> {
     .select({
       id: transactions.id,
       source: transactions.source,
+      flow: transactions.flow,
       txnDate: transactions.txnDate,
       rawDescription: transactions.rawDescription,
       amount: transactions.amount,
@@ -59,6 +64,7 @@ export async function loadEnriched(): Promise<EnrichedTxn[]> {
       return {
         id: r.id,
         source: r.source,
+        flow: r.flow,
         txnDate: r.txnDate,
         rawDescription: r.rawDescription,
         amount: Number(r.amount),
@@ -72,6 +78,17 @@ export async function loadEnriched(): Promise<EnrichedTxn[]> {
         batchId: r.batchId,
       }
     })
+}
+
+/**
+ * Spending dataset: only `expense`-flow rows. Income and inter-account/ignored
+ * transfers are excluded so all the existing spend pages (Overview, Trends,
+ * Custom, Insights) keep working — they now also include bank expenses
+ * (mortgage, hydro, …) automatically.
+ */
+export async function loadEnriched(): Promise<EnrichedTxn[]> {
+  const all = await loadAllFlows()
+  return all.filter((t) => t.flow === 'expense')
 }
 
 // ---------- period helpers ----------

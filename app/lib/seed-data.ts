@@ -5,9 +5,11 @@
  * here is user-editable after seeding; the seed only creates what's missing.
  */
 
-export type CategorySeed = { name: string; color: string }
+export type CategoryKind = 'expense' | 'income' | 'neutral'
+export type CategorySeed = { name: string; color: string; kind?: CategoryKind }
 
 export const CATEGORY_SEED: CategorySeed[] = [
+  // Spending (kind defaults to 'expense').
   { name: 'Groceries', color: '#16a34a' },
   { name: 'Dining', color: '#f97316' },
   { name: 'Transport', color: '#0ea5e9' },
@@ -21,6 +23,23 @@ export const CATEGORY_SEED: CategorySeed[] = [
   { name: 'Travel', color: '#06b6d4' },
   { name: 'Entertainment', color: '#a855f7' },
   { name: 'Other', color: '#94a3b8' },
+  // Bank expenses.
+  { name: 'Mortgage', color: '#b45309', kind: 'expense' },
+  { name: 'Property Tax', color: '#78716c', kind: 'expense' },
+  { name: 'Investment', color: '#0d9488', kind: 'expense' },
+  { name: 'CC Payment', color: '#9ca3af', kind: 'expense' },
+  { name: 'Bank Fees', color: '#71717a', kind: 'expense' },
+  { name: 'Cash', color: '#a16207', kind: 'expense' },
+  // Income.
+  { name: 'Salary', color: '#22c55e', kind: 'income' },
+  { name: 'Family Support', color: '#f59e0b', kind: 'income' },
+  { name: 'Insurance', color: '#3b82f6', kind: 'income' },
+  { name: 'Benefits', color: '#10b981', kind: 'income' },
+  { name: 'Tax Refund', color: '#84cc16', kind: 'income' },
+  { name: 'Interest', color: '#14b8a6', kind: 'income' },
+  { name: 'Other Income', color: '#4ade80', kind: 'income' },
+  // Neutral (inter-account / ignored transfers; excluded from analytics).
+  { name: 'Transfer', color: '#cbd5e1', kind: 'neutral' },
 ]
 
 export type BrandSeed = {

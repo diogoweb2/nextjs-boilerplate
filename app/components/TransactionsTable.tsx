@@ -19,7 +19,7 @@ export type TxnRow = {
   isRecurring: boolean
   isSpecial: boolean
   isPayment: boolean
-  source: 'master' | 'amex'
+  source: 'master' | 'amex' | 'tangerine' | 'scotia'
   person: string
 }
 

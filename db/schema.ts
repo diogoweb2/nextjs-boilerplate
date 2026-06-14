@@ -20,6 +20,11 @@ export const categories = pgTable('categories', {
   id: serial('id').primaryKey(),
   name: text('name').notNull().unique(),
   color: text('color').notNull().default('#6366f1'),
+  // 'expense' shows in spend analytics; 'income' powers the Income page;
+  // 'neutral' is for transfer-like buckets excluded from both.
+  kind: text('kind', { enum: ['expense', 'income', 'neutral'] })
+    .notNull()
+    .default('expense'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 })
 
@@ -69,7 +74,7 @@ export const merchantRules = pgTable(
  */
 export const importBatches = pgTable('import_batches', {
   id: serial('id').primaryKey(),
-  source: text('source', { enum: ['master', 'amex'] }).notNull(),
+  source: text('source', { enum: ['master', 'amex', 'tangerine', 'scotia'] }).notNull(),
   filename: text('filename').notNull(),
   periodLabel: text('period_label').notNull(),
   rowCount: integer('row_count').notNull().default(0),
@@ -87,7 +92,12 @@ export const transactions = pgTable(
   'transactions',
   {
     id: serial('id').primaryKey(),
-    source: text('source', { enum: ['master', 'amex'] }).notNull(),
+    source: text('source', { enum: ['master', 'amex', 'tangerine', 'scotia'] }).notNull(),
+    // 'expense' = spending, 'income' = money in (salary, etc.), 'transfer' =
+    // inter-account / ignored card payments (excluded from both analytics).
+    flow: text('flow', { enum: ['expense', 'income', 'transfer'] })
+      .notNull()
+      .default('expense'),
     // Stable identity for idempotent re-imports.
     externalId: text('external_id').notNull().unique(),
     txnDate: date('txn_date').notNull(),
