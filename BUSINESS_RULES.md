@@ -166,7 +166,35 @@ sections expose new merchants, category movers, subscriptions, and outliers.
 
 ---
 
-## 8. Future (part 2, not built yet)
+## 8. Custom reports (`/custom`)
+
+User-built line charts for ad-hoc comparisons, to answer "where should we spend
+less?". Stored in `custom_reports` (`db/schema.ts`); all logic is pure in
+`app/lib/custom-reports.ts`, CRUD in `app/actions/custom-reports.ts`.
+
+- A **report** = ordered list of **lines (series)**. A line =
+  `{ name, color, categoryIds[], merchantIds[] }` (stored as `jsonb`; IDs not
+  names, so renames/merges follow automatically).
+- **Line membership**: a transaction belongs to a line if its **effective
+  category** is in `categoryIds` **OR** its merchant is in `merchantIds`, counted
+  **at most once per line** — mixing a category with a merchant inside it never
+  double-counts. Only purchases (`amount > 0`) are summed (payments already
+  excluded by `loadEnriched`).
+- **Range**: `1|2|3|6|12` months, `ytd` (Jan of the anchor year → anchor), or
+  `all` (earliest month → anchor). Saved per report and changeable inline.
+- **Real average & target tip**: the anchor (latest) month is treated as the
+  in-progress "current month". Per line, **average** = mean of the *complete*
+  (prior) months in the range; **target** = **median** of those months; the
+  anchor month is shown as "so far". With no prior month (1M) the tip is omitted.
+- **Save & pin**: reports are saved by name; **pinned** reports always render as
+  charts on the page (no limit). Unpinned reports show in a compact list.
+- **Where to cut**: per effective category, compares this (anchor) month against
+  its own average over the prior 6 complete months; lists categories currently
+  over their average, ranked by dollars over (`buildWhereToCut`).
+
+Run after adding the table: `npm run db:push` (no seed change).
+
+## 9. Future (part 2, not built yet)
 
 Bank statements / income & mortgage. The schema is ready: `transactions.source` is an open
 enum and the sign/payment conventions already separate money-in from money-out, so a `bank`

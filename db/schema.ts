@@ -7,6 +7,7 @@ import {
   timestamp,
   integer,
   boolean,
+  jsonb,
   index,
 } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
@@ -118,6 +119,32 @@ export const transactions = pgTable(
   ]
 )
 
+/**
+ * A user-built custom report on the Custom page: an ordered list of "lines"
+ * (series), each summing any mix of categories and/or merchants per month. A
+ * transaction belongs to a line if its effective category OR its merchant is
+ * listed (counted at most once per line). Series store IDs so renames/merges
+ * follow automatically. `range` is the saved period selector for the chart.
+ */
+export type ReportSeries = {
+  name: string
+  color: string
+  categoryIds: number[]
+  merchantIds: number[]
+}
+
+export const customReports = pgTable('custom_reports', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  pinned: boolean('pinned').notNull().default(false),
+  sortOrder: integer('sort_order').notNull().default(0),
+  // '1' | '2' | '3' | '6' | '12' | 'ytd' | 'all'
+  range: text('range').notNull().default('6'),
+  series: jsonb('series').$type<ReportSeries[]>().notNull().default([]),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+})
+
 export const categoriesRelations = relations(categories, ({ many }) => ({
   merchants: many(merchants),
   transactions: many(transactions),
@@ -159,3 +186,4 @@ export type Merchant = typeof merchants.$inferSelect
 export type MerchantRule = typeof merchantRules.$inferSelect
 export type ImportBatch = typeof importBatches.$inferSelect
 export type Transaction = typeof transactions.$inferSelect
+export type CustomReport = typeof customReports.$inferSelect

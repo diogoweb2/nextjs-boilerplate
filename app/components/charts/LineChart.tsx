@@ -10,10 +10,13 @@ export function LineChart({
   labels,
   series,
   height = 200,
+  area = true,
 }: {
   labels: string[]
   series: LineSeries[]
   height?: number
+  /** Fill the area under the first series. Disable for multi-line reports. */
+  area?: boolean
 }) {
   const width = 640
   const padX = 36
@@ -57,7 +60,7 @@ export function LineChart({
       {series.map((s, si) => {
         const pts = s.values.map((v, i) => `${x(i)},${y(v)}`).join(' ')
         const areaPath =
-          si === 0 && n > 1
+          area && si === 0 && n > 1
             ? `M ${x(0)},${padTop + innerH} L ${s.values
                 .map((v, i) => `${x(i)},${y(v)}`)
                 .join(' L ')} L ${x(n - 1)},${padTop + innerH} Z`
@@ -82,18 +85,21 @@ export function LineChart({
               return (
                 <g key={i}>
                   <circle cx={cx} cy={cy} r={2.8} fill={s.color}>
-                    <title>{`${formatMonth(labels[i])}: ${formatCurrencyCompact(v)}`}</title>
+                    <title>{`${s.name ? `${s.name} — ` : ''}${formatMonth(labels[i])}: ${formatCurrencyCompact(v)}`}</title>
                   </circle>
-                  <text
-                    x={cx}
-                    y={labelY}
-                    textAnchor="middle"
-                    style={{ fontSize: 8 }}
-                    className="fill-[var(--foreground)]"
-                    pointerEvents="none"
-                  >
-                    {formatCurrencyCompact(v)}
-                  </text>
+                  {/* Per-point value labels only when a single line (else clutter). */}
+                  {series.length === 1 && (
+                    <text
+                      x={cx}
+                      y={labelY}
+                      textAnchor="middle"
+                      style={{ fontSize: 8 }}
+                      className="fill-[var(--foreground)]"
+                      pointerEvents="none"
+                    >
+                      {formatCurrencyCompact(v)}
+                    </text>
+                  )}
                 </g>
               )
             })}
