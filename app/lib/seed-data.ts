@@ -78,4 +78,51 @@ export const BRAND_SEED: BrandSeed[] = [
   { name: 'YouTube', category: 'Subscriptions', patterns: ['youtube'], recurring: true },
   { name: 'Oddbunch', category: 'Groceries', patterns: ['oddbunch'], recurring: true },
   { name: 'Distributel', category: 'Utilities', patterns: ['distributel'], recurring: true },
+  // Groceries
+  { name: 'Metro', category: 'Groceries', patterns: ['metro'] },
+  { name: 'Shoppers Drug Mart', category: 'Health', patterns: ['shoppers drug mart', 'shoppers'] },
+  { name: 'Adonis', category: 'Groceries', patterns: ['adonis'] },
+  { name: 'Nations Fresh Food', category: 'Groceries', patterns: ['nations fresh'] },
+  // Dining
+  { name: 'Uber', category: 'Transport', patterns: ['uber'] },
+  { name: 'Baskin Robbins', category: 'Dining', patterns: ['baskin robbins'] },
+  { name: 'Pizzaiolo', category: 'Dining', patterns: ['pizzaiolo'] },
+  { name: 'Boston Pizza', category: 'Dining', patterns: ['boston pizza'] },
+  { name: 'KFC', category: 'Dining', patterns: ['kfc'] },
+  { name: 'East Side Marios', category: 'Dining', patterns: ['east side mario'] },
+  { name: 'Cactus Club', category: 'Dining', patterns: ['cactus club'] },
+  { name: 'Second Cup', category: 'Dining', patterns: ['second cup'] },
+  { name: 'DavidsTea', category: 'Dining', patterns: ['davidstea'] },
+  { name: 'Lindt', category: 'Dining', patterns: ['lindt'] },
+  { name: 'Parma Pizza', category: 'Dining', patterns: ['parma pizza'] },
+  // Shopping
+  { name: 'Marshalls', category: 'Shopping', patterns: ['marshalls'] },
+  { name: 'Winners', category: 'Shopping', patterns: ['winners'] },
+  { name: 'Sport Chek', category: 'Shopping', patterns: ['sport chek'] },
+  { name: 'Softmoc', category: 'Shopping', patterns: ['softmoc'] },
+  { name: 'Bluenotes', category: 'Shopping', patterns: ['bluenotes'] },
+  { name: 'Bath & Body Works', category: 'Shopping', patterns: ['bath and body'] },
+  { name: 'Indigo', category: 'Shopping', patterns: ['indigo', 'chapters'] },
+  { name: 'Crocs', category: 'Shopping', patterns: ['crocs'] },
+  { name: 'DSW', category: 'Shopping', patterns: ['dsw'] },
+  { name: 'Groupon', category: 'Shopping', patterns: ['groupon'] },
+  // Home
+  { name: 'Home Depot', category: 'Home', patterns: ['home depot', 'homedepotca'] },
+  // Kids
+  { name: 'Toys R Us', category: 'Kids', patterns: ['toys r us'] },
+  { name: 'Mastermind Toys', category: 'Kids', patterns: ['mastermind toys'] },
+  { name: 'The Lunch Lady', category: 'Kids', patterns: ['lunch lady'] },
+  // Entertainment
+  { name: 'Cineplex', category: 'Entertainment', patterns: ['cineplex'] },
+  { name: 'Dave & Busters', category: 'Entertainment', patterns: ['dave and buster'] },
+  { name: 'Air Riderz', category: 'Entertainment', patterns: ['air riderz'] },
+  { name: 'Pickleplex', category: 'Entertainment', patterns: ['pickleplex'] },
+  { name: 'Canada\'s Wonderland', category: 'Entertainment', patterns: ['wonderland'] },
+  // Travel
+  { name: 'British Airways', category: 'Travel', patterns: ['british airways'] },
+  // Subscriptions
+  { name: 'Real-Debrid', category: 'Subscriptions', patterns: ['real debrid'], recurring: true },
+  { name: 'Audible', category: 'Subscriptions', patterns: ['audible'], recurring: true },
+  // Fuel
+  { name: 'Circle K', category: 'Fuel', patterns: ['circle k'] },
 ]
