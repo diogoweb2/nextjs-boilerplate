@@ -574,6 +574,9 @@ function LineLegend({ line, currentLabel }: { line: ComputedLine; currentLabel: 
         <span>
           avg <span className="font-semibold text-[var(--foreground)]">{formatCurrency(line.average)}</span>/mo
         </span>
+        <span>
+          total <span className="font-semibold text-[var(--foreground)]">{formatCurrency(line.total)}</span>
+        </span>
         {line.target != null && (
           <span title={`Median of complete months in range`}>
             target <span className="font-semibold text-[var(--foreground)]">{formatCurrency(line.target)}</span>

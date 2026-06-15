@@ -98,7 +98,11 @@ export default async function TransactionsPage({
         <TransactionsTable
           transactions={txns}
           categories={catRows.map((c) => ({ id: c.id, name: c.name, color: c.color }))}
-          initialCategoryFilter={category ?? ''}
+          initialCategoryFilter={
+            category
+              ? (catRows.find((c) => c.name === category)?.id?.toString() ?? '')
+              : ''
+          }
         />
       )}
     </AppShell>

@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { Card } from '@/app/components/AppShell'
 import { StatCard } from '@/app/components/charts/StatCard'
 import { LineChart } from '@/app/components/charts/LineChart'
@@ -185,7 +186,12 @@ export function BudgetPlanner({ data }: { data: BudgetData }) {
                 <div className="flex items-center justify-between gap-3">
                   <span className="flex items-center gap-2 text-sm font-medium">
                     <span className="h-2.5 w-2.5 rounded-full" style={{ background: c.color }} />
-                    {c.name}
+                    <Link
+                      href={`/transactions?category=${encodeURIComponent(c.name)}`}
+                      className="hover:underline"
+                    >
+                      {c.name}
+                    </Link>
                     {c.fixed && (
                       <span className="rounded-full bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
                         Fixed
