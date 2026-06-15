@@ -7,6 +7,7 @@ import { logout } from '@/app/actions/auth'
 const LINKS = [
   { href: '/', label: 'Overview', icon: '◎' },
   { href: '/income', label: 'Income', icon: '＄' },
+  { href: '/budget', label: 'Budget', icon: '◇' },
   { href: '/trends', label: 'Trends', icon: '↗' },
   { href: '/custom', label: 'Custom', icon: '⊕' },
   { href: '/merchants', label: 'Merchants', icon: '◆' },
@@ -86,7 +87,7 @@ export function NavBar() {
       </header>
 
       {/* Bottom nav (mobile) */}
-      <nav className="fixed bottom-0 left-0 right-0 z-30 grid grid-cols-6 border-t border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_92%,transparent)] backdrop-blur sm:hidden">
+      <nav className="fixed bottom-0 left-0 right-0 z-30 grid grid-cols-7 border-t border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_92%,transparent)] backdrop-blur sm:hidden">
         {LINKS.map((l) => {
           const active = isActive(pathname, l.href)
           return (

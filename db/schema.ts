@@ -155,6 +155,33 @@ export const customReports = pgTable('custom_reports', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 })
 
+/**
+ * Budget feature (the /budget page). A single settings row holds the year-end
+ * net target and the average reference window; per-category goal overrides live
+ * in `budget_goals`. Anything without a saved goal falls back to the AI-computed
+ * suggestion (see app/lib/budget.ts). See BUSINESS_RULES.md §Budget.
+ */
+export const budgetSettings = pgTable('budget_settings', {
+  id: serial('id').primaryKey(),
+  // Desired year-end net (income − spend). Default 0 = break even.
+  targetNet: numeric('target_net', { precision: 10, scale: 2 }).notNull().default('0'),
+  // Which window drives the per-category averages shown across the page.
+  periodMode: text('period_mode', { enum: ['year', '12mo'] })
+    .notNull()
+    .default('year'),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+})
+
+export const budgetGoals = pgTable('budget_goals', {
+  id: serial('id').primaryKey(),
+  categoryId: integer('category_id')
+    .notNull()
+    .unique()
+    .references(() => categories.id, { onDelete: 'cascade' }),
+  goalAmount: numeric('goal_amount', { precision: 10, scale: 2 }).notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+})
+
 export const categoriesRelations = relations(categories, ({ many }) => ({
   merchants: many(merchants),
   transactions: many(transactions),
@@ -197,3 +224,5 @@ export type MerchantRule = typeof merchantRules.$inferSelect
 export type ImportBatch = typeof importBatches.$inferSelect
 export type Transaction = typeof transactions.$inferSelect
 export type CustomReport = typeof customReports.$inferSelect
+export type BudgetSettings = typeof budgetSettings.$inferSelect
+export type BudgetGoal = typeof budgetGoals.$inferSelect

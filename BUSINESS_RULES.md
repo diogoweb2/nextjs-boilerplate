@@ -255,6 +255,49 @@ less?". Stored in `custom_reports` (`db/schema.ts`); all logic is pure in
 
 Run after adding the table: `npm run db:push` (no seed change).
 
+## 8b. Budget (`/budget`)
+
+Answers one question: **"How much can I spend this month — excluding unavoidable bills — to finish
+the calendar year at a chosen net (default 0)?"** Logic is pure in `app/lib/budget.ts`
+(`computeBudget`, fed by `loadAllFlows()`); page is `app/budget/page.tsx`, client UI in
+`app/components/BudgetPlanner.tsx`, server actions in `app/actions/budget.ts`. State lives in two
+tables: `budget_settings` (singleton: `targetNet`, `periodMode`) and `budget_goals` (per-category
+goal override, unique on `category_id`).
+
+### The model (anchor = latest txn month; year = anchor's year; R = months anchor..Dec inclusive)
+- **Expected monthly income `I`** = avg of the **last 3 complete months** of income *excluding
+  Insurance* + the **trailing-12 complete-month** average of Insurance (Insurance is lumpy, so it's
+  smoothed over a year per the owner's instruction).
+- **Averages use complete months only** (the partial anchor month is excluded), so a half-finished
+  month never drags an average down. `currentMonthActual` is the anchor month's spend so far.
+- **completedBaseline** = net (income − spend) over the year's **completed** months (before anchor).
+  Spend = Σ positive `expense` amounts (matches the Income page; refunds/payments already excluded).
+- **ytdNet** = net over **all** year months incl. the partial anchor month — the familiar headline
+  that matches the Income page (e.g. −$8,979.39 for Jan–Jun 2026).
+- **Monthly cap `B`** = `I + (completedBaseline − targetNet) / R`. Using the *completed* baseline
+  (not ytdNet) means the current month gets a fresh, non-double-counted budget.
+- **Fixed total `F`** = Σ the period-mode averages of the fixed categories.
+- **Ideal discretionary spend this month `X`** = `B − F` — the page's headline number.
+- **Projected year-end net** = `completedBaseline + R·(I − G)` where `G` = Σ all category goals;
+  **on track** when projected ≥ target (equivalently `G ≤ B`). All of B/X/G/projected recompute
+  live on the client from the compact server payload as the user drags the target or a goal.
+
+### Fixed (required) categories & AI suggestions
+- `FIXED_CATEGORIES` = **Mortgage, Property Tax, Utilities, Kids, Groceries** — pre-filled at their
+  average and treated as unavoidable (the owner confirmed these; Scholars lives under Kids,
+  Hydro/Distributel/Koodo under Utilities).
+- **AI initial goals** (`suggestGoals`, the default until the user edits a category): fixed cats =
+  average; **Travel and Investment default to ~$0** (no more flights/Airbnb this year, and "pause
+  investing" is an explicit lever — Investment is an `expense` here, so it still counts toward net);
+  remaining discretionary cats = their average, **proportionally haircut** so the discretionary
+  total fits `B − F`. The page therefore opens already balanced to hit the target.
+- **Period toggle** (`periodMode`: `year` | `12mo`) switches which average (calendar-year vs
+  trailing-12-month) drives the displayed averages and the suggestions across the page. The net
+  target is always end-of-this-year.
+
+Goal overrides persist per category (`saveGoal`); "Reset to suggested" deletes them (`resetGoals`).
+Run after adding the tables: `npm run db:push` (no seed change).
+
 ## 9. Income page (`/income`)
 
 Answers "are we ahead or behind, and which way is it trending?" Logic is pure in
