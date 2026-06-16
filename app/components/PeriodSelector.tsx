@@ -4,7 +4,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useTransition } from 'react'
 
 const DEFAULT_OPTIONS = [
-  { months: 1, label: '1M' },
+  { months: 2, label: '2M' },
   { months: 3, label: '3M' },
   { months: 6, label: '6M' },
   { months: 12, label: '12M' },
@@ -40,13 +40,13 @@ export function PeriodSelector({
   const params = useSearchParams()
   const [pending, startTransition] = useTransition()
 
-  const months = Number(params.get('months')) || 3
+  const months = Number(params.get('months')) || 2
   const excludeSpecial = params.get('special') === '0'
   const selectedMonth = params.get('month') ?? ''
   // "Current" is the default on pages that offer it when nothing else is chosen.
   const isCurrent =
     showCurrent &&
-    (params.get('period') === 'current' || (!params.get('months') && !selectedMonth))
+    params.get('period') === 'current'
 
   const update = (next: Record<string, string | null>) => {
     const sp = new URLSearchParams(params.toString())
