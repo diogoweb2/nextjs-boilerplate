@@ -23,6 +23,9 @@ Columns used: `Date` (ISO `YYYY-MM-DD`), `Posted Date`, `Reference Number`, `Car
 (masked → last 4 only), `Merchant Category Description`, `Merchant Name`,
 `Merchant Country Code`, `Amount` (`$1,234.56`, payments negative).
 Dropped (PII): `Name on Card`.
+> **Rogers Bank** credit-card exports use this same format and ingest as `master` (extra
+> columns — Activity Type/Status, Merchant City/State/Postal, Rewards — are ignored). No
+> separate source/parser. See `AUTO_SYNC_PLAN.md`.
 
 ### Amex
 Header includes `Card Member` and `Account #`.

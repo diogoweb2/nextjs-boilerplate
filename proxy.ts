@@ -5,6 +5,12 @@ import { verifySessionToken, COOKIE_NAME } from '@/app/lib/session'
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
+  // The sync ingest endpoint authenticates with a bearer token, not the session
+  // cookie, so let it through to its own auth (see app/api/ingest/route.ts).
+  if (pathname.startsWith('/api/ingest')) {
+    return NextResponse.next()
+  }
+
   if (pathname === '/login') {
     // Redirect authenticated users away from login
     const token = request.cookies.get(COOKIE_NAME)?.value

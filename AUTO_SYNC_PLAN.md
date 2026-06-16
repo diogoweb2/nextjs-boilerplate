@@ -18,7 +18,7 @@ Sources (all Canadian, no personal API available):
 
 | Source        | Type        | App `ImportSource` | Login URL |
 |---------------|-------------|--------------------|-----------|
-| Rogers Bank   | credit card | `master`?          | `https://selfserve.rogersbank.com/sign-in?locale=en` |
+| Rogers Bank   | credit card | `master` ✅        | `https://selfserve.rogersbank.com/sign-in?locale=en` |
 | Tangerine     | bank        | `tangerine`        | `https://www.tangerine.ca/app/#/login/login-id?locale=en_CA` |
 | Amex Canada   | credit card | `amex`             | `https://www.americanexpress.com/en-ca/account/login` (→ `https://global.americanexpress.com/statements`) |
 | Scotiabank    | bank        | `scotia`           | `https://auth.scotiaonline.scotiabank.com/online` (reached from `https://www.scotiabank.com/`) |
@@ -27,9 +27,13 @@ Sources (all Canadian, no personal API available):
 > `gclid`, …) that expire — the adapter should start from the **stable base URL** and let the site
 > issue fresh tokens, not hardcode a captured query string.
 
-> **Open item:** Rogers Bank isn't one of the four sources in `BUSINESS_RULES.md` today
-> (Master/Amex/Tangerine/Scotia). Decide whether Rogers' export matches the `master` (RBC-style)
-> format or needs a new `ImportSource` + parser in `app/lib/csv.ts`.
+> **Resolved (2026-06-16 spike):** Rogers' CSV export maps to the existing **`master`** source —
+> no new parser. Its header carries both `Reference Number` and `Merchant Category Description`,
+> so `detectSource` already returns `'master'`, and `parseMaster` reads every column it needs
+> (Date ISO, Posted Date, Reference Number, Card Number, Merchant Name, Country Code, `$`-Amount).
+> Rogers' extra columns (Activity Type/Status, Merchant City/State/Postal, Rewards) are ignored,
+> and `Name on Card` is already dropped. Verified on a real 91-row export: all 91 `external_id`s
+> came from the Reference Number (zero hash fallbacks), so dedup is robust.
 
 ## 2. Feasibility & honest risks
 
@@ -194,21 +198,27 @@ Always tell the user what happened; never fail silently.
 This is already mostly solved — the existing manual upload proves the parse/import path works. The
 only addition is a way to feed a CSV in without clicking the UI:
 
-- [ ] Add a **token-authenticated ingest endpoint** (Route Handler) that accepts a CSV + source hint
-      and runs the same logic as `app/actions/import.ts` (reuse `parseStatement` + merchant/category
-      resolution; don't duplicate business logic). *Simplest possible alternative:* drop downloaded
-      CSVs into a watched folder and have the runner POST them — but the endpoint is cleaner.
-- [ ] Decide Rogers Bank source mapping (reuse `master` vs. new `ImportSource` + parser + dedup keys).
+- [x] Add a **token-authenticated ingest endpoint** (Route Handler). *(Done 2026-06-16.)*
+      `app/api/ingest/route.ts` reuses `ingestStatement` from `app/actions/import.ts` — same parse +
+      merchant/category resolution + `onConflictDoNothing({ target: externalId })` dedup, no business
+      logic duplicated. Bearer-token auth via `INGEST_TOKEN`; `proxy.ts` whitelists the route. Runner
+      posts via `sync/lib/ingest.ts`.
+- [x] Decide Rogers Bank source mapping — **reuse `master`** (resolved 2026-06-16; see §1 note).
 - [ ] Keep `BUSINESS_RULES.md` in sync if any parser/source/dedup behavior changes.
 
 ## 10. Build phases
 
 > Effort is ~90% in phases 1 & 3 (the download adapters). Upload is a small slice.
 
-1. **Spike — Rogers Bank, manual trigger.** Persistent profile, Keychain credential, manual run,
-   **CSV successfully downloaded to disk**. Prove the MFA-reuse approach end-to-end *and* resolve the
-   Rogers source-mapping question (vs. `master`) in one go. De-risks the whole project.
-2. **Ingest endpoint.** Add the token endpoint; wire the spike to POST into the app. Verify dedup.
+1. ✅ **Spike — Rogers Bank, manual trigger.** *(Done 2026-06-16.)* Persistent profile + Keychain
+   credentials; `sync/run-rogers.ts` auto-logs in (single-step form in an open shadow root),
+   reuses device trust to skip MFA, exports "Current transactions", and the CSV parses as
+   `master` with 100% Reference-Number dedup keys. Source-mapping question resolved (→ `master`).
+   Code: `sync/adapters/rogers.ts`, `sync/run-rogers.ts`, `sync/lib/{keychain,profile}.ts`.
+2. ✅ **Ingest endpoint.** *(Done 2026-06-16.)* `app/api/ingest/route.ts` (token-authed, reuses
+   `ingestStatement`); `proxy.ts` whitelists it; `sync/run-rogers.ts` POSTs the CSV via
+   `sync/lib/ingest.ts`. Auth/validation paths verified (401/400/405); dedup is the existing
+   `onConflictDoNothing` so a same-day re-run inserts 0.
 3. **Adapter framework + remaining sources.** Generalize the adapter interface; add the other three.
    Most of the calendar time lives here (per-bank selectors, MFA quirks, bot-detection).
 4. **Scheduling + alerting.** launchd plist, notifications, push/email on failure, status files.
@@ -233,7 +243,7 @@ Build the adapters so both modes share the same navigate/export code.
 - ✅ **Dedup: re-importing is safe.** `external_id` UNIQUE constraint + `ON CONFLICT DO NOTHING`.
 
 **Still to confirm before building:**
-- [ ] Rogers Bank format → existing `master` or new source? *(resolved during the spike)*
+- [x] Rogers Bank format → **existing `master`** (resolved during the spike, 2026-06-16).
 - [ ] Alert channel (ntfy / Pushover / email)?
 - [ ] Run time of day + rolling window size.
 ```
