@@ -221,7 +221,14 @@ only addition is a way to feed a CSV in without clicking the UI:
    `onConflictDoNothing` so a same-day re-run inserts 0.
 3. **Adapter framework + remaining sources.** Generalize the adapter interface; add the other three.
    Most of the calendar time lives here (per-bank selectors, MFA quirks, bot-detection).
-4. **Scheduling + alerting.** launchd plist, notifications, push/email on failure, status files.
+4. 🟡 **Scheduling + alerting.** *(Mostly done 2026-06-16.)* launchd LaunchAgent
+   `sync/launchd/com.budget.sync.rogers.plist` fires daily at 11:59 (Mac off → skipped, no
+   catch-up; asleep → runs on wake, harmless via dedup). `sync/run-rogers.sh` is the launchd-safe
+   wrapper (stable fnm node, prod `INGEST_URL`). macOS notifications on success/failure/MFA +
+   failure screenshots to the logs dir. **Key finding:** Rogers login is behind **reCAPTCHA** —
+   headless is rejected, so the runner (and cron) must run **headed**; a headed run in the
+   trust-built persistent profile passes. Still TODO: push/email alert (beyond macOS notification)
+   and a per-source status file.
 5. **Hardening.** MFA-detection edge cases, session-expiry re-login, retries, logging, docs for
    re-authorizing a device.
 

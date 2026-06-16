@@ -278,28 +278,78 @@ goal override, unique on `category_id`).
 - **ytdNet** = net over **all** year months incl. the partial anchor month — the familiar headline
   that matches the Income page (e.g. −$8,979.39 for Jan–Jun 2026).
 - **Monthly cap `B`** = `I + (completedBaseline − targetNet) / R`. Using the *completed* baseline
-  (not ytdNet) means the current month gets a fresh, non-double-counted budget.
-- **Fixed total `F`** = Σ the period-mode averages of the fixed categories.
+  (not ytdNet) means the current month gets a fresh, non-double-counted budget. Exposed as
+  `monthlyCap`.
+- **Unavoidable total `F`** = `monthlyUnavoidable(anchor).total` (§8c) — the **anchor month's**
+  fixed categories + projected bills + subscriptions, projected from history (actual once posted).
+  This replaced the old "Σ averages of the fixed categories", so `F` is now month-specific and
+  reflects the bills actually due (e.g. Water/Belair only in their months). The breakdown is shown
+  in the "Unavoidable this month" card with a link to Settings.
 - **Ideal discretionary spend this month `X`** = `B − F` — the page's headline number.
 - **Projected year-end net** = `completedBaseline + R·(I − G)` where `G` = Σ all category goals;
-  **on track** when projected ≥ target (equivalently `G ≤ B`). All of B/X/G/projected recompute
-  live on the client from the compact server payload as the user drags the target or a goal.
+  **on track** when projected ≥ target. `B`/`X`/`G`/projected recompute live on the client as the
+  user drags the target or a goal (`F` is server-computed and constant across those drags).
 
-### Fixed (required) categories & AI suggestions
-- `FIXED_CATEGORIES` = **Mortgage, Property Tax, Utilities, Kids, Groceries** — pre-filled at their
-  average and treated as unavoidable (the owner confirmed these; Scholars lives under Kids,
-  Hydro/Distributel/Koodo under Utilities).
+### Fixed categories & AI suggestions
+- `FIXED_CATEGORIES` = **Mortgage, Property Tax** only — the sole always-fixed categories. Every
+  other unavoidable cost (Hydro, Water, Belair, Scholars, subscriptions) is a per-merchant
+  **projected bill** managed on Settings (§8c), not a whole fixed category.
 - **AI initial goals** (`suggestGoals`, the default until the user edits a category): fixed cats =
   average; **Travel and Investment default to ~$0** (no more flights/Airbnb this year, and "pause
   investing" is an explicit lever — Investment is an `expense` here, so it still counts toward net);
   remaining discretionary cats = their average, **proportionally haircut** so the discretionary
-  total fits `B − F`. The page therefore opens already balanced to hit the target.
+  total fits the pool. The page therefore opens already balanced to hit the target.
 - **Period toggle** (`periodMode`: `year` | `12mo`) switches which average (calendar-year vs
   trailing-12-month) drives the displayed averages and the suggestions across the page. The net
   target is always end-of-this-year.
 
 Goal overrides persist per category (`saveGoal`); "Reset to suggested" deletes them (`resetGoals`).
 Run after adding the tables: `npm run db:push` (no seed change).
+
+## 8c. Projected bills, Settings & the dashboard Net-trajectory
+
+Only Mortgage & Property Tax are always-fixed. Every other unavoidable cost is a per-merchant
+**projected bill** the owner can't control but that may not hit every month (Toronto Water,
+Belair insurance, Scholars, Hydro). Modelled in `projection_rules` (one row per merchant, unique
+on `merchant_id`) + a `merchants.projection_dismissed` flag. All logic is pure in
+`app/lib/projection.ts`; page `app/settings/page.tsx`, client UI `app/components/ProjectionSettings.tsx`,
+server actions `app/actions/projection.ts`. Run after adding the table: `npm run db:push`.
+
+### Rule fields & projection
+- `cadence`: `monthly | quarterly | annual | periodic` (`periodic` = irregular gaps inferred from
+  history). `amountMode`: `seasonal` (mean of that **calendar month** across years — Hydro
+  winter≠summer), `average` (mean of recent occurrences), `last`, or `fixed` (`fixed_amount`).
+- `projectedAmountForMonth(rule, all, ym)`: **actual replaces projection** — if the merchant has
+  real spend in `ym`, that sum is used; else, if **due** that month (per cadence vs the merchant's
+  historical occurrences) the amount is projected; else `0`.
+- `monthlyUnavoidable(all, rules, ym, FIXED_CATEGORIES)`: the month's unavoidable spend = fixed
+  categories (actual-or-average) + each **confirmed rule**. Subscriptions are **not** auto-included
+  — per the owner's "auto-detect + manual confirm" choice they're surfaced as suggestions and added
+  as rules. Drives `F` on the budget page and the dashboard widget's budget.
+
+### Auto-detect (`suggestProjectionRules`)
+Scans history for **bill-like** recurring merchants: posts ≤ ~1.5 txns per active month (so
+supermarkets/restaurants — which the owner *controls* — are excluded), recurs across ≥ 2 months,
+not a fixed category / already-ruled / dismissed / a financial category (`EXCLUDED_CATEGORIES` =
+CC Payment, Investment, Cash, Bank Fees, Transfer). Infers cadence from occurrence gaps and
+`amountMode` from amount variance (monthly + high variance ⇒ seasonal). Surfaced on Settings with
+**Add** / **Dismiss** (dismiss sets `projection_dismissed`). Annual/rare bills seen in a single
+month (e.g. Belair) can't be inferred, so Settings also has a **manual add** of any merchant.
+
+### Dashboard "Net trajectory" (discretionary burn-down)
+On `/` (`app/components/BurndownTrajectory.tsx`), scoped to the selected period. **Money left to
+spend** = `(B − F) − cumulative discretionary spend`, burning toward $0, vs a straight **pace**
+line (budget → 0 across the window). Discretionary spend **excludes** unavoidable merchants/
+categories. Green when the remaining line is above pace (spending slower than budget), red below.
+- **Current / 1M / a single picked month** → **day-by-day** (`computeMonthBurndown`).
+- **3M/6M/12M** → month-by-month over the window (`computePeriodBurndown`, budget = `(B−F)·months`).
+- The budget reflects live `/budget` settings (target, goals), so editing the budget moves the widget.
+
+### "Current" period
+The dashboard period selector adds **Current** (`?period=current`) — the in-progress anchor month
+from day 1 — and **defaults to it** when no period is chosen (`app/lib/params.ts`,
+`PeriodSelector` `showCurrent`). It scopes the page like picking that exact month, and the widget
+renders day-by-day.
 
 ## 9. Income page (`/income`)
 

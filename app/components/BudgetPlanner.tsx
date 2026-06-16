@@ -43,7 +43,10 @@ export function BudgetPlanner({ data }: { data: BudgetData }) {
   // --- Live derived figures (pure arithmetic from local state) ---
   const goalList = data.categories.map((c) => goals[c.categoryId] ?? 0)
   const G = sum(goalList) // sum of all goals
-  const F = sum(data.categories.filter((c) => c.fixed).map((c) => goals[c.categoryId] ?? 0))
+  // F = everything unavoidable this month (fixed cats + projected bills +
+  // subscriptions), projected from history — see Settings. Replaces the old
+  // "sum of fixed-category goals".
+  const F = data.unavoidable.total
   const B = data.income + (data.completedBaseline - targetNet) / data.monthsRemaining
   const X = B - F // ideal discretionary spend this month
   const projectedNet = data.completedBaseline + data.monthsRemaining * (data.income - G)
@@ -169,6 +172,41 @@ export function BudgetPlanner({ data }: { data: BudgetData }) {
             sum of goals {formatCurrency(G)} vs cap {formatCurrency(B)}.
           </p>
         </div>
+      </Card>
+
+      {/* Unavoidable this month (drives X = B − F) */}
+      <Card
+        title="Unavoidable this month"
+        action={
+          <Link href="/settings" className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]">
+            manage in Settings →
+          </Link>
+        }
+      >
+        {data.unavoidable.lines.length ? (
+          <ul className="flex flex-col divide-y divide-[var(--border)]">
+            {data.unavoidable.lines.map((l) => (
+              <li key={`${l.kind}-${l.label}`} className="flex items-center justify-between gap-3 py-2 text-sm">
+                <span className="flex items-center gap-2">
+                  <span className="font-medium">{l.label}</span>
+                  <span className="rounded-full bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)]">
+                    {l.kind}
+                  </span>
+                  {l.actual && <span className="text-[10px] text-[var(--positive)]">actual</span>}
+                </span>
+                <span className="tabular-nums font-medium">{formatCurrency(l.amount)}</span>
+              </li>
+            ))}
+            <li className="flex items-center justify-between gap-3 border-t-2 border-[var(--border)] pt-2 text-sm font-bold">
+              <span>Total unavoidable (F)</span>
+              <span className="tabular-nums">{formatCurrency(F)}</span>
+            </li>
+          </ul>
+        ) : (
+          <p className="text-xs text-[var(--muted)]">
+            Nothing projected this month. Add recurring bills on the Settings page.
+          </p>
+        )}
       </Card>
 
       {/* Category goals */}

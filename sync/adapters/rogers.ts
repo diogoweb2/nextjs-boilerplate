@@ -48,7 +48,20 @@ async function login(page: Page, creds: Credentials): Promise<void> {
   // the Angular form is valid.
   await page.getByRole('button', { name: 'Sign in' }).click()
 
-  // Land on either the dashboard or the device-MFA screen; the runner decides.
+  // Verify the login actually succeeded. On a rejected login (wrong password or
+  // a reCAPTCHA low-score on automated/headless sessions) Rogers clears the
+  // password field and STAYS on /sign-in — fail loudly instead of letting the
+  // caller proceed against an unauthenticated session. A successful login leaves
+  // /sign-in for either the dashboard or the device-MFA screen.
+  try {
+    await page.waitForURL((url) => !url.pathname.includes('/sign-in'), { timeout: 20_000 })
+  } catch {
+    throw new Error(
+      'Login did not complete — still on /sign-in after submitting. Likely cause: the ' +
+        'stored Keychain password is wrong, or Rogers’ reCAPTCHA rejected the automated login ' +
+        '(more likely in headless). See the failure screenshot in the logs dir.'
+    )
+  }
   await page.waitForLoadState('networkidle').catch(() => {})
 }
 

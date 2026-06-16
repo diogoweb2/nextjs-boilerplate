@@ -12,6 +12,7 @@ const LINKS = [
   { href: '/custom', label: 'Custom', icon: '⊕' },
   { href: '/merchants', label: 'Merchants', icon: '◆' },
   { href: '/transactions', label: 'Activity', icon: '≣' },
+  { href: '/settings', label: 'Settings', icon: '⚙' },
 ]
 
 function isActive(pathname: string, href: string): boolean {
@@ -87,7 +88,7 @@ export function NavBar() {
       </header>
 
       {/* Bottom nav (mobile) */}
-      <nav className="fixed bottom-0 left-0 right-0 z-30 grid grid-cols-7 border-t border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_92%,transparent)] backdrop-blur sm:hidden">
+      <nav className="fixed bottom-0 left-0 right-0 z-30 grid grid-cols-8 border-t border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_92%,transparent)] backdrop-blur sm:hidden">
         {LINKS.map((l) => {
           const active = isActive(pathname, l.href)
           return (

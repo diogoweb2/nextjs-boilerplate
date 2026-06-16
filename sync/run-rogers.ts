@@ -19,8 +19,9 @@
  * And (for a deployed app) INGEST_URL=https://your-app/api/ingest.
  */
 import { chromium, type BrowserContext, type Page } from 'playwright'
+import { join } from 'path'
 import { readCredentials } from './lib/keychain'
-import { profileDir } from './lib/profile'
+import { profileDir, logsDir } from './lib/profile'
 import { postCsv } from './lib/ingest'
 import { notify } from './lib/notify'
 import { rogers } from './adapters/rogers'
@@ -87,6 +88,14 @@ async function main(): Promise<void> {
     console.log(`✓ ingested "${result.source}": ${summary}`)
     notify('Budget sync — Rogers ✓', summary)
   } catch (err) {
+    // Capture state for debugging (esp. headless failures that can't be watched).
+    try {
+      const shot = join(logsDir(), `rogers-error-${Date.now()}.png`)
+      console.error(`  page url: ${page.url()}`)
+      console.error(`  page title: ${await page.title().catch(() => '?')}`)
+      await page.screenshot({ path: shot, fullPage: true })
+      console.error(`  screenshot: ${shot}`)
+    } catch {}
     notify('Budget sync — Rogers FAILED', err instanceof Error ? err.message : String(err))
     throw err
   } finally {

@@ -15,11 +15,16 @@
  *  - X  = B − F  → the "ideal discretionary spend this month" headline.
  */
 import type { EnrichedTxn } from '@/app/lib/analytics'
+import { monthlyUnavoidable, type ProjectionRule, type Unavoidable } from '@/app/lib/projection'
 
 export type PeriodMode = 'year' | '12mo'
 
-/** Categories pre-filled at their average and treated as unavoidable. */
-export const FIXED_CATEGORIES = ['Mortgage', 'Property Tax', 'Utilities', 'Kids', 'Groceries']
+/**
+ * The only always-fixed categories. Everything else "unavoidable" (Hydro, Water,
+ * Belair, Scholars, subscriptions) is a per-merchant projected bill — see
+ * app/lib/projection.ts and the Settings page.
+ */
+export const FIXED_CATEGORIES = ['Mortgage', 'Property Tax']
 /** Categories whose suggested goal defaults to ~$0 (an explicit lever to pull). */
 const ZERO_DEFAULT_CATEGORIES = ['Travel', 'Investment']
 
@@ -80,6 +85,10 @@ export type BudgetData = {
   monthly: { labels: string[]; realSpend: number[]; cumulativeNet: (number | null)[] }
   /** 0-based index of the anchor month within the year (Jun = 5). */
   currentMonthIndex: number
+  /** Monthly all-in cap B (income + (completedBaseline − target)/monthsRemaining). */
+  monthlyCap: number
+  /** This-month unavoidable spend (fixed cats + projected bills + subscriptions). */
+  unavoidable: Unavoidable
 }
 
 /** Sum income (stored negative) for a flow=income predicate over given months. */
@@ -133,15 +142,16 @@ function round2(n: number): number {
 export function computeBudget(
   all: EnrichedTxn[],
   categoriesMeta: CategoryMeta[],
-  opts: { targetNet: number; periodMode: PeriodMode; savedGoals: Map<number, number> }
+  opts: { targetNet: number; periodMode: PeriodMode; savedGoals: Map<number, number>; rules?: ProjectionRule[] }
 ): BudgetData {
-  const { targetNet, periodMode } = opts
+  const { targetNet, periodMode, rules = [] } = opts
   const anchor = anchorMonth(all)
   if (!anchor) {
     return {
       hasData: false, anchor: null, year: '', monthsRemaining: 0, periodMode, targetNet,
       income: 0, completedBaseline: 0, ytdNet: 0, categories: [],
       monthly: { labels: [], realSpend: [], cumulativeNet: [] }, currentMonthIndex: 0,
+      monthlyCap: 0, unavoidable: { total: 0, lines: [] },
     }
   }
   const year = anchor.slice(0, 4)
@@ -228,6 +238,9 @@ export function computeBudget(
     return round2(running)
   })
 
+  // This-month unavoidable spend, projected from history (actual once posted).
+  const unavoidable = monthlyUnavoidable(all, rules, anchor, FIXED_CATEGORIES)
+
   return {
     hasData: true,
     anchor,
@@ -241,5 +254,7 @@ export function computeBudget(
     categories,
     monthly: { labels, realSpend, cumulativeNet },
     currentMonthIndex: anchorMonthNum - 1,
+    monthlyCap: round2(B),
+    unavoidable,
   }
 }

@@ -27,3 +27,9 @@ export function downloadDir(source: string): string {
   ensureDir(BASE)
   return ensureDir(join(BASE, '_downloads', source))
 }
+
+/** Dir for run logs and failure screenshots (matches the launchd plist path). */
+export function logsDir(): string {
+  ensureDir(BASE)
+  return ensureDir(join(BASE, 'logs'))
+}

@@ -26,10 +26,12 @@ function formatMonthLabel(ym: string): string {
 /** URL-driven period + "exclude special purchases" controls. */
 export function PeriodSelector({
   showSpecialToggle = true,
+  showCurrent = false,
   availableMonths,
   periodOptions,
 }: {
   showSpecialToggle?: boolean
+  showCurrent?: boolean
   availableMonths?: string[]
   periodOptions?: number[]
 }) {
@@ -41,6 +43,10 @@ export function PeriodSelector({
   const months = Number(params.get('months')) || 3
   const excludeSpecial = params.get('special') === '0'
   const selectedMonth = params.get('month') ?? ''
+  // "Current" is the default on pages that offer it when nothing else is chosen.
+  const isCurrent =
+    showCurrent &&
+    (params.get('period') === 'current' || (!params.get('months') && !selectedMonth))
 
   const update = (next: Record<string, string | null>) => {
     const sp = new URLSearchParams(params.toString())
@@ -55,13 +61,27 @@ export function PeriodSelector({
 
   return (
     <div className={`flex flex-wrap items-center gap-2 ${pending ? 'opacity-70' : ''}`}>
+      {showCurrent && (
+        <button
+          onClick={() => update({ period: 'current', months: null, month: null })}
+          className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
+            isCurrent
+              ? 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)]'
+              : 'border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]'
+          }`}
+          title="This month so far (from day 1), day by day"
+        >
+          Current
+        </button>
+      )}
+
       {availableMonths && availableMonths.length > 0 && (
         <select
           value={selectedMonth}
           onChange={(e) =>
             e.target.value
-              ? update({ month: e.target.value, months: null })
-              : update({ month: null })
+              ? update({ month: e.target.value, months: null, period: null })
+              : update({ month: null, period: null })
           }
           className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-sm font-medium text-[var(--foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
         >
@@ -82,9 +102,9 @@ export function PeriodSelector({
         {buildOptions(periodOptions).map((o) => (
           <button
             key={o.months}
-            onClick={() => update({ months: String(o.months), month: null })}
+            onClick={() => update({ months: String(o.months), month: null, period: null })}
             className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${
-              !hasExactMonth && months === o.months
+              !hasExactMonth && !isCurrent && months === o.months
                 ? 'bg-[var(--accent)] text-[var(--accent-fg)]'
                 : 'text-[var(--muted)] hover:text-[var(--foreground)]'
             }`}

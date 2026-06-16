@@ -1,6 +1,6 @@
 import { desc } from 'drizzle-orm'
 import { db } from '@/db'
-import { importBatches } from '@/db/schema'
+import { importBatches, categories, budgetGoals } from '@/db/schema'
 import { AppShell, Card, EmptyHint } from '@/app/components/AppShell'
 import { UploadDialog } from '@/app/components/UploadDialog'
 import { PeriodSelector } from '@/app/components/PeriodSelector'
@@ -10,9 +10,14 @@ import { BarList } from '@/app/components/charts/BarList'
 import { WeekdayChart } from '@/app/components/charts/WeekdayChart'
 import { InsightCard } from '@/app/components/InsightCard'
 import { BatchList } from '@/app/components/BatchList'
-import { loadEnriched, buildOverview, availableMonths } from '@/app/lib/analytics'
+import { BurndownTrajectory } from '@/app/components/BurndownTrajectory'
+import { loadAllFlows, buildOverview, availableMonths, anchorMonth, periodWindow } from '@/app/lib/analytics'
 import { buildInsights } from '@/app/lib/insights'
 import { parsePeriodParams } from '@/app/lib/params'
+import { computeBudget, FIXED_CATEGORIES, type CategoryMeta } from '@/app/lib/budget'
+import { computeMonthBurndown, computePeriodBurndown, type BurndownData } from '@/app/lib/projection'
+import { getBudgetSettings } from '@/app/actions/budget'
+import { loadProjectionRules } from '@/app/actions/projection'
 import {
   formatCurrency,
   formatCurrencyCompact,
@@ -27,17 +32,49 @@ export default async function Home({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
-  const { months, excludeSpecial, month } = parsePeriodParams(await searchParams)
-  const all = await loadEnriched()
-  const ov = buildOverview(all, months, excludeSpecial, month)
-  const months_available = availableMonths(all)
-  const insights = buildInsights(all, months, excludeSpecial, month)
+  const rawParams = await searchParams
+  const { months, excludeSpecial, month, current: currentParam } = parsePeriodParams(rawParams)
+  // Default to "Current" (the in-progress month) when nothing is chosen.
+  const current = currentParam || (!rawParams.months && !rawParams.month && !rawParams.period)
 
-  const batches = await db
-    .select()
-    .from(importBatches)
-    .orderBy(desc(importBatches.createdAt))
-    .limit(8)
+  const [allFlows, catRows, goalRows, settings, rules, batches] = await Promise.all([
+    loadAllFlows(),
+    db.select().from(categories),
+    db.select().from(budgetGoals),
+    getBudgetSettings(),
+    loadProjectionRules(),
+    db.select().from(importBatches).orderBy(desc(importBatches.createdAt)).limit(8),
+  ])
+  const all = allFlows.filter((t) => t.flow === 'expense')
+
+  const anchor = anchorMonth(all)
+  // "Current" scopes the page to the anchor month (like picking that exact month).
+  const exactMonth = month ?? (current ? anchor : null)
+  const ov = buildOverview(all, months, excludeSpecial, exactMonth)
+  const months_available = availableMonths(all)
+  const insights = buildInsights(all, months, excludeSpecial, exactMonth)
+
+  // Discretionary burn-down for the trajectory widget (day-by-day for a single
+  // month, month-by-month otherwise). Budget reflects live /budget settings.
+  const meta: CategoryMeta[] = catRows.map((c) => ({ id: c.id, name: c.name, color: c.color, kind: c.kind }))
+  const savedGoals = new Map(goalRows.map((g) => [g.categoryId, Number(g.goalAmount)]))
+  const budget = computeBudget(allFlows, meta, {
+    targetNet: settings.targetNet,
+    periodMode: settings.periodMode,
+    savedGoals,
+    rules,
+  })
+  const monthBudget = budget.monthlyCap - budget.unavoidable.total
+  let burndown: BurndownData | null = null
+  if (budget.hasData && anchor) {
+    const singleMonth = current || months === 1 || Boolean(month)
+    if (singleMonth) {
+      burndown = computeMonthBurndown(allFlows, rules, exactMonth ?? anchor, monthBudget, FIXED_CATEGORIES)
+    } else {
+      const { start, end } = periodWindow(anchor, months)
+      burndown = computePeriodBurndown(allFlows, rules, start, end, monthBudget, FIXED_CATEGORIES)
+    }
+  }
 
   return (
     <AppShell>
@@ -52,7 +89,7 @@ export default async function Home({
               : 'Upload a statement to begin'}
           </p>
         </div>
-        <PeriodSelector availableMonths={months_available} />
+        <PeriodSelector showCurrent availableMonths={months_available} />
       </div>
 
       {!ov.hasData ? (
@@ -84,6 +121,20 @@ export default async function Home({
               hint={ov.largest ? ov.largest.merchant : undefined}
             />
           </div>
+
+          {/* Net trajectory — discretionary burn-down for the selected period */}
+          {burndown && (
+            <Card
+              title="Net trajectory"
+              action={
+                <a href="/budget" className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]">
+                  goal from budget →
+                </a>
+              }
+            >
+              <BurndownTrajectory data={burndown} periodLabel={ov.periodLabel} />
+            </Card>
+          )}
 
           {/* Insights */}
           {insights.cards.length > 0 && (

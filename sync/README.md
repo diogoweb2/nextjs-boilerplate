@@ -90,8 +90,12 @@ Runs on the Mac via a LaunchAgent. **Mac off at 11:59 → run is skipped (no cat
 **Asleep → runs on next wake** (harmless; dedup makes re-imports a no-op). It POSTs to the
 **deployed** app, so nothing local needs to be running.
 
-Files: `run-rogers.sh` (launchd-safe wrapper — resolves a stable fnm node, sets `INGEST_URL`,
-runs headless) and `launchd/com.budget.sync.rogers.plist`.
+Files: `run-rogers.sh` (launchd-safe wrapper — resolves a stable fnm node, sets `INGEST_URL`)
+and `launchd/com.budget.sync.rogers.plist`.
+
+**Runs HEADED.** Rogers' login is behind reCAPTCHA, which rejects headless browsers; a headed
+run in the trust-built persistent profile passes. So a Chrome window appears for ~30s at run
+time, and **you must be logged into the macOS GUI session** for it to work (it is at noon).
 
 **MFA:** device trust normally persists, so MFA never appears. If it ever does, the runner
 reopens a **visible** browser, sends a macOS notification, and waits up to 20 min for you to
@@ -105,9 +109,9 @@ approve on your phone — then continues automatically.
    security find-generic-password -a ingest -s budget-sync-ingest -w   # copy into Vercel env
    ```
 2. Edit `run-rogers.sh` → set `INGEST_URL` to your real `https://<app>.vercel.app/api/ingest`.
-3. Verify a headless run works end-to-end against prod (some banks block headless; Rogers TBD):
+3. Verify a run works end-to-end against prod (headed — Rogers reCAPTCHA blocks headless):
    ```bash
-   INGEST_URL=https://<app>.vercel.app/api/ingest npx tsx sync/run-rogers.ts --headless
+   INGEST_URL=https://<app>.vercel.app/api/ingest npx tsx sync/run-rogers.ts
    ```
 4. Install the schedule:
    ```bash

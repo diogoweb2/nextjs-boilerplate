@@ -4,6 +4,8 @@ export function parsePeriodParams(sp: Record<string, string | string[] | undefin
   excludeSpecial: boolean
   month: string | null
   category: string | null
+  /** Dashboard-only: `?period=current` = the in-progress anchor month, day-by-day. */
+  current: boolean
 } {
   const raw = Number(Array.isArray(sp.months) ? sp.months[0] : sp.months)
   const months = [1, 2, 3, 6, 12].includes(raw) ? raw : 3
@@ -12,5 +14,6 @@ export function parsePeriodParams(sp: Record<string, string | string[] | undefin
   const month = rawMonth && /^\d{4}-\d{2}$/.test(rawMonth) ? rawMonth : null
   const rawCategory = Array.isArray(sp.category) ? sp.category[0] : sp.category
   const category = rawCategory ?? null
-  return { months, excludeSpecial: special === '0', month, category }
+  const period = Array.isArray(sp.period) ? sp.period[0] : sp.period
+  return { months, excludeSpecial: special === '0', month, category, current: period === 'current' }
 }

@@ -41,6 +41,9 @@ export const merchants = pgTable('merchants', {
   }),
   defaultRecurring: boolean('default_recurring').notNull().default(false),
   defaultSpecial: boolean('default_special').notNull().default(false),
+  // true = the owner dismissed this merchant as a projected-bill suggestion, so
+  // the Settings auto-detector stops proposing it (see projection_rules).
+  projectionDismissed: boolean('projection_dismissed').notNull().default(false),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 })
 
@@ -182,6 +185,38 @@ export const budgetGoals = pgTable('budget_goals', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 })
 
+/**
+ * Uncontrolled recurring bills the owner can't avoid but that don't hit every
+ * month (Toronto Water, Belair insurance, Scholars, Hydro). One row per merchant.
+ * The budget projects each bill's amount per month from history and replaces it
+ * with the actual once the real transaction posts (see app/lib/projection.ts).
+ * Mortgage & Property Tax are NOT here — they're always-fixed categories.
+ */
+export const projectionRules = pgTable('projection_rules', {
+  id: serial('id').primaryKey(),
+  merchantId: integer('merchant_id')
+    .notNull()
+    .unique()
+    .references(() => merchants.id, { onDelete: 'cascade' }),
+  // Display label; defaults to the merchant name.
+  label: text('label').notNull(),
+  // How often the bill is due. 'periodic' = irregular gaps inferred from history.
+  cadence: text('cadence', { enum: ['monthly', 'quarterly', 'annual', 'periodic'] })
+    .notNull()
+    .default('monthly'),
+  // How to project the amount in a due month with no actual yet.
+  //  seasonal = mean of that calendar month across years (Hydro winter≠summer)
+  //  average  = mean of recent occurrences
+  //  last     = most recent amount
+  //  fixed    = the explicit fixedAmount below
+  amountMode: text('amount_mode', { enum: ['seasonal', 'average', 'last', 'fixed'] })
+    .notNull()
+    .default('average'),
+  fixedAmount: numeric('fixed_amount', { precision: 10, scale: 2 }),
+  enabled: boolean('enabled').notNull().default(true),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+
 export const categoriesRelations = relations(categories, ({ many }) => ({
   merchants: many(merchants),
   transactions: many(transactions),
@@ -226,3 +261,4 @@ export type Transaction = typeof transactions.$inferSelect
 export type CustomReport = typeof customReports.$inferSelect
 export type BudgetSettings = typeof budgetSettings.$inferSelect
 export type BudgetGoal = typeof budgetGoals.$inferSelect
+export type ProjectionRule = typeof projectionRules.$inferSelect

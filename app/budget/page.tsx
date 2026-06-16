@@ -5,15 +5,17 @@ import { BudgetPlanner } from '@/app/components/BudgetPlanner'
 import { loadAllFlows } from '@/app/lib/analytics'
 import { computeBudget, type CategoryMeta } from '@/app/lib/budget'
 import { getBudgetSettings } from '@/app/actions/budget'
+import { loadProjectionRules } from '@/app/actions/projection'
 
 export const dynamic = 'force-dynamic'
 
 export default async function BudgetPage() {
-  const [all, catRows, goalRows, settings] = await Promise.all([
+  const [all, catRows, goalRows, settings, rules] = await Promise.all([
     loadAllFlows(),
     db.select().from(categories),
     db.select().from(budgetGoals),
     getBudgetSettings(),
+    loadProjectionRules(),
   ])
 
   const meta: CategoryMeta[] = catRows.map((c) => ({ id: c.id, name: c.name, color: c.color, kind: c.kind }))
@@ -22,6 +24,7 @@ export default async function BudgetPage() {
     targetNet: settings.targetNet,
     periodMode: settings.periodMode,
     savedGoals,
+    rules,
   })
 
   return (

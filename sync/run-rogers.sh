@@ -12,9 +12,11 @@ NODE="$HOME/.local/share/fnm/aliases/default/bin/node"
 TSX="$REPO/node_modules/tsx/dist/cli.mjs"
 
 # Point the runner at the deployed app's ingest endpoint.
-# ⚠️ Replace with your real Vercel production URL.
-export INGEST_URL="https://REPLACE-ME.vercel.app/api/ingest"
+export INGEST_URL="https://nextjs-boilerplate-nu-black-85.vercel.app/api/ingest"
 
 cd "$REPO"
 echo "===== budget-sync rogers @ $(date) ====="
-exec "$NODE" "$TSX" "$REPO/sync/run-rogers.ts" --headless
+# NOTE: runs HEADED (no --headless). Rogers' reCAPTCHA rejects headless logins;
+# a headed run in the trust-built profile passes. A browser window appears for
+# ~30s at run time. Requires the user to be logged into the GUI session.
+exec "$NODE" "$TSX" "$REPO/sync/run-rogers.ts"
