@@ -17,8 +17,8 @@
        re-imports dedup to zero. -->
   <key>StartCalendarInterval</key>
   <dict>
-    <key>Hour</key><integer>12</integer>
-    <key>Minute</key><integer>0</integer>
+    <key>Hour</key><integer>11</integer>
+    <key>Minute</key><integer>1</integer>
   </dict>
 
   <!-- Don't run on load/login, only on the schedule. -->
