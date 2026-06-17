@@ -23,13 +23,31 @@ import { chromium, type Page, type Frame } from 'playwright'
 import { readFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { profileDir, downloadDir } from './lib/profile'
+import { applyStealth } from './lib/stealth'
 
-type SourceConfig = { loginUrl: string }
+import type { LaunchHardening } from './adapters/types'
+
+type SourceConfig = { loginUrl: string; launchOptions?: LaunchHardening }
+
+// Amex must be discovered with the SAME real-Chrome + anti-automation launch the
+// runner uses (see adapters/amex.ts) — both so its bot detection lets you log in
+// and so the trusted profile is built by the same browser channel the daily run
+// reuses.
+const AMEX_HARDENING: LaunchHardening = {
+  channel: 'chrome',
+  args: ['--disable-blink-features=AutomationControlled'],
+  ignoreDefaultArgs: ['--enable-automation'],
+}
 
 const SOURCES: Record<string, SourceConfig> = {
   rogers: { loginUrl: 'https://selfserve.rogersbank.com/sign-in?locale=en' },
   tangerine: { loginUrl: 'https://www.tangerine.ca/app/#/login/login-id?locale=en_CA' },
-  amex: { loginUrl: 'https://www.americanexpress.com/en-ca/account/login' },
+  amex: {
+    loginUrl:
+      'https://www.americanexpress.com/en-ca/account/login?DestPage=' +
+      encodeURIComponent('https://global.americanexpress.com/statements'),
+    launchOptions: AMEX_HARDENING,
+  },
   scotia: { loginUrl: 'https://www.scotiabank.com/' },
 }
 
@@ -127,7 +145,9 @@ async function main(): Promise<void> {
     headless: false,
     acceptDownloads: true,
     viewport: { width: 1280, height: 900 },
+    ...config.launchOptions,
   })
+  if (config.launchOptions) await applyStealth(context)
 
   let current: Page
   const wire = (page: Page) => {
@@ -143,10 +163,18 @@ async function main(): Promise<void> {
   })
 
   current = context.pages()[0] ?? (await context.newPage())
-  await current.goto(config.loginUrl, { waitUntil: 'domcontentloaded' })
-  // Give the SPA a beat to render its first screen, then dump once.
-  await current.waitForTimeout(2500)
-  await dumpPage(current)
+  // Amex (and other SPAs) client-redirect the first navigation, which aborts
+  // goto with net::ERR_ABORTED even though the page loads fine. Swallow it and
+  // dump whatever actually rendered.
+  await current.goto(config.loginUrl, { waitUntil: 'domcontentloaded' }).catch((e: Error) => {
+    console.log(`(initial navigation: "${e.message.split('\n')[0]}" — continuing; page likely redirected)`)
+  })
+  // Give the SPA a beat to render its first screen, then dump once. Chrome may
+  // replace the initial tab during startup, closing the page we hold — if so,
+  // re-acquire the live one from the context instead of crashing.
+  await current.waitForTimeout(2500).catch(() => {})
+  if (current.isClosed()) current = context.pages()[0] ?? current
+  await dumpPage(current).catch(() => {})
 
   console.log(
     '\n👉 Navigate to the screen you want (login / MFA / transactions / export).\n' +

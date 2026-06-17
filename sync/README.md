@@ -122,7 +122,45 @@ approve on your phone — then continues automatically.
 5. Logs: `~/Library/Application Support/budget-sync/logs/rogers.log`.
    Unload to stop: `launchctl unload ~/Library/LaunchAgents/com.budget.sync.rogers.plist`.
 
+## Amex (same pattern as Rogers)
+
+Amex reuses the exact Rogers machinery — only the adapter (`adapters/amex.ts`) and the
+source key differ. The shared orchestration lives in `lib/runner.ts`; `run-rogers.ts` and
+`run-amex.ts` are thin wrappers over it. The app already parses the Amex CSV (`source: 'amex'`
+in `app/lib/csv.ts`), so there's no new parser.
+
+One-time Keychain credentials (same shape as Rogers):
+
+```bash
+security add-generic-password -a "amex" -s "budget-sync-amex"      -w   # password
+security add-generic-password -a "amex" -s "budget-sync-amex-user" -w   # User ID
+```
+
+Run it:
+
+```bash
+npx tsx sync/run-amex.ts             # headed, watch it work
+npx tsx sync/run-amex.ts --headless  # headless
+```
+
+It logs in (User ID + password), expands "Latest Transactions", downloads the CSV via the
+modal, and POSTs it to the ingest endpoint as `amex`. Device trust persists in the profile,
+so MFA is skipped on daily runs (and escalates to a visible browser + notification if it ever
+appears, identical to Rogers).
+
+Schedule (launchd): `run-amex.sh` + `launchd/com.budget.sync.amex.plist`, firing at **12:00**
+— one minute after Rogers (11:59) so the two headed runs don't collide in the GUI session.
+Install it the same way:
+
+```bash
+cp sync/launchd/com.budget.sync.amex.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.budget.sync.amex.plist
+launchctl start com.budget.sync.amex   # optional: trigger once now to test
+```
+
+Logs: `~/Library/Application Support/budget-sync/logs/amex.log`.
+
 ## Next (phases 3–5)
 
-Generalize the adapter for Tangerine/Amex/Scotia, then add push/email alerts on failure.
+Generalize the adapter for Tangerine/Scotia, then add push/email alerts on failure.
 See `AUTO_SYNC_PLAN.md` §10.
