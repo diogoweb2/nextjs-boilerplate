@@ -46,7 +46,8 @@ export function PeriodSelector({
   // "Current" is the default on pages that offer it when nothing else is chosen.
   const isCurrent =
     showCurrent &&
-    params.get('period') === 'current'
+    (params.get('period') === 'current' ||
+      (!params.get('period') && !selectedMonth && !params.get('months')))
 
   const update = (next: Record<string, string | null>) => {
     const sp = new URLSearchParams(params.toString())

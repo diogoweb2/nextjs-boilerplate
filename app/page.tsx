@@ -35,7 +35,7 @@ export default async function Home({
   const rawParams = await searchParams
   const { months, excludeSpecial, month, current: currentParam } = parsePeriodParams(rawParams)
   // Default to "Current" (the in-progress month) when nothing is chosen.
-  const current = currentParam
+  const current = currentParam || (!rawParams.period && !rawParams.month && !rawParams.months)
 
   const [allFlows, catRows, goalRows, settings, rules, batches] = await Promise.all([
     loadAllFlows(),
