@@ -1,11 +1,13 @@
 /**
- * Daily-digest runner. Fires AFTER the day's card syncs (via launchd) and pops a
- * single native macOS notification summarizing the budget — sync health, new
- * spend, month pace, and anything unusual — so you get a "go check the site"
- * nudge WITHOUT keeping a browser tab open.
+ * Daily-digest runner. Fires AFTER the day's card syncs (via launchd) and asks
+ * the app to **Web Push** a budget summary — sync health, new spend, month pace,
+ * and anything unusual — to every subscribed device (your Android phone, desktop
+ * Chrome). You get a "go check the site" nudge with no tab open.
  *
- * It just GETs the app's /api/digest (which does all the computing and returns a
- * ready-made title/body) and hands that to `notify()`. No browser, no Playwright.
+ * It POSTs the app's /api/digest, which computes the digest AND sends the push
+ * server-side (the VAPID private key + subscriptions live there). This runner
+ * just triggers it and logs the result; a local macOS banner is fired only if the
+ * trigger itself fails, so a broken pipeline still surfaces on the Mac.
  *
  *   npx tsx sync/digest.ts
  *
@@ -17,7 +19,12 @@
 import { readSecret } from './lib/keychain'
 import { notify } from './lib/notify'
 
-type DigestResponse = { title?: string; body?: string; error?: string }
+type DigestResponse = {
+  title?: string
+  body?: string
+  error?: string
+  push?: { sent: number; failed: number }
+}
 
 function digestUrl(): string {
   if (process.env.DIGEST_URL) return process.env.DIGEST_URL
@@ -29,7 +36,7 @@ async function main(): Promise<void> {
   const token = readSecret('budget-sync-ingest', 'ingest')
   const url = digestUrl()
 
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
   const json = (await res.json().catch(() => null)) as DigestResponse | null
 
   if (!res.ok || !json?.title) {
@@ -37,8 +44,12 @@ async function main(): Promise<void> {
     throw new Error(`digest endpoint error: ${reason}`)
   }
 
+  const { sent = 0, failed = 0 } = json.push ?? {}
   console.log(`${json.title}\n${json.body ?? ''}`)
-  notify(json.title, json.body ?? '')
+  console.log(`\n→ pushed to ${sent} device(s)${failed ? `, ${failed} failed` : ''}`)
+  if (sent === 0) {
+    console.log('  (no subscribed devices — enable notifications in Settings on your phone)')
+  }
 }
 
 main().catch((err) => {

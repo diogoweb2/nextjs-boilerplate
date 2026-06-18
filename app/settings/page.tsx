@@ -2,6 +2,7 @@ import { db } from '@/db'
 import { merchants } from '@/db/schema'
 import { AppShell, Card, EmptyHint } from '@/app/components/AppShell'
 import { ProjectionSettings } from '@/app/components/ProjectionSettings'
+import { PushToggle } from '@/app/components/PushToggle'
 import { loadAllFlows, anchorMonth } from '@/app/lib/analytics'
 import { FIXED_CATEGORIES } from '@/app/lib/budget'
 import {
@@ -48,6 +49,12 @@ export default async function SettingsPage() {
           Mortgage &amp; Property Tax are always fixed; everyday spend you control (groceries, dining) is
           intentionally left out.
         </p>
+      </div>
+
+      <div className="mb-5">
+        <Card title="Notifications">
+          <PushToggle />
+        </Card>
       </div>
 
       {all.length === 0 ? (

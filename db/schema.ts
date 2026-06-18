@@ -217,6 +217,21 @@ export const projectionRules = pgTable('projection_rules', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 })
 
+/**
+ * Web Push subscriptions for the daily digest notification. One row per
+ * browser/device that opted in (Settings → Notifications). The digest runner
+ * triggers POST /api/digest, which sends the notification to every row here.
+ * Expired endpoints (404/410 from the push service) are pruned on send.
+ */
+export const pushSubscriptions = pgTable('push_subscriptions', {
+  id: serial('id').primaryKey(),
+  endpoint: text('endpoint').notNull().unique(),
+  p256dh: text('p256dh').notNull(),
+  auth: text('auth').notNull(),
+  userAgent: text('user_agent'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+
 export const categoriesRelations = relations(categories, ({ many }) => ({
   merchants: many(merchants),
   transactions: many(transactions),
@@ -262,3 +277,4 @@ export type CustomReport = typeof customReports.$inferSelect
 export type BudgetSettings = typeof budgetSettings.$inferSelect
 export type BudgetGoal = typeof budgetGoals.$inferSelect
 export type ProjectionRule = typeof projectionRules.$inferSelect
+export type PushSubscriptionRow = typeof pushSubscriptions.$inferSelect

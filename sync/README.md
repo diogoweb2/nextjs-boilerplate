@@ -160,15 +160,14 @@ launchctl start com.budget.sync.amex   # optional: trigger once now to test
 
 Logs: `~/Library/Application Support/budget-sync/logs/amex.log`.
 
-## Daily digest notification (11:15am)
+## Daily digest notification (11:15am, Web Push)
 
-After the day's syncs, a separate launchd job pops **one native macOS notification**
-summarizing the budget — so you get a "go check the site" nudge **without keeping a
-browser tab open**. No Playwright: it just GETs the deployed app's `/api/digest` and
-hands the returned `title`/`body` to `osascript`.
+After the day's syncs, a separate launchd job triggers a **Web Push** notification with a
+budget summary — delivered to your **phone (Android) and any subscribed browser**, even
+with everything closed. No Playwright, no tab open: the runner just POSTs the deployed
+app's `/api/digest`, which computes the digest **and** pushes it server-side.
 
-What it shows (all computed server-side in `app/lib/digest.ts`, reusing the dashboard
-analytics):
+What it shows (all computed in `app/lib/digest.ts`, reusing the dashboard analytics):
 
 - **Sync health** per card — `Amex ✓ · Master ⚠️ 4d`. Reads each source's last import
   freshness, so a stale/failed sync surfaces even if its runner never fired.
@@ -178,17 +177,46 @@ analytics):
 - **New / unusual** — first-seen merchants and a larger-than-usual charge.
 
 The title carries a `✓` / `⚠️` so you can triage at a glance; `⚠️` means a sync is stale
-**or** you're projected to overspend.
+**or** you're projected to overspend. Tapping the notification opens the dashboard.
 
-Auth reuses the **same `budget-sync-ingest` token** as ingest (no new secret). The digest
-URL is derived from `INGEST_URL` (or set `DIGEST_URL` to override).
+### Pieces
+
+- `app/lib/push.ts` — server sender (`web-push` + VAPID); prunes dead subscriptions.
+- `public/sw.js` — service worker that shows the push and handles the tap.
+- `app/components/PushToggle.tsx` — **Settings → Notifications** enable/disable (per device).
+- `push_subscriptions` table — one row per opted-in browser/device.
+- `POST /api/digest` — computes + pushes; `GET /api/digest` is a no-push dry run.
+
+### One-time setup
+
+1. **Generate VAPID keys** and set three env vars locally (`.env.local`) **and in Vercel
+   (Production)** — they must match:
+   ```bash
+   npx web-push generate-vapid-keys --json
+   ```
+   ```
+   NEXT_PUBLIC_VAPID_PUBLIC_KEY=…   # exposed to the browser
+   VAPID_PRIVATE_KEY=…              # server-only, signs the push
+   VAPID_SUBJECT=mailto:you@example.com
+   ```
+2. **Apply the new table** to the database:
+   ```bash
+   npm run db:push
+   ```
+3. **Redeploy** so prod has the keys + `POST /api/digest`.
+4. On your phone, open the deployed site → **Settings → Notifications → Enable**, and allow
+   the permission prompt. (Android Chrome delivers even when closed. iPhone would need
+   "Add to Home Screen" first — N/A here.)
+
+### Test it
 
 ```bash
-# Test against the deployed app (prints + notifies):
+# Computes the digest and pushes to every subscribed device:
 INGEST_URL=https://<app>.vercel.app/api/ingest npx tsx sync/digest.ts
+# → prints the summary and "pushed to N device(s)"
 ```
 
-Install the schedule (after `INGEST_TOKEN` is set in Vercel — same as ingest):
+### Schedule it
 
 ```bash
 cp sync/launchd/com.budget.sync.digest.plist ~/Library/LaunchAgents/
@@ -196,7 +224,11 @@ launchctl load ~/Library/LaunchAgents/com.budget.sync.digest.plist
 launchctl start com.budget.sync.digest   # optional: trigger once now to test
 ```
 
-Logs: `~/Library/Application Support/budget-sync/logs/digest.log`.
+Logs: `~/Library/Application Support/budget-sync/logs/digest.log`. The launchd job only
+*triggers* the push (a single HTTP POST), so the Mac just needs to be awake at 11:15 — it
+already is for the syncs. If the trigger itself fails, the runner fires a local macOS
+banner so a broken pipeline still surfaces.
+
 Adding **Tangerine** later: add one line to `SYNC_SOURCES` in `app/lib/sync.ts` and the
 digest (and the dashboard badge) pick it up automatically.
 
