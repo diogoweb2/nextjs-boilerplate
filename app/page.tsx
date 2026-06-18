@@ -182,7 +182,9 @@ export default async function Home({
               invertColors
               hint={totalSpendHint}
             />
-            {ov.categoryCards.map((c) => (
+            {ov.categoryCards
+              .filter((c) => c.name !== 'Uncategorized' || c.amount !== 0)
+              .map((c) => (
               <StatCard
                 key={c.name}
                 label={c.label}
@@ -194,7 +196,7 @@ export default async function Home({
                 budget={(goalByName.get(c.name) ?? 0) * periodMonths}
                 href={`/transactions?category=${encodeURIComponent(c.name)}`}
               />
-            ))}
+              ))}
           </div>
 
           {/* Net trajectory — discretionary burn-down for the selected period */}
