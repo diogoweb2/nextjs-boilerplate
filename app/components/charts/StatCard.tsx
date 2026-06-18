@@ -73,11 +73,13 @@ export function StatCard({
       )}
       {hint && <span className="text-xs text-[var(--muted)]">{hint}</span>}
       {showBudget && (
-        <div className="mt-2 flex flex-col gap-1">
-          <div className="flex items-center justify-between text-[10px] font-medium uppercase tracking-wide text-[var(--muted)]">
-            <span>Budget</span>
-            <span className="tabular-nums" style={{ color: barColor }}>
-              {Math.round(ratio * 100)}% of {formatCurrency(budget)}
+        <div className="mt-2 flex flex-col gap-1.5">
+          <div className="flex items-baseline justify-between">
+            <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted)]">
+              Budget
+            </span>
+            <span className="text-[10px] font-semibold tabular-nums" style={{ color: barColor }}>
+              {Math.round(ratio * 100)}%
             </span>
           </div>
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--surface-2)]">
@@ -85,6 +87,14 @@ export function StatCard({
               className="h-full rounded-full transition-all"
               style={{ width: `${Math.min(100, ratio * 100)}%`, backgroundColor: barColor }}
             />
+          </div>
+          <div className="flex items-baseline justify-between text-[10px] tabular-nums text-[var(--muted)]">
+            <span>of {formatCurrency(budget)}</span>
+            {ratio < 1 ? (
+              <span style={{ color: barColor }}>{formatCurrency(budget - current!)} left</span>
+            ) : (
+              <span style={{ color: barColor }}>{formatCurrency(current! - budget)} over</span>
+            )}
           </div>
         </div>
       )}
