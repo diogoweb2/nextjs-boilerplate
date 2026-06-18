@@ -20,11 +20,14 @@ import { monthlyUnavoidable, type ProjectionRule, type Unavoidable } from '@/app
 export type PeriodMode = 'year' | '12mo'
 
 /**
- * The only always-fixed categories. Everything else "unavoidable" (Hydro, Water,
- * Belair, Scholars, subscriptions) is a per-merchant projected bill — see
- * app/lib/projection.ts and the Settings page.
+ * The only always-fixed category. "Home" consolidates the unavoidable house
+ * costs (Mortgage, Property Tax, Toronto Hydro, Toronto Water), so it is treated
+ * as fully fixed. Everything else "unavoidable" (Belair, Scholars, Koodo,
+ * subscriptions) is a per-merchant projected bill — see app/lib/projection.ts
+ * and the Settings page. Hydro/Water have NO projection rule (they would
+ * double-count against the fixed Home total).
  */
-export const FIXED_CATEGORIES = ['Mortgage', 'Property Tax']
+export const FIXED_CATEGORIES = ['Home']
 /** Categories whose suggested goal defaults to ~$0 (an explicit lever to pull). */
 const ZERO_DEFAULT_CATEGORIES = ['Travel', 'Investment']
 

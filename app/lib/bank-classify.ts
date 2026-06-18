@@ -96,8 +96,8 @@ function classifyTangerine(input: BankInput): BankClass {
   if (has(name, 'mbna')) return cardPayment('mbna', 'MBNA Payment', input.date)
 
   // --- Other expenses ---
-  if (has(name, 'highway 407', '407')) return expense('Transport', 'Highway 407')
-  if (has(name, 'koodo')) return expense('Utilities', 'Koodo Mobile', true)
+  if (has(name, 'highway 407', '407')) return expense('Cars', 'Highway 407')
+  if (has(name, 'koodo')) return expense('Subscriptions', 'Koodo Mobile', true)
   if (has(name, 'interac e-transfer to', 'e-transfer to')) return expense('Other', 'E-Transfer Out')
   if (has(name, 'cheque withdrawal')) return expense('Other', 'Cheque Withdrawal')
 
@@ -132,11 +132,12 @@ function classifyScotia(input: BankInput): BankClass {
     return cardPayment('loc', 'Card / Line of Credit Payment', input.date)
 
   // --- Recurring bank expenses ---
-  if (has(desc, 'mortgage payment')) return expense('Mortgage', 'Mortgage', true)
-  if (has(desc, 'taxes') && has(sub, 'toronto')) return expense('Property Tax', 'Toronto Property Tax', true)
-  if (has(desc, 'water bill payment')) return expense('Utilities', 'Toronto Water')
+  // House costs all consolidate into "Home" (the fixed/unavoidable category).
+  if (has(desc, 'mortgage payment')) return expense('Home', 'Mortgage', true)
+  if (has(desc, 'taxes') && has(sub, 'toronto')) return expense('Home', 'Toronto Property Tax', true)
+  if (has(desc, 'water bill payment')) return expense('Home', 'Toronto Water')
   if (has(desc, 'bill payment') && has(sub, 'toronto hydro'))
-    return expense('Utilities', 'Toronto Hydro', true)
+    return expense('Home', 'Toronto Hydro', true)
   if (has(both, 'goodlife')) return expense('Health', 'Goodlife Fitness', true)
   if (has(both, 'planet fitness')) return expense('Health', 'Planet Fitness', true)
   if (has(both, 'new haven')) return expense('Kids', 'New Haven Learning', true)
@@ -151,7 +152,7 @@ function classifyScotia(input: BankInput): BankClass {
   // Recurring outbound "customer transfer dr." split (owner-confirmed):
   // $1,100 = extra mortgage, $900 = iTrade investment, everything else = investment (review).
   if (has(desc, 'customer transfer')) {
-    if (out === 1100) return expense('Mortgage', 'Mortgage', true)
+    if (out === 1100) return expense('Home', 'Mortgage', true)
     return expense('Investment', 'Investment (iTrade)')
   }
 

@@ -187,10 +187,11 @@ export const budgetGoals = pgTable('budget_goals', {
 
 /**
  * Uncontrolled recurring bills the owner can't avoid but that don't hit every
- * month (Toronto Water, Belair insurance, Scholars, Hydro). One row per merchant.
+ * month (Belair insurance, Scholars, Koodo). One row per merchant.
  * The budget projects each bill's amount per month from history and replaces it
  * with the actual once the real transaction posts (see app/lib/projection.ts).
- * Mortgage & Property Tax are NOT here — they're always-fixed categories.
+ * The "Home" category (Mortgage, Property Tax, Hydro, Water) is the always-fixed
+ * category, so its members are NOT projection rules here (would double-count).
  */
 export const projectionRules = pgTable('projection_rules', {
   id: serial('id').primaryKey(),

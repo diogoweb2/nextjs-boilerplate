@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { eq, inArray } from 'drizzle-orm'
+import { eq, inArray, ilike } from 'drizzle-orm'
 import { db } from '@/db'
 import {
   transactions,
@@ -210,7 +210,63 @@ export async function ingestStatement(
     .set({ insertedCount, skippedCount })
     .where(eq(importBatches.id, batch.id))
 
+  // Belair posts two payments once a year (car + house) — split them so the
+  // analytics stay correct every year without manual edits.
+  await reconcileBelairSplit()
+
   return { ok: true, source, inserted: insertedCount, skipped: skippedCount, period }
+}
+
+/**
+ * Belair insurance is billed once a year as two charges — one for the car, one
+ * for the house, the house always the smaller amount. Per calendar year, send
+ * the lowest-amount Belair charge to "Home" and the rest to "Cars" via
+ * transaction-level category overrides. Re-runs idempotently after every import,
+ * so next year's bill is split automatically. See BUSINESS_RULES.md.
+ */
+export async function reconcileBelairSplit(): Promise<void> {
+  const cats = await db
+    .select({ id: categories.id, name: categories.name })
+    .from(categories)
+  const homeId = cats.find((c) => c.name === 'Home')?.id
+  const carsId = cats.find((c) => c.name === 'Cars')?.id
+  if (!homeId || !carsId) return
+
+  const belair = await db
+    .select({ id: merchants.id })
+    .from(merchants)
+    .where(ilike(merchants.name, 'belair%'))
+  if (belair.length === 0) return
+
+  const txns = await db
+    .select({
+      id: transactions.id,
+      txnDate: transactions.txnDate,
+      amount: transactions.amount,
+      categoryId: transactions.categoryId,
+    })
+    .from(transactions)
+    .where(inArray(transactions.merchantId, belair.map((m) => m.id)))
+
+  // Group by calendar year; in each year the cheapest charge is the house.
+  const byYear = new Map<string, typeof txns>()
+  for (const t of txns) {
+    const year = t.txnDate.slice(0, 4)
+    const group = byYear.get(year) ?? []
+    group.push(t)
+    byYear.set(year, group)
+  }
+
+  for (const group of byYear.values()) {
+    if (group.length < 2) continue
+    const lowest = group.reduce((lo, t) => (Number(t.amount) < Number(lo.amount) ? t : lo))
+    for (const t of group) {
+      const target = t.id === lowest.id ? homeId : carsId
+      if (t.categoryId !== target) {
+        await db.update(transactions).set({ categoryId: target }).where(eq(transactions.id, t.id))
+      }
+    }
+  }
 }
 
 /** Undo an import: delete its transactions and the batch record. */

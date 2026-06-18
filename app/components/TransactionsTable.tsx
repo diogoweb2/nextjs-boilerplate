@@ -35,15 +35,19 @@ export function TransactionsTable({
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [query, setQuery] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState<string>(
-    initialCategoryFilter === 'uncategorized' ? '' : initialCategoryFilter
-  )
+  const [categoryFilter, setCategoryFilter] = useState<string>(initialCategoryFilter)
   const [hidePayments, setHidePayments] = useState(true)
   const [hideSpecial, setHideSpecial] = useState(false)
   const [recurringOnly, setRecurringOnly] = useState(false)
-  const [uncategorizedOnly, setUncategorizedOnly] = useState(initialCategoryFilter === 'uncategorized')
   const [personFilter, setPersonFilter] = useState<string>('')
-  const [sortBy, setSortBy] = useState<'date' | 'amount'>('date')
+  const [sortBy, setSortBy] = useState<'date' | 'amount'>(
+    initialCategoryFilter === 'uncategorized' ? 'amount' : 'date'
+  )
+
+  // "Uncategorized" is a synthetic dropdown option (value 'uncategorized') rather
+  // than a real category row; selecting it filters to txns with no category and
+  // shows the inline category picker for quick triage.
+  const uncategorizedOnly = categoryFilter === 'uncategorized'
 
   const run = (fn: () => Promise<void>) =>
     startTransition(async () => {
@@ -64,8 +68,11 @@ export function TransactionsTable({
         if (hideSpecial && t.isSpecial) return false
         if (recurringOnly && !t.isRecurring) return false
         if (personFilter && t.person !== personFilter) return false
-        if (uncategorizedOnly && t.categoryId !== null) return false
-        if (categoryFilter && String(t.categoryId ?? '') !== categoryFilter) return false
+        if (categoryFilter === 'uncategorized') {
+          if (t.categoryId !== null) return false
+        } else if (categoryFilter && String(t.categoryId ?? '') !== categoryFilter) {
+          return false
+        }
         if (q && !t.merchantName.toLowerCase().includes(q) && !t.rawDescription.toLowerCase().includes(q))
           return false
         return true
@@ -75,38 +82,32 @@ export function TransactionsTable({
           ? Math.abs(b.amount) - Math.abs(a.amount)
           : a.txnDate < b.txnDate ? 1 : -1
       )
-  }, [transactions, query, categoryFilter, hidePayments, hideSpecial, recurringOnly, uncategorizedOnly, personFilter, sortBy])
+  }, [transactions, query, categoryFilter, hidePayments, hideSpecial, recurringOnly, personFilter, sortBy])
 
   const total = rows.filter((r) => !r.isPayment).reduce((s, r) => s + r.amount, 0)
 
   return (
     <div className={pending ? 'opacity-70 transition-opacity' : ''}>
       <div className="mb-3 flex flex-col gap-2">
-        <div className="flex gap-2">
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search transactions…"
-            className="min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
-          />
-          <button
-            onClick={() => { setUncategorizedOnly((v) => !v); if (!uncategorizedOnly) setSortBy('amount') }}
-            className={`shrink-0 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
-              uncategorizedOnly
-                ? 'border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-[var(--accent)]'
-                : 'border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]'
-            }`}
-          >
-            {uncategorizedOnly ? '✓ ' : ''}Uncategorized
-          </button>
-        </div>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search transactions…"
+          className="min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
+        />
         <div className="flex flex-wrap items-center gap-2">
           <select
             value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value
+              setCategoryFilter(v)
+              // Sorting uncategorized txns by amount surfaces the ones worth triaging first.
+              if (v === 'uncategorized') setSortBy('amount')
+            }}
             className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm"
           >
             <option value="">All categories</option>
+            <option value="uncategorized">Uncategorized</option>
             {categories.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}

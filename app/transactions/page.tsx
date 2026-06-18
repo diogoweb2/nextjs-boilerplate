@@ -6,6 +6,7 @@ import { TransactionsTable, type TxnRow } from '@/app/components/TransactionsTab
 import { PeriodSelector } from '@/app/components/PeriodSelector'
 import { cardholderName } from '@/app/lib/cardholders'
 import { parsePeriodParams } from '@/app/lib/params'
+import { addMonths } from '@/app/lib/analytics'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,7 +17,11 @@ export default async function TransactionsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
-  const { month, category } = parsePeriodParams(await searchParams)
+  const sp = await searchParams
+  const { category } = parsePeriodParams(sp)
+  const rawMonth = Array.isArray(sp.month) ? sp.month[0] : sp.month
+  const rawMonths = Number(Array.isArray(sp.months) ? sp.months[0] : sp.months)
+  const monthsWindow = [1, 2, 3, 6, 12].includes(rawMonths) ? rawMonths : null
 
   const [rows, catRows] = await Promise.all([
     db
@@ -67,11 +72,28 @@ export default async function TransactionsPage({
     }
   })
 
-  const txns = month ? allTxns.filter((t) => t.txnDate.slice(0, 7) === month) : allTxns
-
   const months_available = Array.from(new Set(allTxns.map((t) => t.txnDate.slice(0, 7))))
     .sort()
     .reverse()
+  const anchor = months_available[0] ?? null
+
+  // Period filter precedence: explicit "all months" → everything; an exact month
+  // → that month; a window (2M/3M/6M/12M) → that many months ending at the anchor;
+  // nothing chosen → the current (latest) month by default.
+  let txns: TxnRow[]
+  if (rawMonth === 'all' || !anchor) {
+    txns = allTxns
+  } else if (rawMonth && /^\d{4}-\d{2}$/.test(rawMonth)) {
+    txns = allTxns.filter((t) => t.txnDate.slice(0, 7) === rawMonth)
+  } else if (monthsWindow) {
+    const start = addMonths(anchor, -(monthsWindow - 1))
+    txns = allTxns.filter((t) => {
+      const ym = t.txnDate.slice(0, 7)
+      return ym >= start && ym <= anchor
+    })
+  } else {
+    txns = allTxns.filter((t) => t.txnDate.slice(0, 7) === anchor)
+  }
 
   return (
     <AppShell>
@@ -83,7 +105,11 @@ export default async function TransactionsPage({
             subscription or special purchase.
           </p>
         </div>
-        <PeriodSelector showSpecialToggle={false} availableMonths={months_available} />
+        <PeriodSelector
+          showSpecialToggle={false}
+          currentMonthDefault
+          availableMonths={months_available}
+        />
       </div>
 
       {txns.length === 0 ? (
@@ -91,7 +117,7 @@ export default async function TransactionsPage({
           <EmptyHint>
             {allTxns.length === 0
               ? 'No transactions yet. Import a statement from the Overview page.'
-              : 'No transactions for this month.'}
+              : 'No transactions for this period.'}
           </EmptyHint>
         </Card>
       ) : (
@@ -100,7 +126,9 @@ export default async function TransactionsPage({
           categories={catRows.map((c) => ({ id: c.id, name: c.name, color: c.color }))}
           initialCategoryFilter={
             category
-              ? (catRows.find((c) => c.name === category)?.id?.toString() ?? '')
+              ? category === NO_CAT.name || category === 'uncategorized'
+                ? 'uncategorized'
+                : (catRows.find((c) => c.id === Number(category) || c.name === category)?.id?.toString() ?? '')
               : ''
           }
         />

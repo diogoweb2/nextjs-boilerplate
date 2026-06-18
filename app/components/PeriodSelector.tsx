@@ -27,11 +27,14 @@ function formatMonthLabel(ym: string): string {
 export function PeriodSelector({
   showSpecialToggle = true,
   showCurrent = false,
+  currentMonthDefault = false,
   availableMonths,
   periodOptions,
 }: {
   showSpecialToggle?: boolean
   showCurrent?: boolean
+  /** When true, no selection means "the current (latest) month"; adds an explicit "All months". */
+  currentMonthDefault?: boolean
   availableMonths?: string[]
   periodOptions?: number[]
 }) {
@@ -40,6 +43,7 @@ export function PeriodSelector({
   const params = useSearchParams()
   const [pending, startTransition] = useTransition()
 
+  const hasMonthsParam = Boolean(params.get('months'))
   const months = Number(params.get('months')) || 2
   const excludeSpecial = params.get('special') === '0'
   const selectedMonth = params.get('month') ?? ''
@@ -82,16 +86,17 @@ export function PeriodSelector({
           onChange={(e) =>
             e.target.value
               ? update({ month: e.target.value, months: null, period: null })
-              : update({ month: null, period: null })
+              : update({ month: null, months: null, period: null })
           }
           className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-sm font-medium text-[var(--foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
         >
-          <option value="">All</option>
+          <option value="">{currentMonthDefault ? 'This month' : 'All'}</option>
           {availableMonths.map((ym) => (
             <option key={ym} value={ym}>
               {formatMonthLabel(ym)}
             </option>
           ))}
+          {currentMonthDefault && <option value="all">All months</option>}
         </select>
       )}
 
@@ -105,7 +110,10 @@ export function PeriodSelector({
             key={o.months}
             onClick={() => update({ months: String(o.months), month: null, period: null })}
             className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${
-              !hasExactMonth && !isCurrent && months === o.months
+              !hasExactMonth &&
+              !isCurrent &&
+              months === o.months &&
+              (!currentMonthDefault || hasMonthsParam)
                 ? 'bg-[var(--accent)] text-[var(--accent-fg)]'
                 : 'text-[var(--muted)] hover:text-[var(--foreground)]'
             }`}

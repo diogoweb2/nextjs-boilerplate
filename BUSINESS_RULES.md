@@ -69,11 +69,13 @@ by description + sub-description + sign. Highlights (owner-confirmed):
   unknown deposits → Other Income.
 - **Inter-account transfer (ignored)**: Tangerine "EFT Withdrawal to THE BANK OF NO[VA
   SCOTIA]" ↔ the matching Scotia "investment / Tangerine" credit.
-- **Bank expenses**: mortgage payment → Mortgage; Toronto Tax → Property Tax; Toronto
-  Hydro/Water → Utilities; Goodlife/Planet Fitness → Health; New Haven/Kumon → Kids; Koodo →
-  Utilities; Highway 407 → Transport; service charge → Bank Fees; abm withdrawal → Cash; `pos
-  purchase` → the normal merchant-learning path (merchant text in the sub-description).
-- **Scotia "customer transfer dr."** split: **−$1,100 → Mortgage**, **−$900 → Investment**;
+- **Bank expenses**: mortgage payment → Home; Toronto Tax → Home; Toronto Hydro/Water → Home
+  (all four are the consolidated house costs); Goodlife/Planet Fitness → Health; New
+  Haven/Kumon → Kids; Koodo → Subscriptions; Highway 407 → Cars; service charge → Bank Fees;
+  abm withdrawal → Cash; `pos purchase` → the normal merchant-learning path (merchant text in
+  the sub-description).
+- **Scotia "customer transfer dr."** split: **−$1,100 → Home** (extra mortgage), **−$900 →
+  Investment**;
   `Mb-Credit Card/Loc Pay` → CC Payment; any other amount → **Investment** (legacy lump
   transfers default here and can be reclassified per-transaction).
 - **Investment** (incl. Scotia iTrade) is an **expense** in category `Investment` (so the
@@ -172,8 +174,29 @@ Run after a schema change: `npm run db:push && npm run db:seed`.
 - Each category has a **`kind`**: `expense` | `income` | `neutral` (default `expense`). It
   groups the Income page's source lines and keeps income/transfer buckets out of spend pickers.
   Income kinds: Salary, Family Support, Insurance, Benefits, Tax Refund, Interest, Other
-  Income. Neutral: Transfer. Everything else is `expense` (incl. Mortgage, Property Tax,
-  Investment, CC Payment, Bank Fees, Cash).
+  Income. Neutral: Transfer. Everything else is `expense` (incl. Home, Investment, CC Payment,
+  Bank Fees, Cash).
+
+### Category conventions (owner-confirmed consolidations)
+- **Cars** — every cost of owning/driving a car: fuel (Costco Gas, Petro-Canada, Circle K, …),
+  parking & parking tickets, tolls (Highway 407), maintenance/dealers/body shops (Woodbine
+  Chevrolet, Mr Lube, Old Mill Cadillac, Wash Me Now), CAA, MTO, and the **car** half of
+  Belair insurance. Answers "how much do we spend on cars?". (Replaced the old `Fuel` and
+  `HouseCar` categories.)
+- **Transport** — public transit only (Presto, TfL, GO/Union Station, Uber rideshare).
+- **Home** — "cost to keep the house": Mortgage, Property Tax, Toronto Hydro, Toronto Water,
+  and the **house** half of Belair. This is the single always-fixed category for the budget
+  (replaced the standalone Mortgage & Property Tax categories). General home goods (IKEA,
+  Home Depot, Wayfair, Canadian Tire) are **Shopping**, not Home.
+- **Dental** — dental offices, split out of Health (e.g. In Path Dental, Lawrence Park Dental).
+- **Subscriptions** — now also includes phone/internet (Koodo, Fido, Distributel).
+- **Entertainment** — now also includes cannabis stores (Budhub, Fika), out of Health.
+
+### Belair insurance annual split (`reconcileBelairSplit`, `app/actions/import.ts`)
+Belair bills **once a year as two charges** — one for the car, one for the house, the **house
+always the smaller**. After every import we group Belair's charges by calendar year and assign
+the **lowest → Home** and the **rest → Cars** as transaction-level category overrides. It is
+idempotent and re-applies automatically each year while the policy stays the same.
 - Bank payees are resolved as fixed merchants by name (classifier-provided); a new one is
   seeded with the classifier's default category + recurring, then the transaction inherits
   them — so later edits to the merchant still win.
@@ -209,6 +232,10 @@ as a per-row badge plus a person filter.
 - Trends show up to 12 months ending at the anchor.
 - "Exclude special" removes `is_special` transactions from all analytics (for one-off /
   reimbursable spend like flights or dental that insurance covers).
+- **Activity page (`/transactions`)** filter precedence: explicit *All months* → an exact month
+  → a window (2M/3M/6M/12M ending at the anchor) → **default = the current (latest) month**.
+  The `PeriodSelector currentMonthDefault` prop drives this (no selection = current month, plus
+  an explicit "All months" option). Deep-links carry `?category=<name>` to pre-select a category.
 
 ---
 
@@ -219,14 +246,31 @@ Payments are always excluded. Aggregations are computed in JS over the loaded ro
 - **Count / Avg** are over purchases (amount > 0).
 - **Category & merchant breakdowns**, **top transactions**, **weekday distribution**
   (weekend = Sat/Sun), **merchant concentration** (top-3 share), **12-month series**.
+- **Same-period (apples-to-apples) deltas**: the previous-period figures (`prevGross`,
+  `prevCount`, `prevAvg`) power the KPI tiles' ±% badges. When the current window reaches the
+  **in-progress anchor month**, the previous period's matching month is clamped to the same
+  **day-of-month** (the anchor's latest txn day) so a partial month is never compared against a
+  full one (e.g. June 1–18 vs **May 1–18**, not all of May).
+- **Biggest purchase** tiles/list (`largest`, `topTransactions`) exclude fixed bills via
+  `isExcludedFromBiggest`: the `BIGGEST_PURCHASE_EXCLUDE_CATEGORIES` (= **Home**: mortgage,
+  property tax, hydro, water) plus named recurring merchants in
+  `BIGGEST_PURCHASE_EXCLUDE_MERCHANTS` (substring match, e.g. **Scholars**) so the headline isn't
+  a fixed house/school bill. The same `isExcludedFromBiggest` filter is reused by the **top-3
+  merchant concentration** insight (§7) so fixed bills don't dominate that headline either.
+- **Dashboard category tiles** (`categoryCards`): Groceries, Cars, Shopping, Dining, Kids, Health,
+  Uncategorized — each the current-period spend + same-period ±% delta; clicking one deep-links to
+  `/transactions?category=<name>`. Total spend leads the same tile grid.
 
 ## 7. Insights (`app/lib/insights.ts`)
 
-Pure, computed (no external/LLM calls). Cards include: spending up/down vs previous period,
-top spending theme (category), biggest category mover, new merchants (first ever seen this
-period), top-3 concentration warning, unusual purchase (≥2× a merchant's typical and ≥ $80),
-and a subscription check (recurring merchants that didn't appear this period). Dedicated
-sections expose new merchants, category movers, subscriptions, and outliers.
+Pure, computed (no external/LLM calls). Cards include: top spending theme (category), biggest
+category mover, new merchants (first ever seen this period), top-3 concentration warning
+(fixed bills excluded via `isExcludedFromBiggest`; lists each merchant's amount),
+unusual purchase (≥2× a merchant's typical and ≥ $80), and a subscription check (recurring
+merchants that didn't appear this period). Dedicated sections expose new merchants, category
+movers, subscriptions, and outliers. The overall **spending up/down** verdict is *not* an
+insight card — it lives as subtext on the dashboard's Total-spend KPI tile (same-period
+compare, §6).
 
 ---
 
@@ -291,9 +335,10 @@ goal override, unique on `category_id`).
   user drags the target or a goal (`F` is server-computed and constant across those drags).
 
 ### Fixed categories & AI suggestions
-- `FIXED_CATEGORIES` = **Mortgage, Property Tax** only — the sole always-fixed categories. Every
-  other unavoidable cost (Hydro, Water, Belair, Scholars, subscriptions) is a per-merchant
-  **projected bill** managed on Settings (§8c), not a whole fixed category.
+- `FIXED_CATEGORIES` = **Home** only — the sole always-fixed category (it consolidates Mortgage,
+  Property Tax, Hydro, Water). Hydro & Water therefore have **no** projection rule (they would
+  double-count against the fixed Home total). Every other unavoidable cost (Belair, Scholars,
+  Koodo, subscriptions) is a per-merchant **projected bill** managed on Settings (§8c).
 - **AI initial goals** (`suggestGoals`, the default until the user edits a category): fixed cats =
   average; **Travel and Investment default to ~$0** (no more flights/Airbnb this year, and "pause
   investing" is an explicit lever — Investment is an `expense` here, so it still counts toward net);
@@ -308,9 +353,10 @@ Run after adding the tables: `npm run db:push` (no seed change).
 
 ## 8c. Projected bills, Settings & the dashboard Net-trajectory
 
-Only Mortgage & Property Tax are always-fixed. Every other unavoidable cost is a per-merchant
-**projected bill** the owner can't control but that may not hit every month (Toronto Water,
-Belair insurance, Scholars, Hydro). Modelled in `projection_rules` (one row per merchant, unique
+Only the consolidated **Home** category (Mortgage, Property Tax, Hydro, Water) is always-fixed.
+Every other unavoidable cost is a per-merchant **projected bill** the owner can't control but
+that may not hit every month (Belair insurance, Scholars, Koodo). Modelled in `projection_rules`
+(one row per merchant, unique
 on `merchant_id`) + a `merchants.projection_dismissed` flag. All logic is pure in
 `app/lib/projection.ts`; page `app/settings/page.tsx`, client UI `app/components/ProjectionSettings.tsx`,
 server actions `app/actions/projection.ts`. Run after adding the table: `npm run db:push`.

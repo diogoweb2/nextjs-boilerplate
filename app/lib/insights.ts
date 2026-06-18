@@ -4,6 +4,7 @@ import {
   periodWindow,
   addMonths,
   monthKey,
+  isExcludedFromBiggest,
 } from '@/app/lib/analytics'
 import { formatCurrency } from '@/app/lib/format'
 
@@ -57,23 +58,8 @@ export function buildInsights(
 
   const cards: InsightCard[] = []
 
-  // 1. Overall direction vs previous period.
-  if (prevTotal > 0) {
-    const diff = curTotal - prevTotal
-    const pct = Math.round((diff / prevTotal) * 100)
-    if (Math.abs(pct) >= 3) {
-      cards.push({
-        title: diff > 0 ? `Spending up ${pct}%` : `Spending down ${Math.abs(pct)}%`,
-        detail: (() => {
-          const periodLabel = exactMonth ? 'month' : months === 1 ? 'month' : `${months} months`
-          return diff > 0
-            ? `You spent ${formatCurrency(Math.abs(diff))} more than the previous ${periodLabel}.`
-            : `You spent ${formatCurrency(Math.abs(diff))} less than the previous ${periodLabel}. Nice work.`
-        })(),
-        tone: diff > 0 ? 'up' : 'good',
-      })
-    }
-  }
+  // Overall spending direction now lives as subtext on the Total-spend KPI tile
+  // (see the dashboard), so it's intentionally omitted from the insight cards.
 
   // 2. Top spending theme (category).
   const catTotals = new Map<string, { color: string; amount: number }>()
@@ -140,15 +126,21 @@ export function buildInsights(
     })
   }
 
-  // 5. Concentration.
+  // 5. Concentration. Exclude fixed bills (mortgage, property tax, dental) so the
+  // headline reflects discretionary merchants, not unavoidable monthly charges.
   const merchTotals = new Map<string, number>()
-  for (const t of cur) merchTotals.set(t.merchantName, (merchTotals.get(t.merchantName) ?? 0) + t.amount)
+  for (const t of cur) {
+    if (isExcludedFromBiggest(t)) continue
+    merchTotals.set(t.merchantName, (merchTotals.get(t.merchantName) ?? 0) + t.amount)
+  }
   const topMerch = [...merchTotals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3)
   const topShare = curTotal > 0 ? sum(topMerch.map((m) => m[1])) / curTotal : 0
   if (topShare >= 0.4 && topMerch.length > 0) {
     cards.push({
       title: `Top 3 merchants = ${Math.round(topShare * 100)}% of spend`,
-      detail: `${topMerch.map((m) => m[0]).join(', ')} dominate your spending this period.`,
+      detail: `${topMerch
+        .map(([name, amount]) => `${name} (${formatCurrency(amount)})`)
+        .join(', ')} dominate your spending this period.`,
       tone: 'warn',
     })
   }

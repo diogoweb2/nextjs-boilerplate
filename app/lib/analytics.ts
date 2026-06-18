@@ -134,6 +134,36 @@ function weekdayOf(dateIso: string): number {
   return new Date(`${dateIso}T00:00:00`).getDay()
 }
 
+function dayOfMonth(dateIso: string): number {
+  return Number(dateIso.slice(8, 10))
+}
+
+/** Quick-glance category tiles on the dashboard (label → category name + color). */
+const CATEGORY_CARDS: { label: string; category: string; color: string }[] = [
+  { label: 'Groceries', category: 'Groceries', color: '#16a34a' },
+  { label: 'Car', category: 'Cars', color: '#eab308' },
+  { label: 'Shopping', category: 'Shopping', color: '#8b5cf6' },
+  { label: 'Dining', category: 'Dining', color: '#f97316' },
+  { label: 'Kids', category: 'Kids', color: '#ec4899' },
+  { label: 'Health', category: 'Health', color: '#ef4444' },
+  { label: 'Uncategorized', category: 'Uncategorized', color: '#94a3b8' },
+]
+
+/**
+ * Categories whose fixed bills shouldn't headline the "biggest purchase" tiles
+ * (Home = mortgage, property tax, hydro, water — always the largest line).
+ */
+const BIGGEST_PURCHASE_EXCLUDE_CATEGORIES = new Set(['Home', 'Dental'])
+
+/** Specific recurring merchants to also keep out of "biggest purchase" (lowercased substrings). */
+const BIGGEST_PURCHASE_EXCLUDE_MERCHANTS = ['scholars']
+
+export function isExcludedFromBiggest(t: EnrichedTxn): boolean {
+  if (BIGGEST_PURCHASE_EXCLUDE_CATEGORIES.has(t.categoryName)) return true
+  const name = t.merchantName.toLowerCase()
+  return BIGGEST_PURCHASE_EXCLUDE_MERCHANTS.some((m) => name.includes(m))
+}
+
 // ---------- aggregations ----------
 
 export type Overview = {
@@ -147,7 +177,10 @@ export type Overview = {
   count: number
   avg: number
   prevGross: number
+  prevCount: number
+  prevAvg: number
   largest: { merchant: string; amount: number; date: string; category: string } | null
+  categoryCards: { label: string; name: string; color: string; amount: number; prevAmount: number }[]
   byCategory: { name: string; color: string; amount: number; pct: number }[]
   topMerchants: { id: number; name: string; amount: number; count: number }[]
   topTransactions: {
@@ -185,9 +218,24 @@ export function buildOverview(
   }
   const cur = filtered.filter((t) => inWindow(t, start, end))
 
+  // Same-period (apples-to-apples) comparison. When the current window reaches
+  // the in-progress anchor month, the previous period's matching month is
+  // clamped to the same day-of-month so we never compare a full month against a
+  // partial one (e.g. all of May vs the first 18 days of June).
+  const includesAnchor = end === anchor
+  const anchorDay = filtered
+    .filter((t) => monthKey(t.txnDate) === anchor)
+    .reduce((max, t) => Math.max(max, dayOfMonth(t.txnDate)), 0)
+
   const prevEnd = addMonths(start, -1)
   const prevStart = exactMonth ? prevEnd : addMonths(prevEnd, -(months - 1))
-  const prev = filtered.filter((t) => inWindow(t, prevStart, prevEnd))
+  const prev = filtered.filter((t) => {
+    const ym = monthKey(t.txnDate)
+    if (ym < prevStart || ym > prevEnd) return false
+    // Clamp the month aligned with the partial anchor month to the same days.
+    if (includesAnchor && ym === prevEnd && dayOfMonth(t.txnDate) > anchorDay) return false
+    return true
+  })
 
   const purchases = cur.filter((t) => t.amount > 0)
   const gross = sum(purchases.map((t) => t.amount))
@@ -195,7 +243,19 @@ export function buildOverview(
   const net = gross + refunds
   const count = purchases.length
   const avg = count ? gross / count : 0
-  const prevGross = sum(prev.filter((t) => t.amount > 0).map((t) => t.amount))
+  const prevPurchases = prev.filter((t) => t.amount > 0)
+  const prevGross = sum(prevPurchases.map((t) => t.amount))
+  const prevCount = prevPurchases.length
+  const prevAvg = prevCount ? prevGross / prevCount : 0
+
+  // Per-category quick tiles, current vs the same previous period.
+  const categoryCards = CATEGORY_CARDS.map((c) => ({
+    label: c.label,
+    name: c.category,
+    color: c.color,
+    amount: sum(purchases.filter((t) => t.categoryName === c.category).map((t) => t.amount)),
+    prevAmount: sum(prevPurchases.filter((t) => t.categoryName === c.category).map((t) => t.amount)),
+  }))
 
   // Category breakdown (gross purchases only).
   const catTotals = new Map<string, { color: string; amount: number }>()
@@ -227,7 +287,10 @@ export function buildOverview(
     names: top3.map((m) => m.name),
   }
 
-  const topTransactions = [...purchases]
+  // "Biggest purchase(s)" exclude fixed Home bills (mortgage, property tax, …)
+  // and named recurring bills like Scholars.
+  const topTransactions = purchases
+    .filter((t) => !isExcludedFromBiggest(t))
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 8)
     .map((t) => ({
@@ -279,7 +342,10 @@ export function buildOverview(
     count,
     avg,
     prevGross,
+    prevCount,
+    prevAvg,
     largest,
+    categoryCards,
     byCategory,
     topMerchants,
     topTransactions,
@@ -373,7 +439,16 @@ function emptyOverview(months: number): Overview {
     count: 0,
     avg: 0,
     prevGross: 0,
+    prevCount: 0,
+    prevAvg: 0,
     largest: null,
+    categoryCards: CATEGORY_CARDS.map((c) => ({
+      label: c.label,
+      name: c.category,
+      color: c.color,
+      amount: 0,
+      prevAmount: 0,
+    })),
     byCategory: [],
     topMerchants: [],
     topTransactions: [],

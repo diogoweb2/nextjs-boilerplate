@@ -14,7 +14,7 @@ import { InsightCard } from '@/app/components/InsightCard'
 import { BatchList } from '@/app/components/BatchList'
 import { BurndownTrajectory } from '@/app/components/BurndownTrajectory'
 import { loadAllFlows, buildOverview, availableMonths, anchorMonth, periodWindow } from '@/app/lib/analytics'
-import { buildInsights } from '@/app/lib/insights'
+import { buildInsights, type InsightCard as InsightCardData } from '@/app/lib/insights'
 import { parsePeriodParams } from '@/app/lib/params'
 import { computeBudget, FIXED_CATEGORIES, type CategoryMeta } from '@/app/lib/budget'
 import { computeMonthBurndown, computePeriodBurndown, type BurndownData } from '@/app/lib/projection'
@@ -67,6 +67,55 @@ export default async function Home({
   const months_available = availableMonths(all)
   const insights = buildInsights(all, months, excludeSpecial, exactMonth)
 
+  // Spending direction subtext for the Total-spend tile (same-period compare).
+  const periodWord = exactMonth || months === 1 ? 'month' : 'period'
+  const spendDiff = ov.gross - ov.prevGross
+  const totalSpendHint =
+    ov.prevGross > 0
+      ? spendDiff < 0
+        ? `You spent ${formatCurrency(-spendDiff)} less than the previous ${periodWord} (same period). Nice work.`
+        : spendDiff > 0
+          ? `You spent ${formatCurrency(spendDiff)} more than the previous ${periodWord} (same period).`
+          : `Same as the previous ${periodWord}(same period).`
+      : ov.refunds < 0
+        ? `${formatCurrency(Math.abs(ov.refunds))} refunded`
+        : undefined
+
+  // Headline stats (transactions, avg, biggest) now live as insight cards rather
+  // than KPI tiles. Prepended to the analytical insights so they lead the section.
+  const countDiff = ov.count - ov.prevCount
+  const statInsights: InsightCardData[] = [
+    {
+      title: `${ov.count} purchases`,
+      detail:
+        ov.prevCount > 0
+          ? countDiff === 0
+            ? `Same as the previous ${periodWord}.`
+            : `${Math.abs(countDiff)} ${countDiff > 0 ? 'more' : 'fewer'} than the previous ${periodWord}.`
+          : 'purchases in this period',
+      tone: 'neutral',
+    },
+    {
+      title: `${formatCurrency(ov.avg)} average purchase`,
+      detail:
+        ov.prevAvg > 0
+          ? `Previously ${formatCurrency(ov.prevAvg)} per purchase.`
+          : 'per transaction',
+      tone: 'neutral',
+    },
+  ]
+  if (ov.topTransactions.length) {
+    statInsights.push({
+      title: 'Biggest purchases',
+      detail: ov.topTransactions
+        .slice(0, 3)
+        .map((t) => `${t.merchant} · ${formatCurrencyCompact(t.amount)}`)
+        .join(', '),
+      tone: 'neutral',
+    })
+  }
+  const allInsightCards = ov.hasData ? [...statInsights, ...insights.cards] : []
+
   // Discretionary burn-down for the trajectory widget (day-by-day for a single
   // month, month-by-month otherwise). Budget reflects live /budget settings.
   const meta: CategoryMeta[] = catRows.map((c) => ({ id: c.id, name: c.name, color: c.color, kind: c.kind }))
@@ -77,6 +126,10 @@ export default async function Home({
     savedGoals,
     rules,
   })
+  // Per-category monthly goal, scaled to the displayed window for the tile bars.
+  // "Current"/single-month views show 1 month; multi-month periods show `months`.
+  const periodMonths = exactMonth ? 1 : months
+  const goalByName = new Map(budget.categories.map((c) => [c.name, c.goal]))
   const monthBudget = budget.monthlyCap - budget.unavoidable.total
   let burndown: BurndownData | null = null
   if (budget.hasData && anchor) {
@@ -119,7 +172,7 @@ export default async function Home({
         </Card>
       ) : (
         <div className="flex flex-col gap-5">
-          {/* KPIs */}
+          {/* Total spend + per-category quick tiles — tap to see that category's transactions */}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatCard
               label="Total spend"
@@ -127,15 +180,21 @@ export default async function Home({
               current={ov.gross}
               previous={ov.prevGross}
               invertColors
-              hint={ov.refunds < 0 ? `${formatCurrency(Math.abs(ov.refunds))} refunded` : undefined}
+              hint={totalSpendHint}
             />
-            <StatCard label="Transactions" value={String(ov.count)} hint="purchases in period" />
-            <StatCard label="Avg purchase" value={formatCurrency(ov.avg)} hint="per transaction" />
-            <StatCard
-              label="Biggest purchase"
-              value={ov.largest ? formatCurrencyCompact(ov.largest.amount) : '—'}
-              hint={ov.largest ? ov.largest.merchant : undefined}
-            />
+            {ov.categoryCards.map((c) => (
+              <StatCard
+                key={c.name}
+                label={c.label}
+                value={formatCurrency(c.amount)}
+                current={c.amount}
+                previous={c.prevAmount}
+                invertColors
+                accent={c.color}
+                budget={(goalByName.get(c.name) ?? 0) * periodMonths}
+                href={`/transactions?category=${encodeURIComponent(c.name)}`}
+              />
+            ))}
           </div>
 
           {/* Net trajectory — discretionary burn-down for the selected period */}
@@ -153,11 +212,11 @@ export default async function Home({
           )}
 
           {/* Insights */}
-          {insights.cards.length > 0 && (
+          {allInsightCards.length > 0 && (
             <div>
               <h2 className="mb-2 text-sm font-semibold">Top insights</h2>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {insights.cards.map((c, i) => (
+                {allInsightCards.map((c, i) => (
                   <InsightCard key={i} card={c} />
                 ))}
               </div>

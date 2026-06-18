@@ -5,6 +5,15 @@
  * tab is open. On Android the notification persists in the shade until tapped;
  * tapping focuses an existing tab or opens the dashboard.
  */
+// Take control of already-open tabs as soon as a new worker activates. Without
+// this, tabs loaded before the worker installed stay *uncontrolled*, and
+// client.navigate() below silently rejects on them — so a notification tap just
+// re-focuses whatever page that tab was on (e.g. /settings) instead of the URL
+// in the push. skipWaiting + claim also means an updated sw.js takes over right
+// away rather than after every tab closes.
+self.addEventListener('install', () => self.skipWaiting())
+self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()))
+
 self.addEventListener('push', (event) => {
   let data = {}
   try {
@@ -31,14 +40,25 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close()
   const url = (event.notification.data && event.notification.data.url) || '/'
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+    (async () => {
+      const clientList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
       for (const client of clientList) {
         if ('focus' in client) {
-          client.navigate(url)
+          // Point the existing tab at the push URL, then focus it. navigate()
+          // can still reject on a client we don't control — fall back to a fresh
+          // window so the tap never dead-ends on the wrong page.
+          if ('navigate' in client) {
+            try {
+              await client.navigate(url)
+              return client.focus()
+            } catch {
+              break
+            }
+          }
           return client.focus()
         }
       }
       return self.clients.openWindow(url)
-    })
+    })()
   )
 })

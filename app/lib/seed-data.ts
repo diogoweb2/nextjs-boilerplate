@@ -12,11 +12,16 @@ export const CATEGORY_SEED: CategorySeed[] = [
   // Spending (kind defaults to 'expense').
   { name: 'Groceries', color: '#16a34a' },
   { name: 'Dining', color: '#f97316' },
+  // Transport = public transit only; car costs (fuel, parking, maintenance,
+  // insurance) all live in "Cars".
   { name: 'Transport', color: '#0ea5e9' },
-  { name: 'Fuel', color: '#eab308' },
+  { name: 'Cars', color: '#eab308' },
   { name: 'Shopping', color: '#8b5cf6' },
   { name: 'Health', color: '#ef4444' },
+  { name: 'Dental', color: '#22d3ee' },
   { name: 'Subscriptions', color: '#6366f1' },
+  // Home = "cost to keep the house": Mortgage, Property Tax, Hydro, Water. It is
+  // the single always-fixed/unavoidable category (see app/lib/budget.ts).
   { name: 'Home', color: '#14b8a6' },
   { name: 'Utilities', color: '#64748b' },
   { name: 'Kids', color: '#ec4899' },
@@ -24,8 +29,6 @@ export const CATEGORY_SEED: CategorySeed[] = [
   { name: 'Entertainment', color: '#a855f7' },
   { name: 'Other', color: '#94a3b8' },
   // Bank expenses.
-  { name: 'Mortgage', color: '#b45309', kind: 'expense' },
-  { name: 'Property Tax', color: '#78716c', kind: 'expense' },
   { name: 'Investment', color: '#0d9488', kind: 'expense' },
   { name: 'CC Payment', color: '#9ca3af', kind: 'expense' },
   { name: 'Bank Fees', color: '#71717a', kind: 'expense' },
@@ -52,8 +55,8 @@ export type BrandSeed = {
 
 export const BRAND_SEED: BrandSeed[] = [
   { name: 'Amazon', category: 'Shopping', patterns: ['amazon', 'amzn'] },
-  // Costco gas is fuel; the warehouse is groceries. Longer pattern wins.
-  { name: 'Costco Gas', category: 'Fuel', patterns: ['costco gas'] },
+  // Costco gas is a car cost; the warehouse is groceries. Longer pattern wins.
+  { name: 'Costco Gas', category: 'Cars', patterns: ['costco gas'] },
   { name: 'Costco', category: 'Groceries', patterns: ['costco wholesale'] },
   { name: 'Walmart', category: 'Groceries', patterns: ['wal mart', 'walmart'] },
   { name: 'Fortinos', category: 'Groceries', patterns: ['fortinos'] },
@@ -66,18 +69,18 @@ export const BRAND_SEED: BrandSeed[] = [
   { name: 'Tim Hortons', category: 'Dining', patterns: ['tim hortons'] },
   { name: 'McDonalds', category: 'Dining', patterns: ['mcdonald'] },
   { name: 'Pizza Pizza', category: 'Dining', patterns: ['pizza pizza'] },
-  { name: 'Petro-Canada', category: 'Fuel', patterns: ['petro canada'] },
+  { name: 'Petro-Canada', category: 'Cars', patterns: ['petro canada'] },
   // Canadian Tire gas vs hardware store.
-  { name: 'Canadian Tire Gas', category: 'Fuel', patterns: ['canadian tire gas'] },
-  { name: 'Canadian Tire', category: 'Home', patterns: ['canadian tire'] },
-  { name: 'IKEA', category: 'Home', patterns: ['ikea'] },
+  { name: 'Canadian Tire Gas', category: 'Cars', patterns: ['canadian tire gas'] },
+  { name: 'Canadian Tire', category: 'Shopping', patterns: ['canadian tire'] },
+  { name: 'IKEA', category: 'Shopping', patterns: ['ikea'] },
   { name: 'LCBO', category: 'Shopping', patterns: ['lcbo'] },
   { name: 'Netflix', category: 'Subscriptions', patterns: ['netflix'], recurring: true },
   { name: 'Spotify', category: 'Subscriptions', patterns: ['spotify'], recurring: true },
   { name: 'Anthropic', category: 'Subscriptions', patterns: ['anthropic'], recurring: true },
   { name: 'YouTube', category: 'Subscriptions', patterns: ['youtube'], recurring: true },
   { name: 'Oddbunch', category: 'Groceries', patterns: ['oddbunch'], recurring: true },
-  { name: 'Distributel', category: 'Utilities', patterns: ['distributel'], recurring: true },
+  { name: 'Distributel', category: 'Subscriptions', patterns: ['distributel'], recurring: true },
   // Groceries
   { name: 'Metro', category: 'Groceries', patterns: ['metro'] },
   { name: 'Shoppers Drug Mart', category: 'Health', patterns: ['shoppers drug mart', 'shoppers'] },
@@ -107,7 +110,7 @@ export const BRAND_SEED: BrandSeed[] = [
   { name: 'DSW', category: 'Shopping', patterns: ['dsw'] },
   { name: 'Groupon', category: 'Shopping', patterns: ['groupon'] },
   // Home
-  { name: 'Home Depot', category: 'Home', patterns: ['home depot', 'homedepotca'] },
+  { name: 'Home Depot', category: 'Shopping', patterns: ['home depot', 'homedepotca'] },
   // Kids
   { name: 'Toys R Us', category: 'Kids', patterns: ['toys r us'] },
   { name: 'Mastermind Toys', category: 'Kids', patterns: ['mastermind toys'] },
@@ -123,6 +126,6 @@ export const BRAND_SEED: BrandSeed[] = [
   // Subscriptions
   { name: 'Real-Debrid', category: 'Subscriptions', patterns: ['real debrid'], recurring: true },
   { name: 'Audible', category: 'Subscriptions', patterns: ['audible'], recurring: true },
-  // Fuel
-  { name: 'Circle K', category: 'Fuel', patterns: ['circle k'] },
+  // Cars (fuel)
+  { name: 'Circle K', category: 'Cars', patterns: ['circle k'] },
 ]
