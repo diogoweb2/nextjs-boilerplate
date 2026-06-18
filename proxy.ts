@@ -12,6 +12,12 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next()
   }
 
+  // The push service worker must be a public, non-redirected script — browsers
+  // refuse to register a SW that 307s to the login page. It contains no data.
+  if (pathname === '/sw.js') {
+    return NextResponse.next()
+  }
+
   if (pathname === '/login') {
     // Redirect authenticated users away from login
     const token = request.cookies.get(COOKIE_NAME)?.value
