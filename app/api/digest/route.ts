@@ -38,9 +38,11 @@ export async function POST(request: NextRequest): Promise<Response> {
   if (problem) return problem
 
   const digest = await buildDigest()
-  const push = pushConfigured()
-    ? await sendPushToAll({ title: digest.title, body: digest.body, url: '/' })
-    : { sent: 0, failed: 0 }
+  const hasNewData = digest.newSpend.count > 0
+  const push =
+    hasNewData && pushConfigured()
+      ? await sendPushToAll({ title: digest.title, body: digest.body, url: '/' })
+      : { sent: 0, failed: 0, skipped: !hasNewData }
 
   return Response.json({ ...digest, push }, { status: 200 })
 }

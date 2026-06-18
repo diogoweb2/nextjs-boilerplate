@@ -23,7 +23,7 @@ type DigestResponse = {
   title?: string
   body?: string
   error?: string
-  push?: { sent: number; failed: number }
+  push?: { sent: number; failed: number; skipped?: boolean }
 }
 
 function digestUrl(): string {
@@ -44,11 +44,15 @@ async function main(): Promise<void> {
     throw new Error(`digest endpoint error: ${reason}`)
   }
 
-  const { sent = 0, failed = 0 } = json.push ?? {}
+  const { sent = 0, failed = 0, skipped = false } = json.push ?? {}
   console.log(`${json.title}\n${json.body ?? ''}`)
-  console.log(`\n→ pushed to ${sent} device(s)${failed ? `, ${failed} failed` : ''}`)
-  if (sent === 0) {
-    console.log('  (no subscribed devices — enable notifications in Settings on your phone)')
+  if (skipped) {
+    console.log('\n→ no new transactions — push skipped')
+  } else {
+    console.log(`\n→ pushed to ${sent} device(s)${failed ? `, ${failed} failed` : ''}`)
+    if (sent === 0) {
+      console.log('  (no subscribed devices — enable notifications in Settings on your phone)')
+    }
   }
 }
 
