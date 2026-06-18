@@ -160,6 +160,46 @@ launchctl start com.budget.sync.amex   # optional: trigger once now to test
 
 Logs: `~/Library/Application Support/budget-sync/logs/amex.log`.
 
+## Daily digest notification (11:15am)
+
+After the day's syncs, a separate launchd job pops **one native macOS notification**
+summarizing the budget — so you get a "go check the site" nudge **without keeping a
+browser tab open**. No Playwright: it just GETs the deployed app's `/api/digest` and
+hands the returned `title`/`body` to `osascript`.
+
+What it shows (all computed server-side in `app/lib/digest.ts`, reusing the dashboard
+analytics):
+
+- **Sync health** per card — `Amex ✓ · Master ⚠️ 4d`. Reads each source's last import
+  freshness, so a stale/failed sync surfaces even if its runner never fired.
+- **New spend** — total + count of charges imported in the last ~24h, plus the biggest.
+- **Month pace** — discretionary month-to-date vs budget, with a straight-line month-end
+  projection flagged `⚠️ over` when it exceeds the cap.
+- **New / unusual** — first-seen merchants and a larger-than-usual charge.
+
+The title carries a `✓` / `⚠️` so you can triage at a glance; `⚠️` means a sync is stale
+**or** you're projected to overspend.
+
+Auth reuses the **same `budget-sync-ingest` token** as ingest (no new secret). The digest
+URL is derived from `INGEST_URL` (or set `DIGEST_URL` to override).
+
+```bash
+# Test against the deployed app (prints + notifies):
+INGEST_URL=https://<app>.vercel.app/api/ingest npx tsx sync/digest.ts
+```
+
+Install the schedule (after `INGEST_TOKEN` is set in Vercel — same as ingest):
+
+```bash
+cp sync/launchd/com.budget.sync.digest.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.budget.sync.digest.plist
+launchctl start com.budget.sync.digest   # optional: trigger once now to test
+```
+
+Logs: `~/Library/Application Support/budget-sync/logs/digest.log`.
+Adding **Tangerine** later: add one line to `SYNC_SOURCES` in `app/lib/sync.ts` and the
+digest (and the dashboard badge) pick it up automatically.
+
 ## Next (phases 3–5)
 
 Generalize the adapter for Tangerine/Scotia, then add push/email alerts on failure.

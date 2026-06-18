@@ -1,7 +1,7 @@
 import { revalidatePath } from 'next/cache'
-import { timingSafeEqual } from 'crypto'
 import type { NextRequest } from 'next/server'
 import { ingestStatement } from '@/app/actions/import'
+import { ingestTokenOk } from '@/app/lib/apiToken'
 import type { ImportSource } from '@/app/lib/csv'
 
 /**
@@ -20,26 +20,11 @@ import type { ImportSource } from '@/app/lib/csv'
 
 const IMPORT_SOURCES: ImportSource[] = ['master', 'amex', 'tangerine', 'scotia']
 
-function tokenOk(presented: string | null): boolean {
-  const expected = process.env.INGEST_TOKEN
-  if (!expected || !presented) return false // fail closed if unconfigured
-  const a = Buffer.from(presented)
-  const b = Buffer.from(expected)
-  // timingSafeEqual throws on length mismatch; guard first (length isn't secret).
-  return a.length === b.length && timingSafeEqual(a, b)
-}
-
-function bearer(req: NextRequest): string | null {
-  const header = req.headers.get('authorization')
-  if (header?.startsWith('Bearer ')) return header.slice(7)
-  return req.headers.get('x-ingest-token')
-}
-
 export async function POST(request: NextRequest): Promise<Response> {
   if (!process.env.INGEST_TOKEN) {
     return Response.json({ ok: false, error: 'Ingest endpoint not configured.' }, { status: 503 })
   }
-  if (!tokenOk(bearer(request))) {
+  if (!ingestTokenOk(request)) {
     return Response.json({ ok: false, error: 'Unauthorized.' }, { status: 401 })
   }
 

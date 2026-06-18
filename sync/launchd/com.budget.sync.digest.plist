@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.budget.sync.digest</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/diogolopes/dev/budget/nextjs-boilerplate/sync/digest.sh</string>
+  </array>
+
+  <!-- Fire at 11:15 — ~15 min after the Rogers (11:00) and Amex (11:01) syncs, so
+       the day's imports are in before we summarize. The digest reads each source's
+       last-import freshness, so even if a sync ran late or failed it still reports
+       the right thing (it just shows that source as stale). No browser is opened.
+       Mac OFF at 11:15 → skipped; ASLEEP → runs on next wake (harmless). -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>11</integer>
+    <key>Minute</key><integer>15</integer>
+  </dict>
+
+  <!-- Don't run on load/login, only on the schedule. -->
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/diogolopes/Library/Application Support/budget-sync/logs/digest.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/diogolopes/Library/Application Support/budget-sync/logs/digest.log</string>
+</dict>
+</plist>

@@ -1,9 +1,11 @@
-import { desc } from 'drizzle-orm'
+import { desc, eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { importBatches, categories, budgetGoals } from '@/db/schema'
 import { AppShell, Card, EmptyHint } from '@/app/components/AppShell'
 import { UploadDialog } from '@/app/components/UploadDialog'
 import { PeriodSelector } from '@/app/components/PeriodSelector'
+import { SyncStatusBar } from '@/app/components/SyncStatusBar'
+import { SYNC_SOURCES } from '@/app/lib/sync'
 import { StatCard } from '@/app/components/charts/StatCard'
 import { Donut } from '@/app/components/charts/Donut'
 import { BarList } from '@/app/components/charts/BarList'
@@ -37,14 +39,25 @@ export default async function Home({
   // Default to "Current" (the in-progress month) when nothing is chosen.
   const current = currentParam || (!rawParams.period && !rawParams.month && !rawParams.months)
 
-  const [allFlows, catRows, goalRows, settings, rules, batches] = await Promise.all([
+  const lastSyncQuery = (source: (typeof SYNC_SOURCES)[number]['source']) =>
+    db
+      .select({ createdAt: importBatches.createdAt })
+      .from(importBatches)
+      .where(eq(importBatches.source, source))
+      .orderBy(desc(importBatches.createdAt))
+      .limit(1)
+      .then((rows) => rows[0]?.createdAt?.toISOString() ?? null)
+
+  const [allFlows, catRows, goalRows, settings, rules, batches, syncTimes] = await Promise.all([
     loadAllFlows(),
     db.select().from(categories),
     db.select().from(budgetGoals),
     getBudgetSettings(),
     loadProjectionRules(),
     db.select().from(importBatches).orderBy(desc(importBatches.createdAt)).limit(8),
+    Promise.all(SYNC_SOURCES.map((s) => lastSyncQuery(s.source))),
   ])
+  const syncEntries = SYNC_SOURCES.map((s, i) => ({ label: s.label, lastSync: syncTimes[i] }))
   const all = allFlows.filter((t) => t.flow === 'expense')
 
   const anchor = anchorMonth(all)
@@ -89,7 +102,10 @@ export default async function Home({
               : 'Upload a statement to begin'}
           </p>
         </div>
-        <PeriodSelector showCurrent availableMonths={months_available} />
+        <div className="flex flex-col items-end gap-2">
+          <SyncStatusBar entries={syncEntries} />
+          <PeriodSelector showCurrent availableMonths={months_available} />
+        </div>
       </div>
 
       {!ov.hasData ? (
