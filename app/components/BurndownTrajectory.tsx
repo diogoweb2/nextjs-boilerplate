@@ -1,9 +1,16 @@
 'use client'
 
 import { formatCurrency, formatCurrencyCompact, formatMonth } from '@/app/lib/format'
-import type { BurndownData } from '@/app/lib/projection'
+import { pacePercent, type BurndownData, type PaceLevel } from '@/app/lib/projection'
 
 const PACE_COLOR = 'var(--muted)'
+
+/** Color + badge copy for each of the three pace levels. */
+const LEVEL: Record<PaceLevel, { color: string; label: string }> = {
+  great: { color: 'var(--positive)', label: 'On pace ✓' },
+  close: { color: 'var(--warning)', label: 'Cutting it close ⚠' },
+  below: { color: 'var(--negative)', label: 'Behind pace ✗' },
+}
 
 /**
  * "Discretionary burn-down": money left to spend this period after unavoidable
@@ -12,11 +19,11 @@ const PACE_COLOR = 'var(--muted)'
  * Day-by-day for a single/current month, month-by-month for longer periods.
  */
 export function BurndownTrajectory({ data, periodLabel }: { data: BurndownData; periodLabel: string }) {
-  const { labels, pace, remaining, asOfIndex, budget, spentToDate, onPace, granularity } = data
+  const { labels, pace, remaining, asOfIndex, budget, spentToDate, granularity } = data
   const remainingNow = remaining[asOfIndex] ?? budget
-  const goodColor = 'var(--positive)'
-  const badColor = 'var(--negative)'
-  const lineColor = onPace ? goodColor : badColor
+  const { pct, level } = pacePercent(data)
+  const lineColor = LEVEL[level].color
+  const pctLabel = `${pct >= 0 ? '+' : ''}${pct}%`
 
   const width = 640
   const height = 200
@@ -47,19 +54,24 @@ export function BurndownTrajectory({ data, periodLabel }: { data: BurndownData; 
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <div className="text-2xl font-bold tabular-nums">{formatCurrency(remainingNow)}</div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-bold tabular-nums">{formatCurrency(remainingNow)}</span>
+            <span className="text-base font-semibold tabular-nums" style={{ color: lineColor }}>
+              {pctLabel}
+            </span>
+          </div>
           <div className="text-xs text-[var(--muted)]">
             left of {formatCurrency(budget)} discretionary · {periodLabel}
           </div>
         </div>
         <span
-          className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-            onPace
-              ? 'bg-[color-mix(in_srgb,var(--positive)_12%,transparent)] text-[var(--positive)]'
-              : 'bg-[color-mix(in_srgb,var(--negative)_12%,transparent)] text-[var(--negative)]'
-          }`}
+          className="rounded-full px-2.5 py-1 text-xs font-semibold"
+          style={{
+            color: lineColor,
+            background: `color-mix(in srgb, ${lineColor} 12%, transparent)`,
+          }}
         >
-          {onPace ? 'On pace ✓' : 'Behind pace ✗'} · spent {formatCurrencyCompact(spentToDate)}
+          {LEVEL[level].label} · spent {formatCurrencyCompact(spentToDate)}
         </span>
       </div>
 

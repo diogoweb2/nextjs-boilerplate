@@ -340,7 +340,12 @@ month (e.g. Belair) can't be inferred, so Settings also has a **manual add** of 
 On `/` (`app/components/BurndownTrajectory.tsx`), scoped to the selected period. **Money left to
 spend** = `(B − F) − cumulative discretionary spend`, burning toward $0, vs a straight **pace**
 line (budget → 0 across the window). Discretionary spend **excludes** unavoidable merchants/
-categories. Green when the remaining line is above pace (spending slower than budget), red below.
+categories.
+- **Pace % + three levels** (`pacePercent` in `app/lib/projection.ts`, shared with the push
+  digest): headroom vs the pace line at the as-of point as a signed % of budget —
+  `(remainingNow − paceNow) / budget`. `great` (green, ≥ 5% cushion) → "On pace ✓", `close`
+  (amber/`--warning`, 0–5%) → "Cutting it close ⚠", `below` (red, negative) → "Behind pace ✗".
+  Drives the remaining-line color, the % shown next to the dollar figure, and the badge.
 - **Current / 1M / a single picked month** → **day-by-day** (`computeMonthBurndown`).
 - **3M/6M/12M** → month-by-month over the window (`computePeriodBurndown`, budget = `(B−F)·months`).
 - The budget reflects live `/budget` settings (target, goals), so editing the budget moves the widget.

@@ -39,7 +39,7 @@ export function UploadDialog() {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <UploadButton
           label="Upload Master CSV"
-          subtitle="RBC / World Elite statement"
+          subtitle="World Elite statement"
           onClick={() => masterRef.current?.click()}
         />
         <UploadButton

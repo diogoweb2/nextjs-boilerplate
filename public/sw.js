@@ -17,8 +17,8 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(title, {
       body: data.body || '',
-      icon: '/favicon.ico',
-      badge: '/favicon.ico',
+      icon: '/icon-192.png', // large app artwork shown in the notification
+      badge: '/badge.png', // small glyph in the Android status bar
       tag: 'budget-digest', // collapse repeats into one entry
       renotify: true,
       requireInteraction: true, // stay until tapped (no 3s auto-dismiss)

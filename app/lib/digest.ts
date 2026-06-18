@@ -16,11 +16,11 @@ import { importBatches, transactions, merchants, categories, budgetGoals } from 
 import { loadAllFlows, anchorMonth, type EnrichedTxn } from '@/app/lib/analytics'
 import { buildInsights } from '@/app/lib/insights'
 import { computeBudget, FIXED_CATEGORIES, type CategoryMeta } from '@/app/lib/budget'
-import { computeMonthBurndown, daysInMonth } from '@/app/lib/projection'
+import { computeMonthBurndown, daysInMonth, pacePercent, type PaceLevel } from '@/app/lib/projection'
 import { getBudgetSettings } from '@/app/actions/budget'
 import { loadProjectionRules } from '@/app/actions/projection'
 import { formatCurrency } from '@/app/lib/format'
-import { SYNC_SOURCES, syncStale, formatSyncAge } from '@/app/lib/sync'
+import { SYNC_SOURCES, syncStale } from '@/app/lib/sync'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -30,7 +30,14 @@ export type DigestSpend = {
   count: number
   biggest: { merchant: string; amount: number } | null
 }
-export type DigestPace = { mtd: number; budget: number; projected: number; onPace: boolean }
+export type DigestPace = {
+  mtd: number
+  budget: number
+  projected: number
+  onPace: boolean
+  pct: number
+  level: PaceLevel
+}
 
 export type Digest = {
   /** Anything the owner should act on (a stale sync or projected overspend). */
@@ -112,7 +119,8 @@ export async function buildDigest(now: number = Date.now()): Promise<Digest> {
     const asOfDay = bd.asOfIndex + 1
     // Straight-line the month-to-date discretionary burn to a month-end estimate.
     const projected = asOfDay > 0 ? round2((bd.spentToDate / asOfDay) * daysInMonth(anchor)) : bd.spentToDate
-    pace = { mtd: bd.spentToDate, budget: bd.budget, projected, onPace: bd.onPace }
+    const status = pacePercent(bd)
+    pace = { mtd: bd.spentToDate, budget: bd.budget, projected, onPace: bd.onPace, pct: status.pct, level: status.level }
   }
 
   // 4. New / unusual — first-seen merchants and a larger-than-usual charge this month.
@@ -130,28 +138,19 @@ export async function buildDigest(now: number = Date.now()): Promise<Digest> {
   const overPace = pace ? pace.projected > pace.budget : false
   const alert = sync.some((s) => s.stale) || overPace
 
+  // Title: total spent since the last import (unchanged copy).
   const title = `Budget ${alert ? '⚠️' : '✓'}${
     newSpend.count ? ` — ${formatCurrency(newSpend.total)} new` : ''
   }`
 
-  const lines: string[] = []
-  lines.push(
-    sync.map((s) => `${s.label} ${s.stale ? `⚠️ ${formatSyncAge(s.lastSync, now)}` : '✓'}`).join(' · ')
-  )
-  if (newSpend.count) {
-    const big = newSpend.biggest
-      ? ` · top ${newSpend.biggest.merchant} ${formatCurrency(newSpend.biggest.amount)}`
-      : ''
-    lines.push(`${formatCurrency(newSpend.total)} new (${newSpend.count} charge${newSpend.count > 1 ? 's' : ''})${big}`)
+  // Body: just the pace verdict + headroom %. The label/emoji track the three
+  // levels (great ✓ / close ⚠ / below ✗); the % is the cushion vs the burn line.
+  const PACE_LABEL: Record<PaceLevel, string> = {
+    great: 'On pace ✓',
+    close: 'Cutting it close ⚠',
+    below: 'Behind pace ✗',
   }
-  if (pace) {
-    const verdict = overPace ? `proj ${formatCurrency(pace.projected)} ⚠️ over` : 'on pace'
-    lines.push(`MTD ${formatCurrency(pace.mtd)} / ${formatCurrency(pace.budget)} · ${verdict}`)
-  }
-  const unusual: string[] = []
-  if (newMerchants.length) unusual.push(`New: ${newMerchants.slice(0, 3).join(', ')}`)
-  if (outlier) unusual.push(`⚠️ ${outlier.merchant} ${formatCurrency(outlier.amount)}`)
-  if (unusual.length) lines.push(unusual.join(' · '))
+  const body = pace ? `${PACE_LABEL[pace.level]} · ${pace.pct >= 0 ? '+' : ''}${pace.pct}%` : ''
 
-  return { alert, title, body: lines.join('\n'), sync, newSpend, pace, newMerchants, outlier }
+  return { alert, title, body, sync, newSpend, pace, newMerchants, outlier }
 }

@@ -59,6 +59,27 @@ export type BurndownData = {
   onPace: boolean
 }
 
+/** great = comfortable cushion, close = ahead but near the line, below = behind. */
+export type PaceLevel = 'great' | 'close' | 'below'
+export type PaceStatus = { pct: number; level: PaceLevel }
+
+/** Cushion below this share of budget (but still positive) counts as "close". */
+const CLOSE_THRESHOLD = 5
+
+/**
+ * Headroom vs the even-pace line at the as-of point, as a signed % of the
+ * discretionary budget. Positive means money to spare (above the burn line),
+ * negative means overspending. Shared by the trajectory widget and the push
+ * digest so both report the same number and color.
+ */
+export function pacePercent(data: BurndownData): PaceStatus {
+  const remainingNow = data.remaining[data.asOfIndex] ?? data.budget
+  const paceNow = data.pace[data.asOfIndex] ?? 0
+  const pct = data.budget > 0 ? Math.round(((remainingNow - paceNow) / data.budget) * 100) : 0
+  const level: PaceLevel = pct < 0 ? 'below' : pct < CLOSE_THRESHOLD ? 'close' : 'great'
+  return { pct, level }
+}
+
 // --- tiny month/day helpers (duplicated to stay db-free, as budget.ts does) ---
 function monthKey(d: string): string {
   return d.slice(0, 7)
