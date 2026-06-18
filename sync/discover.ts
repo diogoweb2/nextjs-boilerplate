@@ -29,11 +29,12 @@ import type { LaunchHardening } from './adapters/types'
 
 type SourceConfig = { loginUrl: string; launchOptions?: LaunchHardening }
 
-// Amex must be discovered with the SAME real-Chrome + anti-automation launch the
-// runner uses (see adapters/amex.ts) — both so its bot detection lets you log in
-// and so the trusted profile is built by the same browser channel the daily run
-// reuses.
-const AMEX_HARDENING: LaunchHardening = {
+// Amex and Scotia both sit behind a WAF that blocks an automated browser, so they
+// must be discovered with the SAME real-Chrome + anti-automation launch the runner
+// uses (see adapters/amex.ts, adapters/scotia.ts) — both so the bot detection lets
+// you log in and so the trusted profile is built by the same browser channel the
+// daily run reuses.
+const CHROME_HARDENING: LaunchHardening = {
   channel: 'chrome',
   args: ['--disable-blink-features=AutomationControlled'],
   ignoreDefaultArgs: ['--enable-automation'],
@@ -46,9 +47,12 @@ const SOURCES: Record<string, SourceConfig> = {
     loginUrl:
       'https://www.americanexpress.com/en-ca/account/login?DestPage=' +
       encodeURIComponent('https://global.americanexpress.com/statements'),
-    launchOptions: AMEX_HARDENING,
+    launchOptions: CHROME_HARDENING,
   },
-  scotia: { loginUrl: 'https://www.scotiabank.com/' },
+  scotia: {
+    loginUrl: 'https://www.scotiabank.com/ca/en/personal.html',
+    launchOptions: CHROME_HARDENING,
+  },
 }
 
 const source = process.argv[2] ?? 'rogers'
