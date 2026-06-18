@@ -66,7 +66,11 @@ export function StatCard({
           </span>
         )}
       </div>
-      {delta && <span className="text-[10px] text-[var(--muted)]">vs previous period</span>}
+      {delta && (
+        <span className="text-[10px] text-[var(--muted)]">
+          vs previous period – {formatCurrency(previous!)}
+        </span>
+      )}
       {hint && <span className="text-xs text-[var(--muted)]">{hint}</span>}
       {showBudget && (
         <div className="mt-2 flex flex-col gap-1">
