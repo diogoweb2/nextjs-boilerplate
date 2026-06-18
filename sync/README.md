@@ -160,6 +160,50 @@ launchctl start com.budget.sync.amex   # optional: trigger once now to test
 
 Logs: `~/Library/Application Support/budget-sync/logs/amex.log`.
 
+## Scotia (same pattern as Rogers/Amex)
+
+Scotia (chequing) reuses the same machinery — only the adapter (`adapters/scotia.ts`) and
+source key differ. The app already parses the Scotia CSV (`source: 'scotia'` in
+`app/lib/csv.ts`), so there's no new parser.
+
+The logged-out login form lives on a one-time `oauth_key` URL we can't hardcode, so the adapter
+sends the trusted session straight to `secure.scotiabank.com/my-accounts` and lets Scotia bounce
+an expired session to a freshly-keyed login screen. To reach the chequing statement it then
+clicks the account from that list by matching the link's `href` (`/accounts/chequing/`) — so no
+account number lands in this **public** repo, and it survives Scotia rotating the opaque
+per-account path token.
+
+One-time Keychain items (same shape as Rogers/Amex — just credentials):
+
+```bash
+security add-generic-password -a "scotia" -s "budget-sync-scotia"      -w   # password
+security add-generic-password -a "scotia" -s "budget-sync-scotia-user" -w   # username/card #
+```
+
+Run it:
+
+```bash
+npx tsx sync/run-scotia.ts             # headed, watch it work
+npx tsx sync/run-scotia.ts --headless  # headless
+```
+
+It logs in (username/card # + password), opens the account's Download kebab, picks
+"Download as CSV", and POSTs it to the ingest endpoint as `scotia`. Device trust persists in the
+profile, so MFA ("Sign in to the app to confirm it's you") is skipped on daily runs — and
+escalates to a visible browser + notification if it ever appears, identical to Rogers/Amex.
+
+Schedule (launchd): `run-scotia.sh` + `launchd/com.budget.sync.scotia.plist`, firing at **11:02**
+— after Rogers (11:00) and Amex (11:01) so the headed runs don't collide in the GUI session.
+Install it the same way:
+
+```bash
+cp sync/launchd/com.budget.sync.scotia.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.budget.sync.scotia.plist
+launchctl start com.budget.sync.scotia   # optional: trigger once now to test
+```
+
+Logs: `~/Library/Application Support/budget-sync/logs/scotia.log`.
+
 ## Daily digest notification (11:15am, Web Push)
 
 After the day's syncs, a separate launchd job triggers a **Web Push** notification with a
