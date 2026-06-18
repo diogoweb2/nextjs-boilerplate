@@ -33,7 +33,7 @@ async function open(
     viewport: { width: 1280, height: 900 },
     ...adapter.launchOptions,
   })
-  if (adapter.launchOptions) await applyStealth(context)
+  if (adapter.launchOptions && adapter.applyStealthScript !== false) await applyStealth(context)
   const page = context.pages()[0] ?? (await context.newPage())
   return { context, page }
 }

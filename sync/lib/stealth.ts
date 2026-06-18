@@ -21,6 +21,20 @@ export const HARDENED_LAUNCH: LaunchHardening = {
   ignoreDefaultArgs: ['--enable-automation'],
 }
 
+/**
+ * Like HARDENED_LAUNCH but on real Google Chrome (`channel`) instead of bundled
+ * Chromium. Some sites only render / pass their bot checks on a genuine Chrome
+ * build — e.g. Tangerine's Angular app renders a blank page in bundled Chromium
+ * but works in real Chrome. The tradeoff vs. bundled Chromium is that an
+ * unattended run can collide with an already-open Chrome window; the isolated
+ * per-source `user-data-dir` keeps it a SEPARATE instance, which avoids that.
+ */
+export const HARDENED_CHROME_LAUNCH: LaunchHardening = {
+  channel: 'chrome',
+  args: ['--disable-blink-features=AutomationControlled'],
+  ignoreDefaultArgs: ['--enable-automation'],
+}
+
 /** Runs in every page before its own scripts; erases common automation tells. */
 const STEALTH_INIT = `
   Object.defineProperty(navigator, 'webdriver', { get: () => undefined });

@@ -4,17 +4,18 @@
  * staleness threshold so the two never drift.
  */
 
-export type SyncSource = { source: 'amex' | 'master' | 'scotia'; label: string }
+export type SyncSource = { source: 'amex' | 'master' | 'scotia' | 'tangerine'; label: string }
 
 /**
  * Auto-synced sources, in display order. Each maps to an `import_batches`
- * source key. Add Tangerine here (`{ source: 'tangerine', label: 'Tangerine' }`)
- * once its sync runner lands — every consumer picks it up automatically.
+ * source key — every consumer (dashboard badge, daily digest) picks up new
+ * entries automatically.
  */
 export const SYNC_SOURCES: SyncSource[] = [
   { source: 'amex', label: 'Amex' },
   { source: 'master', label: 'Master' },
   { source: 'scotia', label: 'Scotia' },
+  { source: 'tangerine', label: 'Tangerine' },
 ]
 
 /** A sync older than this is "stale" — shown in red and flagged in the digest. */

@@ -28,6 +28,14 @@ export type Adapter = {
   readonly loginUrl: string
   /** Optional per-site launch hardening (real Chrome / anti-automation flags). */
   readonly launchOptions?: LaunchHardening
+  /**
+   * Whether to inject the stealth init script (which patches navigator.webdriver/
+   * plugins/languages) when `launchOptions` are set. Defaults to true. Sites with
+   * anti-tamper fingerprinting (e.g. Tangerine's iovation/ThreatMetrix) detect the
+   * patched `navigator` and refuse to render, so they opt OUT and rely on real
+   * Chrome + the anti-automation launch flags alone.
+   */
+  readonly applyStealthScript?: boolean
   /** True when the username field is showing → session expired, must log in. */
   needsLogin(page: Page): Promise<boolean>
   /** Fill + submit the login form. No-op if already authenticated. */

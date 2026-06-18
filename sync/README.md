@@ -204,6 +204,49 @@ launchctl start com.budget.sync.scotia   # optional: trigger once now to test
 
 Logs: `~/Library/Application Support/budget-sync/logs/scotia.log`.
 
+## Tangerine (same pattern as Rogers/Amex/Scotia)
+
+Tangerine reuses the same machinery — only the adapter (`adapters/tangerine.ts`) and source key
+differ. The app already parses the Tangerine CSV (`source: 'tangerine'` in `app/lib/csv.ts`), so
+there's no new parser.
+
+Two Tangerine-specific wrinkles the adapter handles: login is **two steps** (Login ID → "Next" →
+password → "Log In") on an Angular Material SPA, and clicking **Download opens the CSV in a new
+tab** — so the runner listens for the download on the browser *context*, not just the page. On the
+Login ID step it also flips "Remember me on this device" on, which keeps 2-step verification
+skipped on daily runs (and the saved ID then shows as a dropdown, so no typing is needed).
+
+One-time Keychain items (same shape as the others — just credentials):
+
+```bash
+security add-generic-password -a "tangerine" -s "budget-sync-tangerine"      -w   # password
+security add-generic-password -a "tangerine" -s "budget-sync-tangerine-user" -w   # login ID
+```
+
+Run it:
+
+```bash
+npx tsx sync/run-tangerine.ts             # headed, watch it work
+npx tsx sync/run-tangerine.ts --headless  # headless
+```
+
+It logs in (two steps), opens the download page, picks "Excel, other software (CSV)", downloads,
+and POSTs it to the ingest endpoint as `tangerine`. Device trust persists in the profile, so MFA
+is skipped on daily runs (and escalates to a visible browser + notification if it ever appears,
+identical to the others).
+
+Schedule (launchd): `run-tangerine.sh` + `launchd/com.budget.sync.tangerine.plist`, firing at
+**11:03** — after Rogers (11:00), Amex (11:01), and Scotia (11:02) so the headed runs don't
+collide in the GUI session. Install it the same way:
+
+```bash
+cp sync/launchd/com.budget.sync.tangerine.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.budget.sync.tangerine.plist
+launchctl start com.budget.sync.tangerine   # optional: trigger once now to test
+```
+
+Logs: `~/Library/Application Support/budget-sync/logs/tangerine.log`.
+
 ## Daily digest notification (11:15am, Web Push)
 
 After the day's syncs, a separate launchd job triggers a **Web Push** notification with a
@@ -273,10 +316,10 @@ Logs: `~/Library/Application Support/budget-sync/logs/digest.log`. The launchd j
 already is for the syncs. If the trigger itself fails, the runner fires a local macOS
 banner so a broken pipeline still surfaces.
 
-Adding **Tangerine** later: add one line to `SYNC_SOURCES` in `app/lib/sync.ts` and the
-digest (and the dashboard badge) pick it up automatically.
+Adding a new source: add one line to `SYNC_SOURCES` in `app/lib/sync.ts` and the digest (and
+the dashboard badge) pick it up automatically.
 
 ## Next (phases 3–5)
 
-Generalize the adapter for Tangerine/Scotia, then add push/email alerts on failure.
-See `AUTO_SYNC_PLAN.md` §10.
+All four sources (Rogers, Amex, Scotia, Tangerine) are live. Remaining: push/email alerts on
+failure. See `AUTO_SYNC_PLAN.md` §10.

@@ -27,13 +27,19 @@ import { applyStealth } from './lib/stealth'
 
 import type { LaunchHardening } from './adapters/types'
 
-type SourceConfig = { loginUrl: string; launchOptions?: LaunchHardening }
+type SourceConfig = {
+  loginUrl: string
+  launchOptions?: LaunchHardening
+  // Skip the stealth init script (Tangerine's anti-tamper blanks the page when
+  // navigator is patched — see adapters/tangerine.ts). Defaults to applied.
+  applyStealthScript?: boolean
+}
 
-// Amex and Scotia both sit behind a WAF that blocks an automated browser, so they
-// must be discovered with the SAME real-Chrome + anti-automation launch the runner
-// uses (see adapters/amex.ts, adapters/scotia.ts) — both so the bot detection lets
-// you log in and so the trusted profile is built by the same browser channel the
-// daily run reuses.
+// Amex, Scotia, and Tangerine all sit behind bot detection that blocks an automated
+// browser, so they must be discovered with the SAME real-Chrome + anti-automation
+// launch the runner uses (see their adapters) — both so the detection lets you log
+// in and so the trusted profile is built by the same browser channel the daily run
+// reuses.
 const CHROME_HARDENING: LaunchHardening = {
   channel: 'chrome',
   args: ['--disable-blink-features=AutomationControlled'],
@@ -42,7 +48,11 @@ const CHROME_HARDENING: LaunchHardening = {
 
 const SOURCES: Record<string, SourceConfig> = {
   rogers: { loginUrl: 'https://selfserve.rogersbank.com/sign-in?locale=en' },
-  tangerine: { loginUrl: 'https://www.tangerine.ca/app/#/login/login-id?locale=en_CA' },
+  tangerine: {
+    loginUrl: 'https://www.tangerine.ca/app/#/login/login-id?locale=en_CA',
+    launchOptions: CHROME_HARDENING,
+    applyStealthScript: false,
+  },
   amex: {
     loginUrl:
       'https://www.americanexpress.com/en-ca/account/login?DestPage=' +
@@ -151,7 +161,7 @@ async function main(): Promise<void> {
     viewport: { width: 1280, height: 900 },
     ...config.launchOptions,
   })
-  if (config.launchOptions) await applyStealth(context)
+  if (config.launchOptions && config.applyStealthScript !== false) await applyStealth(context)
 
   let current: Page
   const wire = (page: Page) => {

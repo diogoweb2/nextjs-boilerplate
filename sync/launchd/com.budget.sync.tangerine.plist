@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.budget.sync.tangerine</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/diogolopes/dev/budget/nextjs-boilerplate/sync/run-tangerine.sh</string>
+  </array>
+
+  <!-- Fire once a day at 11:03 — after Rogers (11:00), Amex (11:01), and Scotia
+       (11:02) so the headed browser runs don't fight over the GUI session at the
+       same instant. If the Mac is OFF at that time the run is simply skipped (no
+       catch-up). If it's ASLEEP, launchd runs it on the next wake — harmless
+       because re-imports dedup to zero. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>11</integer>
+    <key>Minute</key><integer>3</integer>
+  </dict>
+
+  <!-- Don't run on load/login, only on the schedule. -->
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/diogolopes/Library/Application Support/budget-sync/logs/tangerine.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/diogolopes/Library/Application Support/budget-sync/logs/tangerine.log</string>
+</dict>
+</plist>
