@@ -10,14 +10,14 @@
     <string>/Users/diogolopes/dev/budget/nextjs-boilerplate/sync/run-scotia.sh</string>
   </array>
 
-  <!-- Fire once a day at 11:02 — one minute after Amex (11:01), two after Rogers
-       (11:00), so the headed browser runs don't fight over the GUI session at the
+  <!-- Fire once a day at 10:02 — one minute after Amex (10:01), two after Rogers
+       (10:00), so the headed browser runs don't fight over the GUI session at the
        same instant. If the Mac is OFF at that time the run is simply skipped (no
        catch-up). If it's ASLEEP, launchd runs it on the next wake — harmless
        because re-imports dedup to zero. -->
   <key>StartCalendarInterval</key>
   <dict>
-    <key>Hour</key><integer>11</integer>
+    <key>Hour</key><integer>10</integer>
     <key>Minute</key><integer>2</integer>
   </dict>
 

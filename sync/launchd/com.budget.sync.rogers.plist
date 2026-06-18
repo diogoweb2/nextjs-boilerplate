@@ -10,12 +10,12 @@
     <string>/Users/diogolopes/dev/budget/nextjs-boilerplate/sync/run-rogers.sh</string>
   </array>
 
-  <!-- Fire once a day at 11:00. If the Mac is OFF at that time the run is simply
+  <!-- Fire once a day at 10:00. If the Mac is OFF at that time the run is simply
        skipped (no catch-up). If it's ASLEEP, launchd runs it on the next wake —
        which is harmless because re-imports dedup to zero. -->
   <key>StartCalendarInterval</key>
   <dict>
-    <key>Hour</key><integer>11</integer>
+    <key>Hour</key><integer>10</integer>
     <key>Minute</key><integer>0</integer>
   </dict>
 
