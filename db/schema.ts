@@ -233,6 +233,19 @@ export const pushSubscriptions = pgTable('push_subscriptions', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 })
 
+/**
+ * Brute-force throttle for the single shared login password. One row per client
+ * IP: `failures` counts wrong passwords within a rolling window (windowStart),
+ * and once the threshold is crossed `lockedUntil` blocks further attempts until
+ * it elapses (see app/lib/rate-limit.ts). A successful login deletes the row.
+ */
+export const loginAttempts = pgTable('login_attempts', {
+  ip: text('ip').primaryKey(),
+  failures: integer('failures').notNull().default(0),
+  windowStart: timestamp('window_start').defaultNow().notNull(),
+  lockedUntil: timestamp('locked_until'),
+})
+
 export const categoriesRelations = relations(categories, ({ many }) => ({
   merchants: many(merchants),
   transactions: many(transactions),
@@ -279,3 +292,4 @@ export type BudgetSettings = typeof budgetSettings.$inferSelect
 export type BudgetGoal = typeof budgetGoals.$inferSelect
 export type ProjectionRule = typeof projectionRules.$inferSelect
 export type PushSubscriptionRow = typeof pushSubscriptions.$inferSelect
+export type LoginAttempt = typeof loginAttempts.$inferSelect
