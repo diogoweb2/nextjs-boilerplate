@@ -13,10 +13,11 @@ import { WeekdayChart } from '@/app/components/charts/WeekdayChart'
 import { InsightCard } from '@/app/components/InsightCard'
 import { BatchList } from '@/app/components/BatchList'
 import { BurndownTrajectory } from '@/app/components/BurndownTrajectory'
+import { NetGoalTrajectory } from '@/app/components/NetGoalTrajectory'
 import { loadAllFlows, buildOverview, availableMonths, anchorMonth, periodWindow } from '@/app/lib/analytics'
 import { buildInsights, type InsightCard as InsightCardData } from '@/app/lib/insights'
 import { parsePeriodParams } from '@/app/lib/params'
-import { computeBudget, FIXED_CATEGORIES, type CategoryMeta } from '@/app/lib/budget'
+import { computeBudget, computeNetTrajectory, FIXED_CATEGORIES, type CategoryMeta } from '@/app/lib/budget'
 import { computeMonthBurndown, computePeriodBurndown, type BurndownData } from '@/app/lib/projection'
 import { getBudgetSettings } from '@/app/actions/budget'
 import { loadProjectionRules } from '@/app/actions/projection'
@@ -142,6 +143,10 @@ export default async function Home({
     }
   }
 
+  // Year-to-date net progression toward the year-end net goal. Always the full
+  // calendar year (independent of the period selector) — it's a yearly goal.
+  const netTrajectory = computeNetTrajectory(allFlows, settings.targetNet)
+
   return (
     <AppShell>
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -210,6 +215,20 @@ export default async function Home({
               }
             >
               <BurndownTrajectory data={burndown} periodLabel={ov.periodLabel} />
+            </Card>
+          )}
+
+          {/* Year-end net goal — YTD net progression toward the Dec 31 target */}
+          {netTrajectory.hasData && (
+            <Card
+              title="Year-end net goal"
+              action={
+                <a href="/budget" className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]">
+                  set goal →
+                </a>
+              }
+            >
+              <NetGoalTrajectory data={netTrajectory} />
             </Card>
           )}
 

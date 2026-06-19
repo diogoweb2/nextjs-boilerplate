@@ -142,6 +142,90 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100
 }
 
+export type NetTrajectoryPoint = { date: string; net: number }
+
+export type NetTrajectory = {
+  hasData: boolean
+  year: string
+  targetNet: number
+  /** Daily cumulative net (income − spend) for the calendar year, one point per
+   *  day that has activity. The final point equals `ytdNet`. */
+  points: NetTrajectoryPoint[]
+  /** Jan 1 of the year and the latest transaction date — the plotted x-range. */
+  startDate: string
+  endDate: string
+  /** Latest cumulative net (matches the YTD-net headline). */
+  currentNet: number
+  /** Highest and lowest the running net reached this year. */
+  peak: number
+  trough: number
+  /** Per-month net (income − spend), best first — the months you saved most. */
+  monthlyNet: { ym: string; net: number }[]
+}
+
+/**
+ * Day-by-day cumulative net (income − spend) across the current calendar year,
+ * for the Overview "Year-end net goal" progression chart. Uses the same income/
+ * spend definition as `ytdNet` above, so the last point matches that headline.
+ * No future projection — it only plots what's happened year-to-date.
+ */
+export function computeNetTrajectory(all: EnrichedTxn[], targetNet: number): NetTrajectory {
+  const anchor = anchorMonth(all)
+  const empty: NetTrajectory = {
+    hasData: false, year: '', targetNet, points: [], startDate: '', endDate: '',
+    currentNet: 0, peak: 0, trough: 0, monthlyNet: [],
+  }
+  if (!anchor) return empty
+  const year = anchor.slice(0, 4)
+
+  // Per-day net delta (income stored negative → −amount is the inflow; positive
+  // expenses subtract). Mirrors incomeOver/spendOver so the total ties to ytdNet.
+  const dayDelta = new Map<string, number>()
+  for (const t of all) {
+    if (t.txnDate.slice(0, 4) !== year) continue
+    let delta = 0
+    if (t.flow === 'income') delta = -t.amount
+    else if (t.flow === 'expense' && t.amount > 0) delta = -t.amount
+    else continue
+    dayDelta.set(t.txnDate, (dayDelta.get(t.txnDate) ?? 0) + delta)
+  }
+  const dates = [...dayDelta.keys()].sort()
+  if (dates.length === 0) return empty
+
+  let running = 0
+  let peak = 0
+  let trough = 0
+  const points = dates.map((date) => {
+    running += dayDelta.get(date)!
+    peak = Math.max(peak, running)
+    trough = Math.min(trough, running)
+    return { date, net: round2(running) }
+  })
+
+  // Per-month net (income − spend), most-saved first.
+  const monthSums = new Map<string, number>()
+  for (const [date, delta] of dayDelta) {
+    const ym = date.slice(0, 7)
+    monthSums.set(ym, (monthSums.get(ym) ?? 0) + delta)
+  }
+  const monthlyNet = [...monthSums.entries()]
+    .map(([ym, net]) => ({ ym, net: round2(net) }))
+    .sort((a, b) => b.net - a.net)
+
+  return {
+    hasData: true,
+    year,
+    targetNet,
+    points,
+    startDate: `${year}-01-01`,
+    endDate: dates[dates.length - 1],
+    currentNet: round2(running),
+    peak: round2(peak),
+    trough: round2(trough),
+    monthlyNet,
+  }
+}
+
 export function computeBudget(
   all: EnrichedTxn[],
   categoriesMeta: CategoryMeta[],

@@ -23,7 +23,7 @@ export default async function TransactionsPage({
   const rawMonths = Number(Array.isArray(sp.months) ? sp.months[0] : sp.months)
   const monthsWindow = [1, 2, 3, 6, 12].includes(rawMonths) ? rawMonths : null
 
-  const [rows, catRows] = await Promise.all([
+  const [rows, catRows, monthRows] = await Promise.all([
     db
       .select({
         id: transactions.id,
@@ -47,6 +47,7 @@ export default async function TransactionsPage({
       .orderBy(desc(transactions.txnDate))
       .limit(2000),
     db.select().from(categories).orderBy(categories.name),
+    db.select({ txnDate: transactions.txnDate }).from(transactions),
   ])
 
   const catMap = new Map(catRows.map((c) => [c.id, c]))
@@ -72,9 +73,7 @@ export default async function TransactionsPage({
     }
   })
 
-  const months_available = Array.from(new Set(allTxns.map((t) => t.txnDate.slice(0, 7))))
-    .sort()
-    .reverse()
+  const months_available = Array.from(new Set(monthRows.map((r) => r.txnDate.slice(0, 7)))).sort().reverse()
   const anchor = months_available[0] ?? null
 
   // Period filter precedence: explicit "all months" → everything; an exact month
