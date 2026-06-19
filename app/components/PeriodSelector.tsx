@@ -30,6 +30,7 @@ export function PeriodSelector({
   currentMonthDefault = false,
   availableMonths,
   periodOptions,
+  extraOptions,
 }: {
   showSpecialToggle?: boolean
   showCurrent?: boolean
@@ -37,6 +38,8 @@ export function PeriodSelector({
   currentMonthDefault?: boolean
   availableMonths?: string[]
   periodOptions?: number[]
+  /** Additional pill buttons that set ?period=X instead of ?months=N. */
+  extraOptions?: Array<{ label: string; period: string }>
 }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -47,10 +50,12 @@ export function PeriodSelector({
   const months = Number(params.get('months')) || 2
   const excludeSpecial = params.get('special') === '0'
   const selectedMonth = params.get('month') ?? ''
+  const currentPeriod = params.get('period') ?? ''
+  const isExtraPeriod = Boolean(extraOptions?.some((o) => o.period === currentPeriod))
   // "Current" is the default on pages that offer it when nothing else is chosen.
   const isCurrent =
     showCurrent &&
-    (params.get('period') === 'current' ||
+    (currentPeriod === 'current' ||
       (!params.get('period') && !selectedMonth && !params.get('months')))
 
   const update = (next: Record<string, string | null>) => {
@@ -112,8 +117,22 @@ export function PeriodSelector({
             className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${
               !hasExactMonth &&
               !isCurrent &&
+              !isExtraPeriod &&
               months === o.months &&
               (!currentMonthDefault || hasMonthsParam)
+                ? 'bg-[var(--accent)] text-[var(--accent-fg)]'
+                : 'text-[var(--muted)] hover:text-[var(--foreground)]'
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
+        {extraOptions?.map((o) => (
+          <button
+            key={o.period}
+            onClick={() => update({ period: o.period, months: null, month: null })}
+            className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${
+              !hasExactMonth && currentPeriod === o.period
                 ? 'bg-[var(--accent)] text-[var(--accent-fg)]'
                 : 'text-[var(--muted)] hover:text-[var(--foreground)]'
             }`}

@@ -199,7 +199,7 @@ export default async function Home({
                 invertColors
                 accent={c.color}
                 budget={(goalByName.get(c.name) ?? 0) * periodMonths}
-                href={`/transactions?category=${encodeURIComponent(c.name)}`}
+                href={`/transactions?category=${encodeURIComponent(c.name)}${month ? `&month=${month}` : ''}`}
               />
               ))}
           </div>

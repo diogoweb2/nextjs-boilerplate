@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { AppShell, Card, EmptyHint } from '@/app/components/AppShell'
 import { PeriodSelector } from '@/app/components/PeriodSelector'
 import { LineChart } from '@/app/components/charts/LineChart'
-import { loadEnriched, buildTrends } from '@/app/lib/analytics'
+import { loadEnriched, buildTrends, anchorMonth, availableMonths } from '@/app/lib/analytics'
 import { parsePeriodParams } from '@/app/lib/params'
 import { formatCurrency, formatMonth } from '@/app/lib/format'
 
@@ -13,8 +13,26 @@ export default async function TrendsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
-  const { months, excludeSpecial } = parsePeriodParams(await searchParams)
+  const rawParams = await searchParams
+  const { months: parsedMonths, excludeSpecial } = parsePeriodParams(rawParams)
+  const rawPeriod = Array.isArray(rawParams.period) ? rawParams.period[0] : rawParams.period
+
   const all = await loadEnriched()
+
+  let months = parsedMonths
+  if (rawPeriod === 'year' || rawPeriod === 'all') {
+    const anchor = anchorMonth(all)
+    if (anchor) {
+      if (rawPeriod === 'year') {
+        // Jan of anchor year through anchor month (inclusive)
+        months = Number(anchor.split('-')[1])
+      } else {
+        // All months with any data
+        months = availableMonths(all).length || parsedMonths
+      }
+    }
+  }
+
   const trends = buildTrends(all, months, excludeSpecial)
 
   const totalValues = trends.total.map((t) => t.amount)
@@ -36,7 +54,13 @@ export default async function TrendsPage({
           <h1 className="text-xl font-bold tracking-tight">Trends</h1>
           <p className="text-sm text-[var(--muted)]">How spending evolves month over month</p>
         </div>
-        <PeriodSelector periodOptions={[2, 3, 6, 12]} />
+        <PeriodSelector
+          periodOptions={[2, 3, 6, 12]}
+          extraOptions={[
+            { label: 'YTD', period: 'year' },
+            { label: 'All', period: 'all' },
+          ]}
+        />
       </div>
 
       {!trends.hasData ? (
@@ -70,9 +94,12 @@ export default async function TrendsPage({
                           />
                           {c.name}
                         </span>
-                        <span className="tabular-nums text-[var(--muted)]">
-                          {formatCurrency(c.total)}
-                        </span>
+                        <div className="flex flex-col items-end">
+                          <span className="tabular-nums">{formatCurrency(c.total)}</span>
+                          <span className="tabular-nums text-xs text-[var(--muted)]">
+                            avg {formatCurrency(c.series.reduce((a, b) => a + b, 0) / c.series.length)}/mo
+                          </span>
+                        </div>
                       </div>
                       {/* Mini sparkline bars */}
                       <div className="flex h-8 items-end gap-0.5">
