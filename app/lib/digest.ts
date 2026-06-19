@@ -56,7 +56,7 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100
 }
 
-export async function buildDigest(now: number = Date.now()): Promise<Digest> {
+export async function buildDigest(now: number = Date.now(), failedSources: string[] = []): Promise<Digest> {
   const [allFlows, catRows, goalRows, settings, rules] = await Promise.all([
     loadAllFlows(),
     db.select().from(categories),
@@ -136,21 +136,22 @@ export async function buildDigest(now: number = Date.now()): Promise<Digest> {
 
   // ----- compose the notification -----
   const overPace = pace ? pace.projected > pace.budget : false
-  const alert = sync.some((s) => s.stale) || overPace
+  const alert = sync.some((s) => s.stale) || overPace || failedSources.length > 0
 
   // Title: total spent since the last import (unchanged copy).
   const title = `Budget ${alert ? '⚠️' : '✓'}${
     newSpend.count ? ` — ${formatCurrency(newSpend.total)} new` : ''
   }`
 
-  // Body: just the pace verdict + headroom %. The label/emoji track the three
-  // levels (great ✓ / close ⚠ / below ✗); the % is the cushion vs the burn line.
+  // Body: pace verdict + headroom %, then a failed-sync line if any runners gave up.
   const PACE_LABEL: Record<PaceLevel, string> = {
     great: 'On pace ✓',
     close: 'Cutting it close ⚠',
     below: 'Behind pace ✗',
   }
-  const body = pace ? `${PACE_LABEL[pace.level]} · ${pace.pct >= 0 ? '+' : ''}${pace.pct}%` : ''
+  const paceStr = pace ? `${PACE_LABEL[pace.level]} · ${pace.pct >= 0 ? '+' : ''}${pace.pct}%` : ''
+  const failStr = failedSources.length > 0 ? `Failed: ${failedSources.join(', ')}` : ''
+  const body = [paceStr, failStr].filter(Boolean).join('\n')
 
   return { alert, title, body, sync, newSpend, pace, newMerchants, outlier }
 }

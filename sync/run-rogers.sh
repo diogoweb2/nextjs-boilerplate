@@ -14,9 +14,19 @@ TSX="$REPO/node_modules/tsx/dist/cli.mjs"
 # Point the runner at the deployed app's ingest endpoint.
 export INGEST_URL="https://nextjs-boilerplate-nu-black-85.vercel.app/api/ingest"
 
+STATUS_DIR="$HOME/Library/Application Support/budget-sync/status"
+mkdir -p "$STATUS_DIR"
+
 cd "$REPO"
 echo "===== budget-sync rogers @ $(date) ====="
 # NOTE: runs HEADED (no --headless). Rogers' reCAPTCHA rejects headless logins;
 # a headed run in the trust-built profile passes. A browser window appears for
 # ~30s at run time. Requires the user to be logged into the GUI session.
-exec "$NODE" "$TSX" "$REPO/sync/run-rogers.ts"
+status=0
+"$NODE" "$TSX" "$REPO/sync/run-rogers.ts" || status=$?
+if [ "$status" -eq 0 ]; then
+  echo "ok" > "$STATUS_DIR/rogers"
+else
+  echo "fail" > "$STATUS_DIR/rogers"
+  exit "$status"
+fi

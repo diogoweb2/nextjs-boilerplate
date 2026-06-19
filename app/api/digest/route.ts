@@ -37,7 +37,12 @@ export async function POST(request: NextRequest): Promise<Response> {
   const problem = authProblem(request)
   if (problem) return problem
 
-  const digest = await buildDigest()
+  const body = await request.json().catch(() => ({})) as { failedSources?: unknown }
+  const failedSources = Array.isArray(body.failedSources)
+    ? (body.failedSources as unknown[]).filter((s): s is string => typeof s === 'string')
+    : []
+
+  const digest = await buildDigest(Date.now(), failedSources)
   const hasNewData = digest.newSpend.count > 0
   const push =
     hasNewData && pushConfigured()

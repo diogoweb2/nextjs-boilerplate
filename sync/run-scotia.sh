@@ -14,10 +14,40 @@ TSX="$REPO/node_modules/tsx/dist/cli.mjs"
 # Point the runner at the deployed app's ingest endpoint.
 export INGEST_URL="https://nextjs-boilerplate-nu-black-85.vercel.app/api/ingest"
 
+STATUS_DIR="$HOME/Library/Application Support/budget-sync/status"
+mkdir -p "$STATUS_DIR"
+
 cd "$REPO"
 echo "===== budget-sync scotia @ $(date) ====="
 # NOTE: runs HEADED (no --headless). Bank logins behind bot detection reject
 # headless; a headed run in the trust-built profile passes. A browser window
 # appears for ~30s at run time. Requires the user to be logged into the GUI
 # session.
-exec "$NODE" "$TSX" "$REPO/sync/run-scotia.ts"
+
+# Retry on failure: the initial run plus up to 3 retries (4 attempts total), 5
+# min apart, before giving up. Bank syncs fail for transient reasons (a slow
+# page, a momentary MFA escalation, a blip in the deployed ingest endpoint);
+# spacing retries 5 min apart lets those clear. Re-imports dedup to zero, so
+# retrying after a partial success is harmless.
+ATTEMPTS=4
+DELAY=300  # 5 minutes between attempts
+
+for attempt in $(seq 1 "$ATTEMPTS"); do
+  echo "----- attempt $attempt/$ATTEMPTS @ $(date) -----"
+  status=0
+  "$NODE" "$TSX" "$REPO/sync/run-scotia.ts" || status=$?
+  if [ "$status" -eq 0 ]; then
+    echo "✓ scotia sync succeeded on attempt $attempt @ $(date)"
+    echo "ok" > "$STATUS_DIR/scotia"
+    exit 0
+  fi
+  echo "✗ scotia sync failed on attempt $attempt (exit $status) @ $(date)"
+  if [ "$attempt" -lt "$ATTEMPTS" ]; then
+    echo "retrying in $((DELAY / 60)) min…"
+    sleep "$DELAY"
+  fi
+done
+
+echo "✗ scotia sync gave up after $ATTEMPTS attempts @ $(date)"
+echo "fail" > "$STATUS_DIR/scotia"
+exit 1

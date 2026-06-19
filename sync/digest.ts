@@ -16,8 +16,33 @@
  * And, for the deployed app, INGEST_URL (the digest URL is derived from it) or an
  * explicit DIGEST_URL override.
  */
+import { existsSync, readFileSync, statSync } from 'fs'
+import { homedir } from 'os'
+import { join } from 'path'
 import { readSecret } from './lib/keychain'
 import { notify } from './lib/notify'
+
+const STATUS_DIR = join(homedir(), 'Library', 'Application Support', 'budget-sync', 'status')
+const STATUS_SOURCES = [
+  { key: 'rogers', label: 'Rogers' },
+  { key: 'amex', label: 'Amex' },
+  { key: 'scotia', label: 'Scotia' },
+  { key: 'tangerine', label: 'Tangerine' },
+]
+// Only consider status files written in the last 4 hours — avoids yesterday's failures.
+const STALE_MS = 4 * 60 * 60 * 1000
+
+function readSyncStatus(key: string): 'ok' | 'fail' | null {
+  const file = join(STATUS_DIR, key)
+  if (!existsSync(file)) return null
+  try {
+    if (Date.now() - statSync(file).mtimeMs > STALE_MS) return null
+    const content = readFileSync(file, 'utf8').trim()
+    return content === 'ok' ? 'ok' : content === 'fail' ? 'fail' : null
+  } catch {
+    return null
+  }
+}
 
 type DigestResponse = {
   title?: string
@@ -36,7 +61,19 @@ async function main(): Promise<void> {
   const token = readSecret('budget-sync-ingest', 'ingest')
   const url = digestUrl()
 
-  const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+  const failedSources = STATUS_SOURCES
+    .filter(({ key }) => readSyncStatus(key) === 'fail')
+    .map(({ label }) => label)
+
+  if (failedSources.length > 0) {
+    console.log(`⚠️  failed syncs detected: ${failedSources.join(', ')}`)
+  }
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ failedSources }),
+  })
   const json = (await res.json().catch(() => null)) as DigestResponse | null
 
   if (!res.ok || !json?.title) {
