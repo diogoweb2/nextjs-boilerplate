@@ -10,14 +10,14 @@
     <string>/Users/diogolopes/dev/budget/nextjs-boilerplate/sync/run-tangerine.sh</string>
   </array>
 
-  <!-- Fire once a day at 11:03 — after Rogers (11:00), Amex (11:01), and Scotia
-       (11:02) so the headed browser runs don't fight over the GUI session at the
+  <!-- Fire once a day at 10:03 — after Rogers (10:00), Amex (10:01), and Scotia
+       (10:02) so the headed browser runs don't fight over the GUI session at the
        same instant. If the Mac is OFF at that time the run is simply skipped (no
        catch-up). If it's ASLEEP, launchd runs it on the next wake — harmless
        because re-imports dedup to zero. -->
   <key>StartCalendarInterval</key>
   <dict>
-    <key>Hour</key><integer>11</integer>
+    <key>Hour</key><integer>10</integer>
     <key>Minute</key><integer>3</integer>
   </dict>
 

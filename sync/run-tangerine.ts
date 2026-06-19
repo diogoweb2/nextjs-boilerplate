@@ -6,6 +6,8 @@
  *
  *   npx tsx sync/run-tangerine.ts             # headed (watch it work)
  *   npx tsx sync/run-tangerine.ts --headless  # headless
+ *   npx tsx sync/run-tangerine.ts --manual    # DEBUG: no auto-fill, browser stays open
+ *   npx tsx sync/run-tangerine.ts --keep-open # automated, but stay open if it fails
  *
  * Requires Keychain items (one-time):
  *   security add-generic-password -a "tangerine" -s "budget-sync-tangerine"      -w  # password
@@ -16,7 +18,14 @@
 import { runSync } from './lib/runner'
 import { tangerine } from './adapters/tangerine'
 
-runSync('tangerine', 'Tangerine', tangerine, process.argv.includes('--headless')).catch((err) => {
+runSync(
+  'tangerine',
+  'Tangerine',
+  tangerine,
+  process.argv.includes('--headless'),
+  process.argv.includes('--manual'),
+  process.argv.includes('--keep-open')
+).catch((err) => {
   console.error('\n✗ run failed:', err.message)
   process.exit(1)
 })
