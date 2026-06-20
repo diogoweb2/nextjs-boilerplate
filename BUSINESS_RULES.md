@@ -205,6 +205,25 @@ idempotent and re-applies automatically each year while the policy stays the sam
   Transaction flags are tri-state (`true` / `false` / `null = inherit`).
 - Deleting a category sets referencing merchants/transactions to `null` (Uncategorized).
 
+### Manual split (`splitTransaction` / `unsplitTransaction`, `app/actions/transactions.ts`)
+One real charge sometimes spans categories — e.g. a Walmart grocery run that also
+includes $50 of kids' clothes. From the Activity row editor (Split), the user peels
+**parts** off a transaction: each part becomes its own child row with its own amount,
+category, and merchant label, and the **parent's amount is reduced** by the total peeled
+off so the sum is unchanged — analytics never double-count. Tracked by a self-referencing
+`transactions.split_parent_id` (cascade, so undoing a batch drops the children too).
+- A part's **label** defaults to the parent merchant; reusing the same name keeps the
+  same merchant (just a per-txn category override), while a **new** label creates a
+  rule-less merchant (`merchant_rules` untouched). So future statements still resolve the
+  original merchant to its normal category, and the carved-out spend stays a one-off that
+  is **never** auto-categorized again.
+- Children inherit the parent's date/source/card/batch; their `external_id` is
+  `<parent>:split:<rand>` so re-imports (which skip the still-present parent id) leave the
+  split intact. The original must keep a **positive remainder** (to fully reassign a row,
+  just recategorize it). **Unsplit** deletes the children and folds their amounts back into
+  the parent; merchants left orphaned are cleaned up by the merchants page's prune path.
+- Run after pulling this change: `npm run db:push` (adds `split_parent_id`).
+
 ---
 
 ## 4b. Cardholder attribution ("who paid")

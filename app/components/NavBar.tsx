@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import { logout } from '@/app/actions/auth'
 
 const LINKS = [
@@ -15,6 +16,12 @@ const LINKS = [
   { href: '/settings', label: 'Settings', icon: '⚙' },
 ]
 
+// On mobile only the first few links live in the bottom bar; the rest collapse
+// into a "More" sheet. Desktop shows the full list in the top bar.
+const MOBILE_PRIMARY_COUNT = 4
+const MOBILE_PRIMARY = LINKS.slice(0, MOBILE_PRIMARY_COUNT)
+const MOBILE_MORE = LINKS.slice(MOBILE_PRIMARY_COUNT)
+
 function isActive(pathname: string, href: string): boolean {
   if (href === '/') return pathname === '/'
   return pathname.startsWith(href)
@@ -23,6 +30,14 @@ function isActive(pathname: string, href: string): boolean {
 export function NavBar() {
   const pathname = usePathname()
   const searchParams = useSearchParams()
+  const [moreOpen, setMoreOpen] = useState(false)
+
+  // Close the mobile "More" sheet whenever the route changes.
+  useEffect(() => {
+    setMoreOpen(false)
+  }, [pathname])
+
+  const moreActive = MOBILE_MORE.some((l) => isActive(pathname, l.href))
 
   function navHref(href: string): string {
     const preserved: string[] = []
@@ -87,9 +102,49 @@ export function NavBar() {
         </div>
       </header>
 
+      {/* More sheet (mobile) */}
+      {moreOpen && (
+        <div className="fixed inset-0 z-40 sm:hidden" onClick={() => setMoreOpen(false)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div
+            className="absolute bottom-[4.25rem] left-2 right-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="grid grid-cols-2 gap-1">
+              {MOBILE_MORE.map((l) => {
+                const active = isActive(pathname, l.href)
+                return (
+                  <Link
+                    key={l.href}
+                    href={navHref(l.href)}
+                    className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
+                      active
+                        ? 'bg-[var(--surface-2)] text-[var(--accent)]'
+                        : 'text-[var(--foreground)]'
+                    }`}
+                  >
+                    <span className="text-base leading-none">{l.icon}</span>
+                    {l.label}
+                  </Link>
+                )
+              })}
+            </div>
+            <form action={logout} className="mt-1 border-t border-[var(--border)] pt-1">
+              <button
+                type="submit"
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium text-[var(--negative)]"
+              >
+                <span className="text-base leading-none">⏏</span>
+                Sign out
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Bottom nav (mobile) */}
-      <nav className="fixed bottom-0 left-0 right-0 z-30 grid grid-cols-8 border-t border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_92%,transparent)] backdrop-blur sm:hidden">
-        {LINKS.map((l) => {
+      <nav className="fixed bottom-0 left-0 right-0 z-50 grid grid-cols-5 border-t border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_92%,transparent)] backdrop-blur sm:hidden">
+        {MOBILE_PRIMARY.map((l) => {
           const active = isActive(pathname, l.href)
           return (
             <Link
@@ -104,6 +159,16 @@ export function NavBar() {
             </Link>
           )
         })}
+        <button
+          type="button"
+          onClick={() => setMoreOpen((v) => !v)}
+          className={`flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium ${
+            moreOpen || moreActive ? 'text-[var(--accent)]' : 'text-[var(--muted)]'
+          }`}
+        >
+          <span className="text-base leading-none">⋯</span>
+          More
+        </button>
       </nav>
     </>
   )

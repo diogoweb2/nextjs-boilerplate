@@ -2,7 +2,13 @@
 
 import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { setTxnCategory, setTxnFlags } from '@/app/actions/transactions'
+import {
+  setTxnCategory,
+  setTxnFlags,
+  splitTransaction,
+  unsplitTransaction,
+  type SplitPart,
+} from '@/app/actions/transactions'
 import { formatCurrency, formatLongDate } from '@/app/lib/format'
 import type { CategoryOption } from '@/app/components/MerchantsManager'
 
@@ -21,6 +27,10 @@ export type TxnRow = {
   isPayment: boolean
   source: 'master' | 'amex' | 'tangerine' | 'scotia'
   person: string
+  // A peeled-off part of another transaction.
+  isSplitPart: boolean
+  // Has had parts peeled off it (so it can be unsplit).
+  isSplitParent: boolean
 }
 
 export function TransactionsTable({
@@ -151,6 +161,8 @@ export function TransactionsTable({
             inlineCategory={uncategorizedOnly}
             onCategory={(cid) => run(() => setTxnCategory(t.id, t.merchantId, cid))}
             onFlags={(flags) => run(() => setTxnFlags(t.id, flags))}
+            onSplit={(parts) => run(() => splitTransaction(t.id, parts))}
+            onUnsplit={() => run(() => unsplitTransaction(t.id))}
           />
         ))}
         {rows.length === 0 && (
@@ -191,14 +203,19 @@ function TxnRowView({
   inlineCategory,
   onCategory,
   onFlags,
+  onSplit,
+  onUnsplit,
 }: {
   t: TxnRow
   categories: CategoryOption[]
   inlineCategory: boolean
   onCategory: (categoryId: number | null) => void
   onFlags: (flags: { isRecurring?: boolean | null; isSpecial?: boolean | null }) => void
+  onSplit: (parts: SplitPart[]) => void
+  onUnsplit: () => void
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [splitting, setSplitting] = useState(false)
 
   return (
     <div className="flex flex-col gap-2 p-3">
@@ -210,6 +227,22 @@ function TxnRowView({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span className="truncate text-sm font-medium">{t.merchantName}</span>
+            {t.isSplitPart && (
+              <span
+                title="Split off from another transaction"
+                className="rounded bg-[var(--surface-2)] px-1 text-[10px] text-[var(--muted)]"
+              >
+                ⑂ split
+              </span>
+            )}
+            {t.isSplitParent && (
+              <span
+                title="This transaction has parts split off"
+                className="rounded bg-[var(--surface-2)] px-1 text-[10px] text-[var(--muted)]"
+              >
+                ⑂ split origin
+              </span>
+            )}
             {t.isRecurring && <span title="Subscription" className="text-xs text-[var(--accent)]">↻</span>}
             {t.isSpecial && <span title="Special" className="text-xs text-amber-500">★</span>}
             {t.isPayment && (
@@ -294,11 +327,163 @@ function TxnRowView({
           >
             ★ Special
           </button>
+          {!t.isSplitPart && !t.isPayment && (
+            <button
+              onClick={() => setSplitting((v) => !v)}
+              className={`rounded-md px-2 py-1 text-xs font-medium ${
+                splitting
+                  ? 'bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] text-[var(--accent)]'
+                  : 'text-[var(--muted)] hover:bg-[var(--surface-2)]'
+              }`}
+            >
+              ⑂ Split
+            </button>
+          )}
+          {t.isSplitParent && (
+            <button
+              onClick={onUnsplit}
+              className="rounded-md px-2 py-1 text-xs font-medium text-[var(--muted)] hover:bg-[var(--surface-2)]"
+            >
+              ↩ Unsplit
+            </button>
+          )}
           <span className="text-[11px] text-[var(--muted)]" title={t.rawDescription}>
             {t.rawDescription}
           </span>
         </div>
       )}
+
+      {expanded && splitting && (
+        <SplitForm
+          t={t}
+          categories={categories}
+          onCancel={() => setSplitting(false)}
+          onSubmit={(parts) => {
+            setSplitting(false)
+            onSplit(parts)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+/**
+ * Peel one or more parts off a transaction. The remainder stays on the original
+ * row; each part gets its own amount, category, and merchant label (defaulting
+ * to the same merchant). The remainder is shown live and must stay positive.
+ */
+function SplitForm({
+  t,
+  categories,
+  onCancel,
+  onSubmit,
+}: {
+  t: TxnRow
+  categories: CategoryOption[]
+  onCancel: () => void
+  onSubmit: (parts: SplitPart[]) => void
+}) {
+  const total = Math.abs(t.amount)
+  const [parts, setParts] = useState<
+    { amount: string; categoryId: string; label: string }[]
+  >([{ amount: '', categoryId: '', label: t.merchantName }])
+
+  const update = (i: number, patch: Partial<(typeof parts)[number]>) =>
+    setParts((ps) => ps.map((p, j) => (j === i ? { ...p, ...patch } : p)))
+
+  const peeledOff = parts.reduce((s, p) => s + (Number(p.amount) || 0), 0)
+  const remainder = total - peeledOff
+  const valid =
+    parts.every((p) => Number(p.amount) > 0 && p.label.trim()) &&
+    remainder > 0.0049
+
+  return (
+    <div className="animate-in mt-1 flex flex-col gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-3">
+      <p className="text-[11px] text-[var(--muted)]">
+        Split {formatCurrency(total)} — the rest stays on {t.merchantName}.
+      </p>
+      {parts.map((p, i) => (
+        <div key={i} className="flex flex-wrap items-center gap-2">
+          <input
+            type="number"
+            inputMode="decimal"
+            step="0.01"
+            min="0"
+            value={p.amount}
+            onChange={(e) => update(i, { amount: e.target.value })}
+            placeholder="0.00"
+            className="w-24 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs tabular-nums"
+          />
+          <input
+            value={p.label}
+            onChange={(e) => update(i, { label: e.target.value })}
+            placeholder="Merchant label"
+            className="min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs"
+          />
+          <select
+            value={p.categoryId}
+            onChange={(e) => update(i, { categoryId: e.target.value })}
+            className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs"
+          >
+            <option value="">Uncategorized</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          {parts.length > 1 && (
+            <button
+              onClick={() => setParts((ps) => ps.filter((_, j) => j !== i))}
+              className="rounded-md px-1.5 py-1 text-xs text-[var(--muted)] hover:bg-[var(--surface)]"
+              aria-label="Remove part"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      ))}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <button
+          onClick={() =>
+            setParts((ps) => [...ps, { amount: '', categoryId: '', label: t.merchantName }])
+          }
+          className="rounded-md px-2 py-1 text-xs font-medium text-[var(--accent)] hover:bg-[var(--surface)]"
+        >
+          + Add part
+        </button>
+        <span
+          className={`text-[11px] tabular-nums ${
+            remainder > 0.0049 ? 'text-[var(--muted)]' : 'text-red-500'
+          }`}
+        >
+          Remainder on {t.merchantName}: {formatCurrency(remainder)}
+        </span>
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          disabled={!valid}
+          onClick={() =>
+            onSubmit(
+              parts.map((p) => ({
+                amount: Number(p.amount),
+                categoryId: p.categoryId ? Number(p.categoryId) : null,
+                label: p.label.trim(),
+              }))
+            )
+          }
+          className="rounded-md bg-[var(--accent)] px-3 py-1 text-xs font-medium text-[var(--accent-fg)] disabled:opacity-40"
+        >
+          Save split
+        </button>
+        <button
+          onClick={onCancel}
+          className="rounded-md px-3 py-1 text-xs font-medium text-[var(--muted)] hover:bg-[var(--surface)]"
+        >
+          Cancel
+        </button>
+      </div>
     </div>
   )
 }

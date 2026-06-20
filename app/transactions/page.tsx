@@ -36,6 +36,7 @@ export default async function TransactionsPage({
         txnCategoryId: transactions.categoryId,
         txnRecurring: transactions.isRecurring,
         txnSpecial: transactions.isSpecial,
+        splitParentId: transactions.splitParentId,
         merchantId: merchants.id,
         merchantName: merchants.name,
         merchantCategoryId: merchants.categoryId,
@@ -51,6 +52,11 @@ export default async function TransactionsPage({
   ])
 
   const catMap = new Map(catRows.map((c) => [c.id, c]))
+
+  // Rows that have had parts peeled off them, so the UI can offer "Unsplit".
+  const splitParentIds = new Set(
+    rows.map((r) => r.splitParentId).filter((id): id is number => id != null)
+  )
 
   const allTxns: TxnRow[] = rows.map((r) => {
     const effCatId = r.txnCategoryId ?? r.merchantCategoryId ?? null
@@ -70,6 +76,8 @@ export default async function TransactionsPage({
       isPayment: r.isPayment,
       source: r.source,
       person: cardholderName(r.cardLast4),
+      isSplitPart: r.splitParentId != null,
+      isSplitParent: splitParentIds.has(r.id),
     }
   })
 

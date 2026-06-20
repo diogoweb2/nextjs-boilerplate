@@ -9,6 +9,7 @@ import {
   boolean,
   jsonb,
   index,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 
@@ -124,11 +125,20 @@ export const transactions = pgTable(
     batchId: integer('batch_id').references(() => importBatches.id, {
       onDelete: 'set null',
     }),
+    // Manual split: a peeled-off portion of another transaction (e.g. the $50 of
+    // kids' clothes inside a Walmart grocery run). null = a normal/parent row.
+    // Reducing the parent's amount + summing children keeps totals exact, so
+    // analytics never double-count. Cascade so undoing a batch drops children too.
+    splitParentId: integer('split_parent_id').references(
+      (): AnyPgColumn => transactions.id,
+      { onDelete: 'cascade' }
+    ),
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (t) => [
     index('transactions_txn_date_idx').on(t.txnDate),
     index('transactions_merchant_idx').on(t.merchantId),
+    index('transactions_split_parent_idx').on(t.splitParentId),
   ]
 )
 

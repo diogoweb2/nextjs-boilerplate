@@ -16,6 +16,10 @@ const MAX_FAILURES = 5
 const WINDOW_MS = 15 * 60 * 1000
 const LOCKOUT_MS = 15 * 60 * 1000
 
+// Throttling only matters for the publicly exposed deployment. In local dev it
+// just gets in the way, so disable it entirely.
+const ENABLED = process.env.NODE_ENV === 'production'
+
 /** Best-effort client identity from proxy headers; falls back to a shared bucket. */
 export async function clientKey(): Promise<string> {
   const h = await headers()
@@ -27,6 +31,7 @@ export type RateLimitState = { blocked: boolean; retryAfterSec: number }
 
 /** Is this client currently locked out? */
 export async function checkLoginRateLimit(key: string): Promise<RateLimitState> {
+  if (!ENABLED) return { blocked: false, retryAfterSec: 0 }
   const [row] = await db.select().from(loginAttempts).where(eq(loginAttempts.ip, key)).limit(1)
   const lockedMs = row?.lockedUntil ? row.lockedUntil.getTime() - Date.now() : 0
   if (lockedMs > 0) return { blocked: true, retryAfterSec: Math.ceil(lockedMs / 1000) }
@@ -35,6 +40,7 @@ export async function checkLoginRateLimit(key: string): Promise<RateLimitState> 
 
 /** Record a wrong password; opens/extends the lockout once the threshold is hit. */
 export async function recordLoginFailure(key: string): Promise<void> {
+  if (!ENABLED) return
   const now = Date.now()
   const [row] = await db.select().from(loginAttempts).where(eq(loginAttempts.ip, key)).limit(1)
 
