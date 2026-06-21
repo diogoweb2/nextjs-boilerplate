@@ -3,25 +3,32 @@ import { db } from '@/db'
 import { categories, merchants, transactions } from '@/db/schema'
 import { AppShell } from '@/app/components/AppShell'
 import { CategoriesManager, type CategoryManageRow } from '@/app/components/CategoriesManager'
+import { isDemoSession } from '@/app/lib/demo'
 
 export const dynamic = 'force-dynamic'
 
 export default async function CategoriesPage() {
-  const [catRows, txnCounts, merchantCats] = await Promise.all([
-    db.select().from(categories).orderBy(categories.name),
-    // Count transactions whose own categoryId is set.
-    db
-      .select({ categoryId: transactions.categoryId, count: sql<number>`count(*)` })
-      .from(transactions)
-      .groupBy(transactions.categoryId),
-    // Count transactions inheriting from their merchant's category.
-    db
-      .select({ categoryId: merchants.categoryId, count: sql<number>`count(*)` })
-      .from(transactions)
-      .innerJoin(merchants, eq(transactions.merchantId, merchants.id))
-      .where(sql`${transactions.categoryId} is null`)
-      .groupBy(merchants.categoryId),
-  ])
+  const [catRows, txnCounts, merchantCats] = (await isDemoSession())
+    ? await (async () => {
+        const d = await import('@/app/lib/demo-data')
+        const counts = d.demoCategoryCounts()
+        return [d.demoCategoryRows(), counts.txnCounts, counts.merchantCats] as const
+      })()
+    : await Promise.all([
+        db.select().from(categories).orderBy(categories.name),
+        // Count transactions whose own categoryId is set.
+        db
+          .select({ categoryId: transactions.categoryId, count: sql<number>`count(*)` })
+          .from(transactions)
+          .groupBy(transactions.categoryId),
+        // Count transactions inheriting from their merchant's category.
+        db
+          .select({ categoryId: merchants.categoryId, count: sql<number>`count(*)` })
+          .from(transactions)
+          .innerJoin(merchants, eq(transactions.merchantId, merchants.id))
+          .where(sql`${transactions.categoryId} is null`)
+          .groupBy(merchants.categoryId),
+      ])
 
   // Effective per-category transaction counts.
   const counts = new Map<number, number>()

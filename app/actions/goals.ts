@@ -14,6 +14,7 @@ import {
   type Goal,
 } from '@/db/schema'
 import { requireAuth } from '@/app/lib/auth-guard'
+import { isDemoSession } from '@/app/lib/demo'
 import { loadAllFlows, anchorMonth } from '@/app/lib/analytics'
 import {
   savingsValue,
@@ -138,6 +139,10 @@ async function ensureMortgageGoal(): Promise<void> {
 }
 
 export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: string; suggestNetZero: boolean; monthStats: { thisMonth: number; lastMonth: number } }> {
+  if (await isDemoSession()) {
+    const { demoGoalsData } = await import('@/app/lib/demo-data')
+    return demoGoalsData()
+  }
   await ensureMortgageGoal()
   await reconcileNetZeroGoals()
 
@@ -395,6 +400,10 @@ export type PendingReview = {
 
 /** Pending transfer reviews for the dashboard prompt (+ savings-goal options). */
 export async function loadPendingReviews(): Promise<PendingReview[]> {
+  if (await isDemoSession()) {
+    const { demoPendingReviews } = await import('@/app/lib/demo-data')
+    return demoPendingReviews()
+  }
   const rows = await db
     .select({
       id: transferReviews.id,

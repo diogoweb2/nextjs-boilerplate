@@ -23,6 +23,7 @@ import { computeMonthBurndown, computePeriodBurndown, type BurndownData } from '
 import { getBudgetSettings } from '@/app/actions/budget'
 import { loadProjectionRules } from '@/app/actions/projection'
 import { loadPendingReviews } from '@/app/actions/goals'
+import { isDemoSession } from '@/app/lib/demo'
 import { TransferReview } from '@/app/components/TransferReview'
 import {
   formatCurrency,
@@ -52,17 +53,33 @@ export default async function Home({
       .limit(1)
       .then((rows) => rows[0]?.createdAt?.toISOString() ?? null)
 
-  const [allFlows, catRows, goalRows, settings, rules, batches, syncTimes, syncRunRows, pendingReviews] = await Promise.all([
-    loadAllFlows(),
-    db.select().from(categories),
-    db.select().from(budgetGoals),
-    getBudgetSettings(),
-    loadProjectionRules(),
-    db.select().from(importBatches).orderBy(desc(importBatches.createdAt)).limit(8),
-    Promise.all(SYNC_SOURCES.map((s) => lastSyncQuery(s.source))),
-    db.select().from(syncRuns),
-    loadPendingReviews(),
-  ])
+  const demo = await isDemoSession()
+  const [allFlows, catRows, goalRows, settings, rules, batches, syncTimes, syncRunRows, pendingReviews] = demo
+    ? await (async () => {
+        const d = await import('@/app/lib/demo-data')
+        return [
+          d.demoAllFlows(),
+          d.demoCategoryRows(),
+          d.demoBudgetGoalRows(),
+          d.demoBudgetSettings(),
+          d.demoProjectionRules(),
+          d.demoImportBatches(),
+          d.demoSyncTimes(),
+          [] as (typeof syncRuns.$inferSelect)[],
+          d.demoPendingReviews(),
+        ] as const
+      })()
+    : await Promise.all([
+        loadAllFlows(),
+        db.select().from(categories),
+        db.select().from(budgetGoals),
+        getBudgetSettings(),
+        loadProjectionRules(),
+        db.select().from(importBatches).orderBy(desc(importBatches.createdAt)).limit(8),
+        Promise.all(SYNC_SOURCES.map((s) => lastSyncQuery(s.source))),
+        db.select().from(syncRuns),
+        loadPendingReviews(),
+      ])
   // Banks whose latest automated sync reported a failure — surfaced as a banner.
   const syncFailures: SyncFailure[] = SYNC_SOURCES.flatMap((s) => {
     const run = syncRunRows.find((r) => r.source === s.source)

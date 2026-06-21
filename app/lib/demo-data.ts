@@ -1,0 +1,687 @@
+/**
+ * Synthetic dataset for the read-only DEMO session (started via the login page's
+ * "Explore the demo" button). Everything here is fabricated — safe to commit to a
+ * public repo — and is generated deterministically so the demo looks identical on
+ * every load. Loaders branch to these builders when isDemoSession() is true
+ * (see app/lib/demo.ts); writes are blocked by requireAuth, so it is read-only.
+ *
+ * Numbers are modelled to look like a real Toronto family budget across ~2 years
+ * so every feature (analytics, trends, income, budget, goals, projections, custom
+ * reports, activity) has believable data to render.
+ */
+import type { EnrichedTxn, ImportSource, Flow } from '@/app/lib/analytics'
+import type { ProjectionRule } from '@/app/lib/projection'
+import type { GoalView, PendingReview } from '@/app/actions/goals'
+import type { MortgageProjection } from '@/app/lib/mortgage'
+import type { ReportSeries } from '@/db/schema'
+import { CATEGORY_SEED } from '@/app/lib/seed-data'
+
+// ---------------------------------------------------------------------------
+// Deterministic PRNG (so the demo is stable across reloads)
+// ---------------------------------------------------------------------------
+function mulberry32(seed: number) {
+  let a = seed
+  return () => {
+    a |= 0
+    a = (a + 0x6d2b79f5) | 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+const rnd = mulberry32(20260621)
+const rand = (min: number, max: number) => min + (max - min) * rnd()
+const randInt = (min: number, max: number) => Math.floor(rand(min, max + 1))
+const money = (min: number, max: number) => Math.round(rand(min, max) * 100) / 100
+const chance = (p: number) => rnd() < p
+const pick = <T,>(arr: T[]): T => arr[randInt(0, arr.length - 1)]
+
+// ---------------------------------------------------------------------------
+// Anchor / month helpers — anchor is the in-progress current month so "Current"
+// period features have a partial month to show.
+// ---------------------------------------------------------------------------
+const ANCHOR_YM = '2026-06'
+const ANCHOR_DAY = 20 // data fills June up to the 20th
+const HISTORY_MONTHS = 23 // plus the anchor = 24 months total
+
+function addMonths(ym: string, delta: number): string {
+  const [y, m] = ym.split('-').map(Number)
+  const total = y * 12 + (m - 1) + delta
+  return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, '0')}`
+}
+function monthList(): string[] {
+  const out: string[] = []
+  for (let i = HISTORY_MONTHS; i >= 0; i--) out.push(addMonths(ANCHOR_YM, -i))
+  return out
+}
+function day(ym: string, d: number): string {
+  return `${ym}-${String(d).padStart(2, '0')}`
+}
+function maxDay(ym: string): number {
+  if (ym === ANCHOR_YM) return ANCHOR_DAY
+  return new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 0).getDate()
+}
+function someDay(ym: string): string {
+  return day(ym, randInt(1, maxDay(ym)))
+}
+
+// ---------------------------------------------------------------------------
+// Categories — reuse the real seed so colors/kinds match the app exactly.
+// ---------------------------------------------------------------------------
+export type DemoCategory = { id: number; name: string; color: string; kind: 'expense' | 'income' | 'neutral' }
+export const DEMO_CATEGORIES: DemoCategory[] = CATEGORY_SEED.map((c, i) => ({
+  id: i + 1,
+  name: c.name,
+  color: c.color,
+  kind: c.kind ?? 'expense',
+}))
+const catId = (name: string): number => DEMO_CATEGORIES.find((c) => c.name === name)!.id
+
+// ---------------------------------------------------------------------------
+// Merchants
+// ---------------------------------------------------------------------------
+type MerchantDef = {
+  name: string
+  category: string | null
+  recurring?: boolean
+  special?: boolean
+}
+const MERCHANT_DEFS: MerchantDef[] = [
+  // Groceries
+  { name: 'Costco Wholesale', category: 'Groceries' },
+  { name: 'Fortinos', category: 'Groceries' },
+  { name: 'No Frills', category: 'Groceries' },
+  { name: 'Metro', category: 'Groceries' },
+  // Dining
+  { name: 'Tim Hortons', category: 'Dining' },
+  { name: 'McDonalds', category: 'Dining' },
+  { name: 'Pizza Pizza', category: 'Dining' },
+  { name: 'Cactus Club', category: 'Dining' },
+  // Cars
+  { name: 'Petro-Canada', category: 'Cars' },
+  { name: 'Costco Gas', category: 'Cars' },
+  // Transport
+  { name: 'Presto', category: 'Transport' },
+  { name: 'Uber', category: 'Transport' },
+  // Shopping
+  { name: 'Amazon', category: 'Shopping' },
+  { name: 'Canadian Tire', category: 'Shopping' },
+  { name: 'Dollarama', category: 'Shopping' },
+  { name: 'IKEA', category: 'Shopping' },
+  // Health
+  { name: 'Shoppers Drug Mart', category: 'Health' },
+  { name: 'Rexall', category: 'Health' },
+  // Dental (special by default)
+  { name: 'Lawrence Park Dental', category: 'Dental', special: true },
+  // Subscriptions (recurring)
+  { name: 'Netflix', category: 'Subscriptions', recurring: true },
+  { name: 'Spotify', category: 'Subscriptions', recurring: true },
+  { name: 'Anthropic', category: 'Subscriptions', recurring: true },
+  { name: 'Distributel', category: 'Subscriptions', recurring: true },
+  // Home (the always-fixed category)
+  { name: 'Mortgage', category: 'Home', recurring: true },
+  { name: 'Toronto Hydro', category: 'Home' },
+  { name: 'Toronto Water', category: 'Home' },
+  // Kids
+  { name: 'Kumon', category: 'Kids', recurring: true },
+  { name: 'Mastermind Toys', category: 'Kids' },
+  // Entertainment
+  { name: 'Cineplex', category: 'Entertainment' },
+  // Travel (special by default — big one-offs)
+  { name: 'British Airways', category: 'Travel', special: true },
+  // Investment (an expense per the app's rules)
+  { name: 'Investment (iTrade)', category: 'Investment' },
+  // Income payees
+  { name: 'Payroll Deposit', category: 'Salary' },
+  { name: 'UHN Payroll', category: 'Salary' },
+  { name: 'Family Support', category: 'Family Support' },
+  { name: 'Canada Child Benefit', category: 'Benefits' },
+  { name: 'Sun Life', category: 'Insurance' },
+  { name: 'Interest Paid', category: 'Interest' },
+  // Card payment (no category; rows are isPayment and excluded from analytics)
+  { name: 'Card Payment', category: null },
+]
+
+export type DemoMerchant = {
+  id: number
+  name: string
+  categoryId: number | null
+  defaultRecurring: boolean
+  defaultSpecial: boolean
+  projectionDismissed: boolean
+}
+export const DEMO_MERCHANTS: DemoMerchant[] = MERCHANT_DEFS.map((m, i) => ({
+  id: i + 1,
+  name: m.name,
+  categoryId: m.category ? catId(m.category) : null,
+  defaultRecurring: m.recurring ?? false,
+  defaultSpecial: m.special ?? false,
+  projectionDismissed: false,
+}))
+const merchant = (name: string): DemoMerchant => DEMO_MERCHANTS.find((m) => m.name === name)!
+
+// ---------------------------------------------------------------------------
+// Raw transactions (the single source of truth; every page shape derives here)
+// ---------------------------------------------------------------------------
+export type DemoRawTxn = {
+  id: number
+  source: ImportSource
+  flow: Flow
+  txnDate: string
+  rawDescription: string
+  amount: number
+  cardLast4: string | null
+  isPayment: boolean
+  txnCategoryId: number | null
+  txnRecurring: boolean | null
+  txnSpecial: boolean | null
+  splitParentId: number | null
+  batchId: number | null
+  merchantId: number
+}
+
+let _seq = 0
+function buildTxns(): DemoRawTxn[] {
+  const txns: DemoRawTxn[] = []
+  const add = (
+    m: DemoMerchant,
+    opts: {
+      date: string
+      amount: number
+      flow?: Flow
+      source: ImportSource
+      desc?: string
+      isPayment?: boolean
+      cardLast4?: string | null
+    }
+  ) => {
+    txns.push({
+      id: ++_seq,
+      source: opts.source,
+      flow: opts.flow ?? 'expense',
+      txnDate: opts.date,
+      rawDescription: opts.desc ?? m.name.toUpperCase(),
+      amount: opts.amount,
+      cardLast4: opts.cardLast4 ?? null,
+      isPayment: opts.isPayment ?? false,
+      txnCategoryId: null,
+      txnRecurring: null,
+      txnSpecial: null,
+      splitParentId: null,
+      batchId: null,
+      merchantId: m.id,
+    })
+  }
+
+  const CARD: ImportSource[] = ['master', 'amex']
+  const cardLast4 = (s: ImportSource) => (s === 'master' ? '4021' : '1007')
+  const onCard = () => {
+    const s = pick(CARD)
+    return { source: s, cardLast4: cardLast4(s) }
+  }
+
+  const months = monthList()
+  months.forEach((ym, idx) => {
+    const isAnchor = ym === ANCHOR_YM
+    const cap = maxDay(ym)
+    const upto = (frac: number) => Math.max(1, Math.round(cap * frac))
+
+    // --- Groceries: weekly-ish big shops + top-ups (family of 4)
+    const groceryStores = ['Costco Wholesale', 'Fortinos', 'No Frills', 'Metro']
+    for (let i = 0; i < randInt(7, 11); i++) {
+      const c = onCard()
+      add(merchant(pick(groceryStores)), { date: someDay(ym), amount: money(38, 260), ...c })
+    }
+    // --- Dining
+    for (let i = 0; i < randInt(5, 9); i++) {
+      const c = onCard()
+      add(merchant(pick(['Tim Hortons', 'McDonalds', 'Pizza Pizza', 'Cactus Club'])), {
+        date: someDay(ym),
+        amount: money(12, 90),
+        ...c,
+      })
+    }
+    // --- Fuel
+    for (let i = 0; i < randInt(3, 5); i++) {
+      const c = onCard()
+      add(merchant(pick(['Petro-Canada', 'Costco Gas'])), { date: someDay(ym), amount: money(50, 105), ...c })
+    }
+    // --- Transit
+    for (let i = 0; i < randInt(1, 4); i++) {
+      const c = onCard()
+      add(merchant(chance(0.6) ? 'Presto' : 'Uber'), { date: someDay(ym), amount: money(8, 34), ...c })
+    }
+    // --- Shopping
+    for (let i = 0; i < randInt(2, 5); i++) {
+      const c = onCard()
+      add(merchant(pick(['Amazon', 'Canadian Tire', 'Dollarama'])), {
+        date: someDay(ym),
+        amount: money(12, 180),
+        ...c,
+      })
+    }
+    if (chance(0.25)) {
+      const c = onCard()
+      add(merchant('IKEA'), { date: someDay(ym), amount: money(120, 520), ...c })
+    }
+    // --- Health
+    for (let i = 0; i < randInt(1, 3); i++) {
+      const c = onCard()
+      add(merchant(chance(0.5) ? 'Shoppers Drug Mart' : 'Rexall'), {
+        date: someDay(ym),
+        amount: money(9, 80),
+        ...c,
+      })
+    }
+    // --- Kids (two kids: Kumon for both + occasional toys)
+    add(merchant('Kumon'), { date: day(ym, Math.min(5, cap)), amount: 330, ...onCard() })
+    if (chance(0.4)) add(merchant('Mastermind Toys'), { date: someDay(ym), amount: money(25, 110), ...onCard() })
+    // --- Entertainment
+    if (chance(0.4)) add(merchant('Cineplex'), { date: someDay(ym), amount: money(28, 96), ...onCard() })
+
+    // --- Subscriptions (fixed monthly)
+    const subs: [string, number, number][] = [
+      ['Netflix', 20.99, 3],
+      ['Spotify', 11.29, 8],
+      ['Anthropic', 28.24, 14],
+      ['Distributel', 64.97, 18],
+    ]
+    for (const [name, amt, d] of subs) {
+      if (isAnchor && d > cap) continue
+      add(merchant(name), { date: day(ym, Math.min(d, cap)), amount: amt, ...onCard() })
+    }
+
+    // --- Home (mortgage + utilities) — billed from the bank (Scotia)
+    add(merchant('Mortgage'), {
+      date: day(ym, Math.min(1, cap)),
+      amount: 2150,
+      source: 'scotia',
+      desc: 'MORTGAGE PAYMENT',
+    })
+    // Voluntary extra prepayment some months
+    if (chance(0.3))
+      add(merchant('Mortgage'), {
+        date: day(ym, Math.min(2, cap)),
+        amount: 1100,
+        source: 'scotia',
+        desc: 'CUSTOMER TRANSFER DR.',
+      })
+    // Hydro every month (seasonal: winter heavier), Water quarterly
+    const month = Number(ym.slice(5, 7))
+    const winter = month <= 3 || month >= 11
+    add(merchant('Toronto Hydro'), {
+      date: day(ym, Math.min(12, cap)),
+      amount: money(winter ? 150 : 80, winter ? 260 : 140),
+      source: 'tangerine',
+    })
+    if (month % 3 === 0)
+      add(merchant('Toronto Water'), { date: day(ym, Math.min(15, cap)), amount: money(110, 180), source: 'tangerine' })
+
+    // --- Investment (an expense per the app's rules) — recurring Scotia transfer
+    if (!isAnchor || cap >= 10)
+      add(merchant('Investment (iTrade)'), {
+        date: day(ym, Math.min(10, cap)),
+        amount: 900,
+        source: 'scotia',
+        desc: 'CUSTOMER TRANSFER DR.',
+      })
+
+    // --- Income (flow: 'income'; stored negative per the app's sign convention)
+    // Self salary, biweekly (Tangerine)
+    add(merchant('Payroll Deposit'), { date: day(ym, Math.min(upto(0.15), cap)), amount: -2300, flow: 'income', source: 'tangerine', desc: 'PAYROLL DEP BGRS' })
+    if (upto(0.55) <= cap)
+      add(merchant('Payroll Deposit'), { date: day(ym, upto(0.55)), amount: -2300, flow: 'income', source: 'tangerine', desc: 'PAYROLL DEP BGRS' })
+    // Partner salary, monthly (Scotia / UHN)
+    add(merchant('UHN Payroll'), { date: day(ym, Math.min(upto(0.85), cap)), amount: -3650, flow: 'income', source: 'scotia', desc: 'UHN PAYROLL' })
+    // Child benefit, monthly (Scotia) — two kids
+    add(merchant('Canada Child Benefit'), { date: day(ym, Math.min(20, cap)), amount: -713, flow: 'income', source: 'scotia', desc: 'CANADA CCB' })
+    // Bank interest, monthly (Tangerine)
+    add(merchant('Interest Paid'), { date: day(ym, Math.min(28, cap)), amount: -money(4, 16), flow: 'income', source: 'tangerine', desc: 'INTEREST PAID' })
+    // Family support, occasional (Tangerine)
+    if (chance(0.3))
+      add(merchant('Family Support'), { date: someDay(ym), amount: -money(500, 900), flow: 'income', source: 'tangerine', desc: 'TRANSFERWISE' })
+    // Insurance payout, once a year (Scotia)
+    if (month === 9)
+      add(merchant('Sun Life'), { date: day(ym, 18), amount: -1840, flow: 'income', source: 'scotia', desc: 'SUN LIFE CLAIM' })
+
+    // --- Card payment (excluded from analytics; visible on Activity)
+    add(merchant('Card Payment'), {
+      date: day(ym, Math.min(22, cap)),
+      amount: -money(1200, 2400),
+      source: 'master',
+      desc: 'PAYMENT THANK YOU',
+      isPayment: true,
+      cardLast4: '4021',
+    })
+
+    // --- One-off big specials
+    if (idx === 13) add(merchant('British Airways'), { date: day(ym, 9), amount: 2480, source: 'amex', desc: 'BRITISH AIRWAYS', cardLast4: '1007' })
+    if (idx === 18 || idx === 6) add(merchant('Lawrence Park Dental'), { date: someDay(ym), amount: money(180, 320), ...onCard() })
+  })
+
+  return txns
+}
+
+// Generated once at module load — deterministic.
+export const DEMO_RAW_TXNS: DemoRawTxn[] = buildTxns()
+
+// ---------------------------------------------------------------------------
+// Derived shapes (mirror what each loader / page expects)
+// ---------------------------------------------------------------------------
+const NO_CATEGORY = { name: 'Uncategorized', color: '#94a3b8' }
+const catById = new Map(DEMO_CATEGORIES.map((c) => [c.id, c]))
+const merchById = new Map(DEMO_MERCHANTS.map((m) => [m.id, m]))
+
+/** Mirror of analytics.loadAllFlows(): non-payment rows, joined + effective cat. */
+export function demoAllFlows(): EnrichedTxn[] {
+  return DEMO_RAW_TXNS.filter((r) => !r.isPayment).map((r) => {
+    const m = merchById.get(r.merchantId)!
+    const effectiveCatId = r.txnCategoryId ?? m.categoryId ?? null
+    const cat = effectiveCatId != null ? catById.get(effectiveCatId) : undefined
+    return {
+      id: r.id,
+      source: r.source,
+      flow: r.flow,
+      txnDate: r.txnDate,
+      rawDescription: r.rawDescription,
+      amount: r.amount,
+      merchantId: m.id,
+      merchantName: m.name,
+      categoryId: effectiveCatId,
+      categoryName: cat?.name ?? NO_CATEGORY.name,
+      categoryColor: cat?.color ?? NO_CATEGORY.color,
+      isRecurring: r.txnRecurring ?? m.defaultRecurring,
+      isSpecial: r.txnSpecial ?? m.defaultSpecial,
+      batchId: r.batchId,
+    }
+  })
+}
+
+/** categories table rows (id, name, color, kind, …). */
+export function demoCategoryRows() {
+  return DEMO_CATEGORIES.map((c) => ({ ...c }))
+}
+
+/** merchants table rows. */
+export function demoMerchantRows() {
+  return DEMO_MERCHANTS.map((m) => ({ ...m }))
+}
+
+/** budget_settings shape. */
+export function demoBudgetSettings(): { targetNet: number; periodMode: 'year' | '12mo' } {
+  return { targetNet: 0, periodMode: 'year' }
+}
+
+/** budget_goals rows ({ categoryId, goalAmount } — a few overrides; rest use AI). */
+export function demoBudgetGoalRows() {
+  return [
+    { categoryId: catId('Groceries'), goalAmount: '850' },
+    { categoryId: catId('Dining'), goalAmount: '300' },
+    { categoryId: catId('Shopping'), goalAmount: '250' },
+  ]
+}
+
+/** Enabled projection rules (lib view). */
+export function demoProjectionRules(): ProjectionRule[] {
+  return [
+    { merchantId: merchant('Distributel').id, merchantName: 'Distributel', label: 'Internet', cadence: 'monthly', amountMode: 'last', fixedAmount: null },
+    { merchantId: merchant('Kumon').id, merchantName: 'Kumon', label: 'Kumon', cadence: 'monthly', amountMode: 'average', fixedAmount: null },
+    { merchantId: merchant('Toronto Water').id, merchantName: 'Toronto Water', label: 'Water', cadence: 'quarterly', amountMode: 'average', fixedAmount: null },
+  ]
+}
+
+/** import_batches rows for the dashboard "Recent imports" list. */
+export function demoImportBatches() {
+  const sources: ImportSource[] = ['master', 'amex', 'scotia', 'tangerine']
+  return sources.map((source, i) => ({
+    id: i + 1,
+    source,
+    filename: `${source}-2026-06.csv`,
+    periodLabel: 'June 2026',
+    insertedCount: randInt(40, 120),
+    createdAt: new Date(`2026-06-${String(18 + i).padStart(2, '0')}T08:00:00Z`),
+  }))
+}
+
+/** Recent successful sync times per SYNC_SOURCES order [amex, master, scotia, tangerine]. */
+export function demoSyncTimes(): (string | null)[] {
+  const recent = (h: number) => new Date(Date.now() - h * 3600_000).toISOString()
+  return [recent(5), recent(5), recent(7), recent(7)]
+}
+
+// ---- Activity page ----
+export function demoActivityRows() {
+  return DEMO_RAW_TXNS.map((r) => {
+    const m = merchById.get(r.merchantId)!
+    return {
+      id: r.id,
+      txnDate: r.txnDate,
+      rawDescription: r.rawDescription,
+      amount: r.amount,
+      source: r.source,
+      cardLast4: r.cardLast4,
+      isPayment: r.isPayment,
+      txnCategoryId: r.txnCategoryId,
+      txnRecurring: r.txnRecurring,
+      txnSpecial: r.txnSpecial,
+      splitParentId: r.splitParentId,
+      merchantId: m.id,
+      merchantName: m.name,
+      merchantCategoryId: m.categoryId,
+      merchantRecurring: m.defaultRecurring,
+      merchantSpecial: m.defaultSpecial,
+    }
+  }).sort((a, b) => (a.txnDate < b.txnDate ? 1 : -1))
+}
+export function demoMonthRows() {
+  return DEMO_RAW_TXNS.map((r) => ({ txnDate: r.txnDate }))
+}
+
+// ---- Merchants page aggregates (exclude payments) ----
+export function demoMerchantTotals() {
+  const totals = new Map<number, { total: number; count: number }>()
+  const months = new Map<number, Set<string>>()
+  for (const r of DEMO_RAW_TXNS) {
+    if (r.isPayment) continue
+    const t = totals.get(r.merchantId) ?? { total: 0, count: 0 }
+    t.total += r.amount
+    t.count += 1
+    totals.set(r.merchantId, t)
+    const s = months.get(r.merchantId) ?? new Set<string>()
+    s.add(r.txnDate.slice(0, 7))
+    months.set(r.merchantId, s)
+  }
+  return {
+    totals: [...totals.entries()].map(([merchantId, v]) => ({ merchantId, total: v.total, count: v.count })),
+    monthCounts: [...months.entries()].map(([merchantId, s]) => ({ merchantId, monthCount: s.size })),
+  }
+}
+
+// ---- Categories page counts ----
+export function demoCategoryCounts() {
+  const counts = new Map<number, number>()
+  for (const r of DEMO_RAW_TXNS) {
+    const m = merchById.get(r.merchantId)!
+    const eff = r.txnCategoryId ?? m.categoryId
+    if (eff != null) counts.set(eff, (counts.get(eff) ?? 0) + 1)
+  }
+  return {
+    txnCounts: [] as { categoryId: number | null; count: number }[],
+    merchantCats: [...counts.entries()].map(([categoryId, count]) => ({ categoryId, count })),
+  }
+}
+
+// ---- Custom reports ----
+export function demoCustomReports(): { id: number; name: string; pinned: boolean; sortOrder: number; range: string; series: ReportSeries[] }[] {
+  return [
+    {
+      id: 1,
+      name: 'Eating out vs Groceries',
+      pinned: true,
+      sortOrder: 0,
+      range: '6',
+      series: [
+        { name: 'Dining', color: '#f97316', categoryIds: [catId('Dining')], merchantIds: [] },
+        { name: 'Groceries', color: '#16a34a', categoryIds: [catId('Groceries')], merchantIds: [] },
+      ],
+    },
+    {
+      id: 2,
+      name: 'Discretionary',
+      pinned: false,
+      sortOrder: 1,
+      range: '12',
+      series: [
+        { name: 'Fun', color: '#a855f7', categoryIds: [catId('Entertainment'), catId('Dining'), catId('Travel')], merchantIds: [] },
+      ],
+    },
+  ]
+}
+
+// ---------------------------------------------------------------------------
+// Goals (hand-built final views — avoids re-deriving the full goals math)
+// ---------------------------------------------------------------------------
+function savingsSeries(months: number, end: number): { ym: string; value: number }[] {
+  const out: { ym: string; value: number }[] = []
+  let v = Math.max(0, end - months * (end / (months + 2)))
+  for (let i = months; i >= 0; i--) {
+    const ym = addMonths(ANCHOR_YM, -i)
+    out.push({ ym, value: Math.round(v) })
+    v += (end - v) / Math.max(1, i)
+  }
+  out[out.length - 1] = { ym: ANCHOR_YM, value: end }
+  return out
+}
+
+function demoMortgageProjection(): MortgageProjection {
+  const startYm = addMonths(ANCHOR_YM, -23)
+  const series: { ym: string; actual: number | null; projected: number; pace: number }[] = []
+  const start = 318000
+  const payoffMonths = 132 // ~11 years out
+  let bal = start
+  for (let i = 0; i <= 23; i++) {
+    const ym = addMonths(startYm, i)
+    bal = Math.max(0, bal - 1850 + bal * (0.052 / 12))
+    series.push({
+      ym,
+      actual: Math.round(bal),
+      projected: Math.round(bal),
+      pace: Math.round(start - (start / payoffMonths) * i),
+    })
+  }
+  return {
+    targetYm: '2031-09',
+    currentBalance: Math.round(bal),
+    monthsToTarget: 63,
+    regularPayment: 2150,
+    extraPayment: 1100,
+    recentPayment: 3250,
+    requiredMonthly: 3980,
+    recommendedExtra: 1830,
+    prepay: 730,
+    projectedPayoffYm: '2032-02',
+    onTrack: false,
+    series,
+  }
+}
+
+export function demoGoalsData(): {
+  goals: GoalView[]
+  asOfYm: string
+  suggestNetZero: boolean
+  monthStats: { thisMonth: number; lastMonth: number }
+} {
+  const goals: GoalView[] = [
+    {
+      id: 1,
+      name: 'Family Vacation',
+      emoji: '🏖️',
+      color: '#06b6d4',
+      kind: 'savings',
+      notify: true,
+      archived: false,
+      sortOrder: 0,
+      targetAmount: 6000,
+      targetDate: '2026-12-31',
+      annualRate: null,
+      value: 3850,
+      contributed: 3850,
+      progressPct: 3850 / 6000,
+      projectedCompletionYm: '2026-11',
+      milestone: 'Over halfway there — keep it up! 🎯',
+      series: savingsSeries(10, 3850),
+      mortgage: null,
+      netZero: null,
+    },
+    {
+      id: 2,
+      name: 'Emergency Fund',
+      emoji: '🛟',
+      color: '#16a34a',
+      kind: 'savings',
+      notify: false,
+      archived: false,
+      sortOrder: 1,
+      targetAmount: 20000,
+      targetDate: null,
+      annualRate: null,
+      value: 12400,
+      contributed: 12400,
+      progressPct: 12400 / 20000,
+      projectedCompletionYm: '2027-08',
+      milestone: 'Solid cushion building. 💪',
+      series: savingsSeries(18, 12400),
+      mortgage: null,
+      netZero: null,
+    },
+    {
+      id: 3,
+      name: 'Mortgage Freedom',
+      emoji: '🏠',
+      color: '#10b981',
+      kind: 'mortgage',
+      notify: true,
+      archived: false,
+      sortOrder: 1000,
+      targetAmount: 0,
+      targetDate: '2031-09-05',
+      annualRate: 0.052,
+      value: demoMortgageProjection().currentBalance,
+      contributed: 0,
+      progressPct: null,
+      projectedCompletionYm: null,
+      milestone: 'Behind pace — add $730/mo extra to catch up. 🔴',
+      series: [],
+      mortgage: demoMortgageProjection(),
+      netZero: null,
+    },
+  ]
+  return {
+    goals,
+    asOfYm: ANCHOR_YM,
+    suggestNetZero: false,
+    monthStats: { thisMonth: 350, lastMonth: 500 },
+  }
+}
+
+export function demoPendingReviews(): PendingReview[] {
+  // The most recent $900 Scotia investment transfer, awaiting allocation.
+  const inv = DEMO_RAW_TXNS.filter((r) => r.merchantId === merchant('Investment (iTrade)').id)
+    .sort((a, b) => (a.txnDate < b.txnDate ? 1 : -1))[0]
+  if (!inv) return []
+  return [
+    {
+      id: 1,
+      transactionId: inv.id,
+      direction: 'out',
+      date: inv.txnDate,
+      amount: inv.amount,
+      merchant: 'Investment (iTrade)',
+      suggestedGoalId: 2,
+      goals: [
+        { id: 1, name: 'Family Vacation', emoji: '🏖️' },
+        { id: 2, name: 'Emergency Fund', emoji: '🛟' },
+      ],
+    },
+  ]
+}

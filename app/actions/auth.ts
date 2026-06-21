@@ -51,6 +51,24 @@ export async function login(state: LoginState, formData: FormData): Promise<Logi
   redirect('/')
 }
 
+/**
+ * Start a read-only demo session — no password. Sets a signed `demo` session
+ * cookie so the visitor can browse every feature with synthetic data; writes are
+ * blocked by requireAuth and pages serve app/lib/demo-data.ts.
+ */
+export async function enterDemo(): Promise<void> {
+  const token = await createSessionToken({ demo: true })
+  const cookieStore = await cookies()
+  cookieStore.set(COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 7 * 24 * 60 * 60,
+    path: '/',
+  })
+  redirect('/')
+}
+
 export async function logout(): Promise<void> {
   const cookieStore = await cookies()
   cookieStore.delete(COOKIE_NAME)

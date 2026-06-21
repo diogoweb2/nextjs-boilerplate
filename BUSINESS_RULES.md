@@ -551,3 +551,25 @@ mortgage uses a ⬇ "closer to payoff" framing. No new endpoint or table.
 Run after pulling this change: `npm run db:push` (adds `goals`, `goal_entries`, `transfer_reviews`).
 The goal-spend feature adds `transfer_reviews.direction` and a `Goal Spend` income category — rerun
 `npm run db:push && npm run db:seed`.
+
+## 11. Demo mode (read-only showcase)
+
+The login page has an **"Explore the demo"** button (`enterDemo`, `app/actions/auth.ts`) that
+starts a session **with no password**. It mints the normal signed session cookie but with a
+`demo: true` flag in the payload (`app/lib/session.ts`), so it authenticates for navigation like
+any session. `isDemoSession()` (`app/lib/demo.ts`) reads that flag.
+
+- **All data is synthetic.** Every read path branches on `isDemoSession()` and returns the
+  fabricated dataset in `app/lib/demo-data.ts` instead of touching the database — so a visitor
+  never sees real numbers. The data is generated deterministically (seeded PRNG) from one
+  canonical set of transactions/merchants/categories, so every page is internally consistent.
+  Branch points: `loadAllFlows` (covers Overview/Trends/Income/Budget/Custom/Settings),
+  `getBudgetSettings`, `loadProjectionRules`, `loadGoalsData`, `loadPendingReviews`, and the
+  direct table reads in each page (dashboard, budget, settings, activity, merchants, categories,
+  custom).
+- **Read-only.** Every mutating Server Action calls `requireAuth()` first, which **throws** for a
+  demo session — so one check blocks all writes. Read loaders never call `requireAuth`, so demo
+  reads work. A sticky amber banner (`app/components/DemoBanner.tsx`, rendered from the root
+  layout) says editing is disabled and offers "Exit demo" (logout).
+- The synthetic dataset is committed (safe — it's all made up). When adding a new page/loader,
+  add an `isDemoSession()` branch so it doesn't fall through to real data.

@@ -6,17 +6,23 @@ import { loadAllFlows } from '@/app/lib/analytics'
 import { computeBudget, type CategoryMeta } from '@/app/lib/budget'
 import { getBudgetSettings } from '@/app/actions/budget'
 import { loadProjectionRules } from '@/app/actions/projection'
+import { isDemoSession } from '@/app/lib/demo'
 
 export const dynamic = 'force-dynamic'
 
 export default async function BudgetPage() {
-  const [all, catRows, goalRows, settings, rules] = await Promise.all([
-    loadAllFlows(),
-    db.select().from(categories),
-    db.select().from(budgetGoals),
-    getBudgetSettings(),
-    loadProjectionRules(),
-  ])
+  const [all, catRows, goalRows, settings, rules] = (await isDemoSession())
+    ? await (async () => {
+        const d = await import('@/app/lib/demo-data')
+        return [d.demoAllFlows(), d.demoCategoryRows(), d.demoBudgetGoalRows(), d.demoBudgetSettings(), d.demoProjectionRules()] as const
+      })()
+    : await Promise.all([
+        loadAllFlows(),
+        db.select().from(categories),
+        db.select().from(budgetGoals),
+        getBudgetSettings(),
+        loadProjectionRules(),
+      ])
 
   const meta: CategoryMeta[] = catRows.map((c) => ({ id: c.id, name: c.name, color: c.color, kind: c.kind }))
   const savedGoals = new Map(goalRows.map((g) => [g.categoryId, Number(g.goalAmount)]))

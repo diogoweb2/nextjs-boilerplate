@@ -5,10 +5,15 @@ import { eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { budgetSettings, budgetGoals } from '@/db/schema'
 import { requireAuth } from '@/app/lib/auth-guard'
+import { isDemoSession } from '@/app/lib/demo'
 import type { PeriodMode } from '@/app/lib/budget'
 
 /** Read the singleton settings row, creating it with defaults on first access. */
 export async function getBudgetSettings(): Promise<{ targetNet: number; periodMode: PeriodMode }> {
+  if (await isDemoSession()) {
+    const { demoBudgetSettings } = await import('@/app/lib/demo-data')
+    return demoBudgetSettings()
+  }
   const [row] = await db.select().from(budgetSettings).limit(1)
   if (row) return { targetNet: Number(row.targetNet), periodMode: row.periodMode }
   return { targetNet: 0, periodMode: 'year' }

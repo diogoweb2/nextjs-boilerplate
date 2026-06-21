@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { transactions, merchants, categories } from '@/db/schema'
 import { formatMonth } from '@/app/lib/format'
+import { isDemoSession } from '@/app/lib/demo'
 
 export type ImportSource = 'master' | 'amex' | 'tangerine' | 'scotia'
 export type Flow = 'expense' | 'income' | 'transfer'
@@ -31,6 +32,10 @@ const NO_CATEGORY = { name: 'Uncategorized', color: '#94a3b8' }
  * (hundreds of rows/year) so we aggregate in JS for flexibility.
  */
 export async function loadAllFlows(): Promise<EnrichedTxn[]> {
+  if (await isDemoSession()) {
+    const { demoAllFlows } = await import('@/app/lib/demo-data')
+    return demoAllFlows()
+  }
   const cats = await db.select().from(categories)
   const catMap = new Map(cats.map((c) => [c.id, c]))
 

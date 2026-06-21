@@ -11,15 +11,21 @@ import {
   monthlyUnavoidable,
 } from '@/app/lib/projection'
 import { loadProjectionRules } from '@/app/actions/projection'
+import { isDemoSession } from '@/app/lib/demo'
 
 export const dynamic = 'force-dynamic'
 
 export default async function SettingsPage() {
-  const [all, rules, merchantRows] = await Promise.all([
-    loadAllFlows(),
-    loadProjectionRules(),
-    db.select().from(merchants),
-  ])
+  const [all, rules, merchantRows] = (await isDemoSession())
+    ? await (async () => {
+        const d = await import('@/app/lib/demo-data')
+        return [d.demoAllFlows(), d.demoProjectionRules(), d.demoMerchantRows()] as const
+      })()
+    : await Promise.all([
+        loadAllFlows(),
+        loadProjectionRules(),
+        db.select().from(merchants),
+      ])
   const anchor = anchorMonth(all)
 
   const existing = new Set(rules.map((r) => r.merchantId))

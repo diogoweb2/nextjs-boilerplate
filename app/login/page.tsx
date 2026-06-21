@@ -1,7 +1,7 @@
 'use client'
 
 import { useActionState, useState } from 'react'
-import { login, type LoginState } from '@/app/actions/auth'
+import { login, enterDemo, type LoginState } from '@/app/actions/auth'
 
 export default function LoginPage() {
   const [state, action, pending] = useActionState<LoginState, FormData>(login, undefined)
@@ -82,6 +82,24 @@ export default function LoginPage() {
           >
             {pending ? 'Signing in…' : 'Sign in'}
           </button>
+        </form>
+
+        <div className="my-5 flex items-center gap-3 text-xs text-zinc-400">
+          <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+          or
+          <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+        </div>
+
+        <form action={enterDemo}>
+          <button
+            type="submit"
+            className="w-full rounded-lg border border-dashed border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:border-zinc-500 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-700/50"
+          >
+            🔍 Explore the demo
+          </button>
+          <p className="mt-2 text-center text-xs text-zinc-400">
+            Sample data, no sign-in — view every feature, nothing is editable.
+          </p>
         </form>
       </div>
     </div>

@@ -15,15 +15,21 @@ import {
   type ReportRange,
 } from '@/app/lib/custom-reports'
 import { formatCurrency } from '@/app/lib/format'
+import { isDemoSession } from '@/app/lib/demo'
 
 export const dynamic = 'force-dynamic'
 
 export default async function CustomPage() {
-  const [all, catRows, reportRows] = await Promise.all([
-    loadEnriched(),
-    db.select().from(categories).orderBy(categories.name),
-    db.select().from(customReports).orderBy(customReports.sortOrder),
-  ])
+  const [all, catRows, reportRows] = (await isDemoSession())
+    ? await (async () => {
+        const d = await import('@/app/lib/demo-data')
+        return [d.demoAllFlows().filter((t) => t.flow === 'expense'), d.demoCategoryRows(), d.demoCustomReports()] as const
+      })()
+    : await Promise.all([
+        loadEnriched(),
+        db.select().from(categories).orderBy(categories.name),
+        db.select().from(customReports).orderBy(customReports.sortOrder),
+      ])
 
   const hasData = all.length > 0
 

@@ -7,6 +7,7 @@ import { PeriodSelector } from '@/app/components/PeriodSelector'
 import { cardholderName } from '@/app/lib/cardholders'
 import { parsePeriodParams } from '@/app/lib/params'
 import { addMonths } from '@/app/lib/analytics'
+import { isDemoSession } from '@/app/lib/demo'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,33 +24,38 @@ export default async function TransactionsPage({
   const rawMonths = Number(Array.isArray(sp.months) ? sp.months[0] : sp.months)
   const monthsWindow = [1, 2, 3, 6, 12].includes(rawMonths) ? rawMonths : null
 
-  const [rows, catRows, monthRows] = await Promise.all([
-    db
-      .select({
-        id: transactions.id,
-        txnDate: transactions.txnDate,
-        rawDescription: transactions.rawDescription,
-        amount: transactions.amount,
-        source: transactions.source,
-        cardLast4: transactions.cardLast4,
-        isPayment: transactions.isPayment,
-        txnCategoryId: transactions.categoryId,
-        txnRecurring: transactions.isRecurring,
-        txnSpecial: transactions.isSpecial,
-        splitParentId: transactions.splitParentId,
-        merchantId: merchants.id,
-        merchantName: merchants.name,
-        merchantCategoryId: merchants.categoryId,
-        merchantRecurring: merchants.defaultRecurring,
-        merchantSpecial: merchants.defaultSpecial,
-      })
-      .from(transactions)
-      .innerJoin(merchants, eq(transactions.merchantId, merchants.id))
-      .orderBy(desc(transactions.txnDate))
-      .limit(2000),
-    db.select().from(categories).orderBy(categories.name),
-    db.select({ txnDate: transactions.txnDate }).from(transactions),
-  ])
+  const [rows, catRows, monthRows] = (await isDemoSession())
+    ? await (async () => {
+        const d = await import('@/app/lib/demo-data')
+        return [d.demoActivityRows(), d.demoCategoryRows(), d.demoMonthRows()] as const
+      })()
+    : await Promise.all([
+        db
+          .select({
+            id: transactions.id,
+            txnDate: transactions.txnDate,
+            rawDescription: transactions.rawDescription,
+            amount: transactions.amount,
+            source: transactions.source,
+            cardLast4: transactions.cardLast4,
+            isPayment: transactions.isPayment,
+            txnCategoryId: transactions.categoryId,
+            txnRecurring: transactions.isRecurring,
+            txnSpecial: transactions.isSpecial,
+            splitParentId: transactions.splitParentId,
+            merchantId: merchants.id,
+            merchantName: merchants.name,
+            merchantCategoryId: merchants.categoryId,
+            merchantRecurring: merchants.defaultRecurring,
+            merchantSpecial: merchants.defaultSpecial,
+          })
+          .from(transactions)
+          .innerJoin(merchants, eq(transactions.merchantId, merchants.id))
+          .orderBy(desc(transactions.txnDate))
+          .limit(2000),
+        db.select().from(categories).orderBy(categories.name),
+        db.select({ txnDate: transactions.txnDate }).from(transactions),
+      ])
 
   const catMap = new Map(catRows.map((c) => [c.id, c]))
 

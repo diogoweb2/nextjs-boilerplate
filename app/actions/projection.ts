@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { projectionRules, merchants } from '@/db/schema'
 import { requireAuth } from '@/app/lib/auth-guard'
+import { isDemoSession } from '@/app/lib/demo'
 import type { ProjectionRule, Cadence, AmountMode } from '@/app/lib/projection'
 
 const CADENCES: Cadence[] = ['monthly', 'quarterly', 'annual', 'periodic']
@@ -12,6 +13,10 @@ const AMOUNT_MODES: AmountMode[] = ['seasonal', 'average', 'last', 'fixed']
 
 /** Load enabled projection rules joined with their merchant name (lib view). */
 export async function loadProjectionRules(): Promise<ProjectionRule[]> {
+  if (await isDemoSession()) {
+    const { demoProjectionRules } = await import('@/app/lib/demo-data')
+    return demoProjectionRules()
+  }
   const rows = await db
     .select({
       merchantId: projectionRules.merchantId,
