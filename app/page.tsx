@@ -1,10 +1,11 @@
 import { desc, eq } from 'drizzle-orm'
 import { db } from '@/db'
-import { importBatches, categories, budgetGoals } from '@/db/schema'
+import { importBatches, categories, budgetGoals, syncRuns } from '@/db/schema'
 import { AppShell, Card, EmptyHint } from '@/app/components/AppShell'
 import { UploadDialog } from '@/app/components/UploadDialog'
 import { PeriodSelector } from '@/app/components/PeriodSelector'
 import { SyncStatusBar } from '@/app/components/SyncStatusBar'
+import { SyncErrorBanner, type SyncFailure } from '@/app/components/SyncErrorBanner'
 import { SYNC_SOURCES } from '@/app/lib/sync'
 import { StatCard } from '@/app/components/charts/StatCard'
 import { Donut } from '@/app/components/charts/Donut'
@@ -51,7 +52,7 @@ export default async function Home({
       .limit(1)
       .then((rows) => rows[0]?.createdAt?.toISOString() ?? null)
 
-  const [allFlows, catRows, goalRows, settings, rules, batches, syncTimes, pendingReviews] = await Promise.all([
+  const [allFlows, catRows, goalRows, settings, rules, batches, syncTimes, syncRunRows, pendingReviews] = await Promise.all([
     loadAllFlows(),
     db.select().from(categories),
     db.select().from(budgetGoals),
@@ -59,9 +60,26 @@ export default async function Home({
     loadProjectionRules(),
     db.select().from(importBatches).orderBy(desc(importBatches.createdAt)).limit(8),
     Promise.all(SYNC_SOURCES.map((s) => lastSyncQuery(s.source))),
+    db.select().from(syncRuns),
     loadPendingReviews(),
   ])
-  const syncEntries = SYNC_SOURCES.map((s, i) => ({ label: s.label, lastSync: syncTimes[i] }))
+  // Banks whose latest automated sync reported a failure — surfaced as a banner.
+  const syncFailures: SyncFailure[] = SYNC_SOURCES.flatMap((s) => {
+    const run = syncRunRows.find((r) => r.source === s.source)
+    if (!run || run.status !== 'fail') return []
+    return [{
+      label: s.label,
+      lastSuccessAt: run.lastSuccessAt?.toISOString() ?? null,
+      error: run.error,
+      failureCount: run.failureCount,
+    }]
+  })
+  const failedLabels = new Set(syncFailures.map((f) => f.label))
+  const syncEntries = SYNC_SOURCES.map((s, i) => ({
+    label: s.label,
+    lastSync: syncTimes[i],
+    failed: failedLabels.has(s.label),
+  }))
   const all = allFlows.filter((t) => t.flow === 'expense')
 
   const anchor = anchorMonth(all)
@@ -168,6 +186,12 @@ export default async function Home({
           <PeriodSelector showCurrent availableMonths={months_available} />
         </div>
       </div>
+
+      {syncFailures.length > 0 && (
+        <div className="mb-5">
+          <SyncErrorBanner failures={syncFailures} />
+        </div>
+      )}
 
       {pendingReviews.length > 0 && (
         <div className="mb-5">

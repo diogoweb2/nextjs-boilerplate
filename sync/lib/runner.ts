@@ -17,6 +17,7 @@ import { readCredentials } from './keychain'
 import { profileDir, logsDir } from './profile'
 import { postCsv } from './ingest'
 import { notify } from './notify'
+import { reportSyncStatus } from './status'
 import { applyStealth } from './stealth'
 import type { Adapter } from '../adapters/types'
 
@@ -139,7 +140,10 @@ export async function runSync(
     const summary = `${result.inserted} inserted, ${result.skipped} skipped (${result.period})`
     console.log(`✓ ingested "${result.source}": ${summary}`)
     notify(`Budget sync — ${label} ✓`, summary)
+    // Record success on the server so the dashboard clears any prior failure.
+    await reportSyncStatus(adapter.importSource, 'ok')
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
     // Capture state for debugging (esp. headless failures that can't be watched).
     try {
       const shot = join(logsDir(), `${source}-error-${Date.now()}.png`)
@@ -148,9 +152,12 @@ export async function runSync(
       await page.screenshot({ path: shot, fullPage: true })
       console.error(`  screenshot: ${shot}`)
     } catch {}
-    notify(`Budget sync — ${label} FAILED`, err instanceof Error ? err.message : String(err))
+    notify(`Budget sync — ${label} FAILED`, message)
+    // Record the failure on the server so the dashboard shows this bank as failed
+    // (and keeps its last-worked time). Best-effort — never masks the real error.
+    if (!manual) await reportSyncStatus(adapter.importSource, 'fail', message)
     if (keepOpenOnFail) {
-      console.error(`\n✗ ${label} failed: ${err instanceof Error ? err.message : String(err)}`)
+      console.error(`\n✗ ${label} failed: ${message}`)
       console.error('=== Browser left OPEN for inspection. Press Ctrl+C in this terminal to quit. ===')
       await new Promise(() => {}) // keep the process (and browser) alive
     }

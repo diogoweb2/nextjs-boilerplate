@@ -319,6 +319,22 @@ banner so a broken pipeline still surfaces.
 Adding a new source: add one line to `SYNC_SOURCES` in `app/lib/sync.ts` and the digest (and
 the dashboard badge) pick it up automatically.
 
+## Failure reporting (dashboard banner)
+
+Every run reports its outcome to the deployed app via `POST /api/sync-status` (token-authed,
+same bearer token as ingest — `lib/status.ts`, called from `lib/runner.ts`). On success it
+records `ok` and stamps "last worked"; on failure it records `fail` with the error message,
+preserving the prior last-worked time.
+
+The dashboard reads the `sync_runs` table and, if any source's latest run failed, shows a red
+banner naming the bank(s) and when each last worked (`app/components/SyncErrorBanner.tsx`) — and
+tints that source red in the status bar. This surfaces a break **immediately**, instead of
+waiting for the 3-day staleness heuristic. The next successful run clears it automatically.
+
+No extra setup: the report URL is derived from `INGEST_URL`, and a failed report never breaks a
+run (best-effort). One-time after pulling this change: `npm run db:push` to create `sync_runs`,
+then redeploy.
+
 ## Next (phases 3–5)
 
 All four sources (Rogers, Amex, Scotia, Tangerine) are live. Remaining: push/email alerts on

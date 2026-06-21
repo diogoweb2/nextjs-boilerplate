@@ -88,6 +88,29 @@ export const importBatches = pgTable('import_batches', {
 })
 
 /**
+ * Per-source health of the automated daily sync (the Mac-side budget-sync
+ * runner). One upserted row per source: the runner POSTs /api/sync-status with
+ * 'ok' or 'fail' on every run, so the dashboard can show *which* bank failed and
+ * when it last worked — without waiting for the 3-day staleness heuristic.
+ *
+ * `lastSuccessAt` is "the last time it actually worked" (login → export → post
+ * all succeeded), preserved across failures. `error` holds the most recent
+ * failure message; `failureCount` is consecutive failures (reset to 0 on ok).
+ * A successful sync that imports 0 new rows still counts as working.
+ */
+export const syncRuns = pgTable('sync_runs', {
+  id: serial('id').primaryKey(),
+  source: text('source', { enum: ['master', 'amex', 'tangerine', 'scotia'] })
+    .notNull()
+    .unique(),
+  status: text('status', { enum: ['ok', 'fail'] }).notNull(),
+  lastRunAt: timestamp('last_run_at').defaultNow().notNull(),
+  lastSuccessAt: timestamp('last_success_at'),
+  error: text('error'),
+  failureCount: integer('failure_count').notNull().default(0),
+})
+
+/**
  * Consolidated transactions from both card sources.
  * Sign convention: positive = money out (expense), negative = money in
  * (refund/payment). isPayment rows (card payments) are excluded from analytics.
@@ -403,6 +426,7 @@ export type Category = typeof categories.$inferSelect
 export type Merchant = typeof merchants.$inferSelect
 export type MerchantRule = typeof merchantRules.$inferSelect
 export type ImportBatch = typeof importBatches.$inferSelect
+export type SyncRun = typeof syncRuns.$inferSelect
 export type Transaction = typeof transactions.$inferSelect
 export type CustomReport = typeof customReports.$inferSelect
 export type BudgetSettings = typeof budgetSettings.$inferSelect
