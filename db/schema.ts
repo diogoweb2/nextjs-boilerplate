@@ -229,6 +229,95 @@ export const projectionRules = pgTable('projection_rules', {
 })
 
 /**
+ * Goals feature (the /goals page). A goal is something the owner saves toward by
+ * moving money to an investment/savings account. Two kinds:
+ *  - 'savings'  — kitchen reno, debt-recovery, generic invest. Its current value
+ *    is Σ goal_entries.amount and can be reconciled to a market value (stocks).
+ *  - 'mortgage' — the special payoff card: balance counts DOWN to $0 by a target
+ *    date (the owner's 50th birthday). annualRate is back-solved from overrides.
+ * See BUSINESS_RULES.md §10. Personal figures (start balance, birth date) come
+ * from .env.local, never committed code.
+ */
+export const goals = pgTable('goals', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  emoji: text('emoji').notNull().default('🎯'),
+  color: text('color').notNull().default('#6366f1'),
+  // 'savings' = generic/market-valued goal; 'mortgage' = payoff projection;
+  // 'netzero' = the year-net recovery tracker (carries a deficit across years
+  // until clawed back, then auto-archives). See BUSINESS_RULES.md §10.
+  kind: text('kind', { enum: ['savings', 'mortgage', 'netzero'] })
+    .notNull()
+    .default('savings'),
+  // Optional target. For mortgage this is 0 (payoff); targetDate is the deadline.
+  targetAmount: numeric('target_amount', { precision: 12, scale: 2 }),
+  targetDate: date('target_date'),
+  // Mortgage only: current interest estimate, refined when the owner overrides
+  // the real balance (see app/lib/mortgage.ts → inferRate).
+  annualRate: numeric('annual_rate', { precision: 6, scale: 4 }),
+  // Include this goal in immediate push notifications when its value changes.
+  notify: boolean('notify').notNull().default(false),
+  archived: boolean('archived').notNull().default(false),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+
+/**
+ * The ledger behind a goal's value and its sparkline. kind:
+ *  - 'contribution' — money added (signed amount). From a transfer allocation
+ *    (transactionId set) or a manual "extra" deposit (no txn, no budget impact).
+ *  - 'adjustment'   — savings market reconcile; amount = signed delta
+ *    (new value − old value), so the running Σ equals the reconciled value.
+ *  - 'balance'      — mortgage only; amount = the ABSOLUTE balance observed or
+ *    overridden on occurredAt.
+ * A 3k transfer split across goals is several 'contribution' rows that share one
+ * transactionId.
+ */
+export const goalEntries = pgTable(
+  'goal_entries',
+  {
+    id: serial('id').primaryKey(),
+    goalId: integer('goal_id')
+      .notNull()
+      .references(() => goals.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: ['contribution', 'adjustment', 'balance'] })
+      .notNull()
+      .default('contribution'),
+    amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
+    transactionId: integer('transaction_id').references(() => transactions.id, {
+      onDelete: 'set null',
+    }),
+    occurredAt: date('occurred_at').notNull(),
+    note: text('note'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => [index('goal_entries_goal_idx').on(t.goalId)]
+)
+
+/**
+ * The dashboard "needs a decision" queue. On import, every Scotia transfer the
+ * classifier routes to Investment (the $900 kitchen transfer and any non-$1,100
+ * customer transfer) gets a pending row, surfaced prominently on the dashboard
+ * until the owner says what it was for (see app/actions/import.ts).
+ */
+export const transferReviews = pgTable('transfer_reviews', {
+  id: serial('id').primaryKey(),
+  transactionId: integer('transaction_id')
+    .notNull()
+    .unique()
+    .references(() => transactions.id, { onDelete: 'cascade' }),
+  status: text('status', { enum: ['pending', 'resolved', 'dismissed'] })
+    .notNull()
+    .default('pending'),
+  // Auto-suggested goal, learned from prior transfers of the same amount.
+  suggestedGoalId: integer('suggested_goal_id').references(() => goals.id, {
+    onDelete: 'set null',
+  }),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  resolvedAt: timestamp('resolved_at'),
+})
+
+/**
  * Web Push subscriptions for the daily digest notification. One row per
  * browser/device that opted in (Settings → Notifications). The digest runner
  * triggers POST /api/digest, which sends the notification to every row here.
@@ -292,6 +381,17 @@ export const transactionsRelations = relations(transactions, ({ one }) => ({
   }),
 }))
 
+export const goalsRelations = relations(goals, ({ many }) => ({
+  entries: many(goalEntries),
+}))
+
+export const goalEntriesRelations = relations(goalEntries, ({ one }) => ({
+  goal: one(goals, {
+    fields: [goalEntries.goalId],
+    references: [goals.id],
+  }),
+}))
+
 export type Category = typeof categories.$inferSelect
 export type Merchant = typeof merchants.$inferSelect
 export type MerchantRule = typeof merchantRules.$inferSelect
@@ -303,3 +403,6 @@ export type BudgetGoal = typeof budgetGoals.$inferSelect
 export type ProjectionRule = typeof projectionRules.$inferSelect
 export type PushSubscriptionRow = typeof pushSubscriptions.$inferSelect
 export type LoginAttempt = typeof loginAttempts.$inferSelect
+export type Goal = typeof goals.$inferSelect
+export type GoalEntry = typeof goalEntries.$inferSelect
+export type TransferReview = typeof transferReviews.$inferSelect

@@ -15,6 +15,7 @@ function revalidateAll() {
   revalidatePath('/budget')
   revalidatePath('/custom')
   revalidatePath('/merchants')
+  revalidatePath('/goals')
 }
 
 /**

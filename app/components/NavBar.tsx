@@ -7,6 +7,7 @@ import { logout } from '@/app/actions/auth'
 
 const LINKS = [
   { href: '/', label: 'Overview', icon: '◎' },
+  { href: '/goals', label: 'Goals', icon: '◔' },
   { href: '/income', label: 'Income', icon: '＄' },
   { href: '/budget', label: 'Budget', icon: '◇' },
   { href: '/trends', label: 'Trends', icon: '↗' },

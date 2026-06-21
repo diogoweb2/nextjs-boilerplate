@@ -21,6 +21,8 @@ import { computeBudget, computeNetTrajectory, FIXED_CATEGORIES, type CategoryMet
 import { computeMonthBurndown, computePeriodBurndown, type BurndownData } from '@/app/lib/projection'
 import { getBudgetSettings } from '@/app/actions/budget'
 import { loadProjectionRules } from '@/app/actions/projection'
+import { loadPendingReviews } from '@/app/actions/goals'
+import { TransferReview } from '@/app/components/TransferReview'
 import {
   formatCurrency,
   formatCurrencyCompact,
@@ -49,7 +51,7 @@ export default async function Home({
       .limit(1)
       .then((rows) => rows[0]?.createdAt?.toISOString() ?? null)
 
-  const [allFlows, catRows, goalRows, settings, rules, batches, syncTimes] = await Promise.all([
+  const [allFlows, catRows, goalRows, settings, rules, batches, syncTimes, pendingReviews] = await Promise.all([
     loadAllFlows(),
     db.select().from(categories),
     db.select().from(budgetGoals),
@@ -57,6 +59,7 @@ export default async function Home({
     loadProjectionRules(),
     db.select().from(importBatches).orderBy(desc(importBatches.createdAt)).limit(8),
     Promise.all(SYNC_SOURCES.map((s) => lastSyncQuery(s.source))),
+    loadPendingReviews(),
   ])
   const syncEntries = SYNC_SOURCES.map((s, i) => ({ label: s.label, lastSync: syncTimes[i] }))
   const all = allFlows.filter((t) => t.flow === 'expense')
@@ -165,6 +168,12 @@ export default async function Home({
           <PeriodSelector showCurrent availableMonths={months_available} />
         </div>
       </div>
+
+      {pendingReviews.length > 0 && (
+        <div className="mb-5">
+          <TransferReview reviews={pendingReviews} />
+        </div>
+      )}
 
       {!ov.hasData ? (
         <Card title="Get started">

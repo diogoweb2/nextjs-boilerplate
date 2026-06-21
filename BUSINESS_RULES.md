@@ -440,3 +440,81 @@ Answers "are we ahead or behind, and which way is it trending?" Logic is pure in
 - **Common-start clamp**: when viewing both accounts, the lower bound is the first month both
   accounts have data (≈ 2024-06, the oldest Scotia month) so Tangerine-only history doesn't
   skew the Net.
+
+## 10. Goals (`/goals`)
+
+The owner moves money to investment/savings accounts (mostly Scotia → iTrade) for different
+reasons that used to all collapse into one `Investment` expense. Goals let the owner say what a
+transfer was *for*, track progress to a target, and handle market-valued and mortgage goals. The
+**Goals** tab is 2nd in the nav. Page `app/goals/page.tsx`, client UI
+`app/components/GoalsManager.tsx`, server actions + loaders `app/actions/goals.ts`, pure math in
+`app/lib/goals.ts` (savings value/progress/sparkline) and `app/lib/mortgage.ts` (payoff projection).
+
+### Tables (`db/schema.ts`)
+- **`goals`** — `kind: 'savings' | 'mortgage' | 'netzero'`, `name, emoji, color, sortOrder, archived,
+  notify`, optional `targetAmount` / `targetDate`, and mortgage-only `annualRate`.
+- **`goal_entries`** — the ledger driving a goal's value: `contribution` (money in; signed
+  `amount`; `transactionId` set when it came from a real transfer, null for a manual "extra"
+  deposit), `adjustment` (savings market reconcile; `amount` = signed delta so the running Σ
+  equals the new value), `balance` (mortgage only; `amount` = the absolute statement balance).
+- **`transfer_reviews`** — the dashboard prompt queue (`pending|resolved|dismissed`, unique on
+  `transactionId`, optional `suggestedGoalId`).
+
+A **savings** goal's value = Σ contribution+adjustment amounts. Budget/analytics impact is carried
+**only** by the underlying transaction's `flow`, so goal contributions never double-count.
+
+### Import hook (`app/actions/import.ts` → `createTransferReviews`)
+After each import, every newly-inserted Scotia transfer the classifier routed to the
+**`Investment (iTrade)`** payee (the recurring **$900** and any **non-$1,100** customer transfer —
+`classifyScotia`) gets a `pending` review. The exact **$1,100 → Mortgage** still auto-classifies
+with **no** prompt. `suggestedGoalId` is learned: the goal most often tagged on a prior transfer of
+the same rounded amount. Idempotent.
+
+### Dashboard prompt (`app/components/TransferReview.tsx`)
+Pending reviews render a prominent `--warning` card at the **top** of the dashboard until resolved.
+Per transfer (`resolveTransferReview`): **Count as expense** (default — keep `flow=expense`,
+category `Investment`) · **Don't count** (better-interest move → `flow=transfer`, category
+`Transfer`; leaves analytics) · **Extra mortgage** (not a goal → recategorize to Home / `Mortgage`)
+· **Leave as-is** (dismiss). For the two counting options the owner allocates the amount across one
+or more **savings** goals (split a single transfer across goals).
+
+### Mortgage goal (auto-created, smart projection)
+Bootstrapped on first `/goals` load from `.env.local` (privacy — never committed): **`OWNER_BIRTHDATE`**
+(e.g. `1981-09-05`) and **`MORTGAGE_START_BALANCE`** (e.g. `176702.19`); target = the month the owner
+turns **50**. `projectMortgage` walks the real Home/`Mortgage` payments month-by-month
+(`b = b·(1+r/12) − payment`). Those payments are **split by description**: the contractual
+**regular** payment ("mortgage payment") vs the voluntary **extra** prepayment (the "customer
+transfer" top-ups). The card surfaces them separately and, crucially, the **"Extra needed"** figure
+is just the prepayment required *on top of the regular payment* (`requiredMonthly − regularPayment`),
+not the total — so the owner sees exactly what to set their extra payment to. The chart shows the
+balance line vs a straight **pace** line to $0 by 50, an on-track/behind badge, and (when behind) the
+extra bump to add. "Update balance" records a
+`balance` entry and **back-solves the implied annual rate** (`inferRate`, bisection) from the prior
+snapshot + payments since, sharpening the next projection.
+
+### Net-zero recovery goal (`kind = 'netzero'`)
+A persistent, **multi-year** tracker for "get the year's net back to zero", distinct from the
+`/budget` planner (which is forward-looking and resets each year with no memory of shortfalls).
+Its **value = cumulative net (income − spend) from its start year through the anchor month**, using
+the same definition as the Income/Budget `ytdNet` (`netOverRange` in `app/actions/goals.ts`:
+income-flow summed, positive expenses summed, refunds/payments/transfers excluded). Negative = still
+in the red. Because it's cumulative, the **Dec 31 → Jan 1 rollover is automatic** — a year-end
+deficit simply carries into next year's running total (the card shows "this year net" + "carried
+over").
+- **Start:** the owner creates it via a dashboard-of-goals CTA that appears only when the current
+  calendar year's net is negative and no net-zero goal exists yet (`suggestNetZero`). Tracking
+  starts Jan 1 of the anchor year (stored in `targetDate`).
+- **Reconcile** (`reconcileNetZeroGoals`, run on every import and Goals-page load, idempotent):
+  value ≥ 0 → **congratulate via push + auto-archive**; an archived goal whose *current* year has
+  slipped negative again → **auto-revive**, re-anchoring the start to this year (last year's debt was
+  cleared). So it self-manages forever after the first creation.
+- The value is computed, not from `goal_entries` — there's no Add money / Adjust; the card is
+  read-only with a link to `/budget` to plan the gap.
+
+### Notifications (immediate, per goal)
+When a goal with `notify` on changes value (`addContribution`, `adjustValue`,
+`updateMortgageBalance`, or a `resolveTransferReview` allocation), an immediate Web Push fires via
+`sendPushToAll` (reusing the digest's subscriptions) showing the new value + signed %/$ delta;
+mortgage uses a ⬇ "closer to payoff" framing. No new endpoint or table.
+
+Run after pulling this change: `npm run db:push` (adds `goals`, `goal_entries`, `transfer_reviews`).

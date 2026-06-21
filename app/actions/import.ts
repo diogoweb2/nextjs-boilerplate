@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { eq, inArray, ilike } from 'drizzle-orm'
+import { and, eq, inArray, ilike } from 'drizzle-orm'
 import { db } from '@/db'
 import {
   transactions,
@@ -9,10 +9,13 @@ import {
   merchantRules,
   categories,
   importBatches,
+  goalEntries,
+  transferReviews,
 } from '@/db/schema'
 import { requireAuth } from '@/app/lib/auth-guard'
 import { parseStatement, type ImportSource, type ParsedRow } from '@/app/lib/csv'
 import { normalizeKey, prettify, masterCategoryFor } from '@/app/lib/normalize'
+import { reconcileNetZeroGoals } from '@/app/actions/goals'
 
 export type ImportResult =
   | { ok: true; source: ImportSource; inserted: number; skipped: number; period: string }
@@ -138,6 +141,7 @@ export async function importCsv(formData: FormData): Promise<ImportResult> {
     revalidatePath('/income')
     revalidatePath('/merchants')
     revalidatePath('/transactions')
+    revalidatePath('/goals')
   }
   return result
 }
@@ -214,6 +218,12 @@ export async function ingestStatement(
   // analytics stay correct every year without manual edits.
   await reconcileBelairSplit()
 
+  // Queue investment transfers for the dashboard "what was this for?" prompt.
+  await createTransferReviews(inserted.map((r) => r.id))
+
+  // Keep the net-zero recovery goal in sync (auto-complete / revive on new data).
+  await reconcileNetZeroGoals()
+
   return { ok: true, source, inserted: insertedCount, skipped: skippedCount, period }
 }
 
@@ -269,6 +279,55 @@ export async function reconcileBelairSplit(): Promise<void> {
   }
 }
 
+/**
+ * Queue a Goals review for every freshly-imported investment transfer. The
+ * classifier sends both the recurring $900 (kitchen) and any non-$1,100 customer
+ * transfer to the "Investment (iTrade)" payee; those are the ones the owner needs
+ * to attribute. The exact $1,100 → Mortgage is auto-classified and never queued.
+ * suggestedGoalId is learned: the goal most often tagged on a prior transfer of
+ * the same rounded amount. Idempotent (transactionId is unique).
+ */
+async function createTransferReviews(insertedIds: number[]): Promise<void> {
+  if (insertedIds.length === 0) return
+
+  const rows = await db
+    .select({ id: transactions.id, amount: transactions.amount })
+    .from(transactions)
+    .innerJoin(merchants, eq(transactions.merchantId, merchants.id))
+    .where(
+      and(
+        inArray(transactions.id, insertedIds),
+        eq(merchants.name, 'Investment (iTrade)')
+      )
+    )
+  if (rows.length === 0) return
+
+  // Learn amount → goal from prior tagged contributions (rounded to the dollar).
+  const priorTags = await db
+    .select({ goalId: goalEntries.goalId, amount: transactions.amount })
+    .from(goalEntries)
+    .innerJoin(transactions, eq(goalEntries.transactionId, transactions.id))
+  const votes = new Map<number, Map<number, number>>() // roundedAmount -> goalId -> count
+  for (const t of priorTags) {
+    const key = Math.round(Number(t.amount))
+    const inner = votes.get(key) ?? new Map<number, number>()
+    inner.set(t.goalId, (inner.get(t.goalId) ?? 0) + 1)
+    votes.set(key, inner)
+  }
+  const suggestFor = (amount: number): number | null => {
+    const inner = votes.get(Math.round(amount))
+    if (!inner) return null
+    return [...inner.entries()].sort((a, b) => b[1] - a[1])[0][0]
+  }
+
+  for (const r of rows) {
+    await db
+      .insert(transferReviews)
+      .values({ transactionId: r.id, suggestedGoalId: suggestFor(Number(r.amount)) })
+      .onConflictDoNothing({ target: transferReviews.transactionId })
+  }
+}
+
 /** Undo an import: delete its transactions and the batch record. */
 export async function deleteBatch(batchId: number): Promise<void> {
   await requireAuth()
@@ -279,6 +338,7 @@ export async function deleteBatch(batchId: number): Promise<void> {
   revalidatePath('/income')
   revalidatePath('/merchants')
   revalidatePath('/transactions')
+  revalidatePath('/goals')
 }
 
 /** Used by the merchants page to offer a "clean up empty merchants" path. */

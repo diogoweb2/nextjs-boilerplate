@@ -1,0 +1,116 @@
+/**
+ * Goals — pure value/progress math over the goal_entries ledger. A savings goal's
+ * current value is the running sum of its contribution + adjustment deltas; a
+ * sparkline is that sum bucketed by month. Mortgage goals use app/lib/mortgage.ts
+ * instead. See BUSINESS_RULES.md §10.
+ */
+import { addMonths, monthsBetween } from '@/app/lib/mortgage'
+
+export type EntryLite = {
+  kind: 'contribution' | 'adjustment' | 'balance'
+  amount: number
+  occurredAt: string // YYYY-MM-DD
+}
+
+/** Current value of a savings goal = Σ contributions + Σ adjustment deltas. */
+export function savingsValue(entries: EntryLite[]): number {
+  return round2(
+    entries
+      .filter((e) => e.kind === 'contribution' || e.kind === 'adjustment')
+      .reduce((s, e) => s + e.amount, 0),
+  )
+}
+
+/** Total money actually put in (positive contributions only). */
+export function totalContributed(entries: EntryLite[]): number {
+  return round2(
+    entries.filter((e) => e.kind === 'contribution' && e.amount > 0).reduce((s, e) => s + e.amount, 0),
+  )
+}
+
+/** 0–100 progress toward a target (clamped); null when there is no target. */
+export function progressPct(value: number, target: number | null): number | null {
+  if (!target || target <= 0) return null
+  return Math.max(0, Math.min(100, (value / target) * 100))
+}
+
+/**
+ * Running value bucketed by month, from the first entry's month through `asOfYm`,
+ * for the sparkline. Each point is the cumulative value at that month's end.
+ */
+export function valueSeries(entries: EntryLite[], asOfYm: string): { ym: string; value: number }[] {
+  const relevant = entries
+    .filter((e) => e.kind === 'contribution' || e.kind === 'adjustment')
+    .sort((a, b) => (a.occurredAt < b.occurredAt ? -1 : 1))
+  if (relevant.length === 0) return [{ ym: asOfYm, value: 0 }]
+
+  const deltaByYm = new Map<string, number>()
+  for (const e of relevant) {
+    const ym = e.occurredAt.slice(0, 7)
+    deltaByYm.set(ym, (deltaByYm.get(ym) ?? 0) + e.amount)
+  }
+  const startYm = relevant[0].occurredAt.slice(0, 7)
+  const endYm = monthsBetween(startYm, asOfYm) >= 0 ? asOfYm : startYm
+
+  const out: { ym: string; value: number }[] = []
+  let running = 0
+  for (let ym = startYm; monthsBetween(ym, endYm) >= 0; ym = addMonths(ym, 1)) {
+    running += deltaByYm.get(ym) ?? 0
+    out.push({ ym, value: round2(running) })
+  }
+  return out
+}
+
+/**
+ * Estimated month the goal is reached, from your monthly contribution pace.
+ *
+ * Pace = total contributions over the span of COMPLETED months (first
+ * contribution month → the month before the in-progress anchor), divided by the
+ * number of those months. Excluding the in-progress month stops a partial month
+ * skewing it; dividing by the full span (zero months included) stops a single
+ * seed deposit implying an unrealistically fast finish. We need ≥2 completed
+ * months of history first — otherwise there's no real pattern to project, so we
+ * return null and the card says so. It sharpens each month as the pattern grows.
+ */
+export function projectedCompletionYm(
+  entries: EntryLite[],
+  target: number | null,
+  asOfYm: string,
+): string | null {
+  if (!target || target <= 0) return null
+  const value = savingsValue(entries)
+  if (value >= target) return null
+
+  const completed = entries.filter(
+    (e) => e.kind === 'contribution' && e.amount > 0 && e.occurredAt.slice(0, 7) < asOfYm,
+  )
+  if (completed.length === 0) return null
+
+  const firstYm = completed.reduce(
+    (m, e) => (e.occurredAt.slice(0, 7) < m ? e.occurredAt.slice(0, 7) : m),
+    completed[0].occurredAt.slice(0, 7),
+  )
+  // asOf is in progress, so months from firstYm up to it = the completed span.
+  const monthsElapsed = monthsBetween(firstYm, asOfYm)
+  if (monthsElapsed < 2) return null
+
+  const pace = completed.reduce((s, e) => s + e.amount, 0) / monthsElapsed
+  if (pace <= 0) return null
+  const monthsLeft = Math.ceil((target - value) / pace)
+  return addMonths(asOfYm, monthsLeft)
+}
+
+/** A short, motivational line keyed to a progress percentage. */
+export function milestoneMessage(pct: number | null): string {
+  if (pct === null) return 'Every dollar counts — keep stacking. 💪'
+  if (pct >= 100) return 'Goal smashed! Time to celebrate. 🎉'
+  if (pct >= 75) return 'So close you can taste it — final push! 🔥'
+  if (pct >= 50) return 'Over halfway there. Momentum is on your side. 🚀'
+  if (pct >= 25) return "Quarter of the way — you're building real steam. 💫"
+  if (pct > 0) return 'Off the starting line — every deposit adds up. 🌱'
+  return 'Fresh start. The best time to begin was yesterday. 🌟'
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100
+}
