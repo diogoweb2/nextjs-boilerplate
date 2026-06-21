@@ -31,7 +31,7 @@ import { formatCurrency } from '@/app/lib/format'
 
 // Personal figures stay out of committed code (public repo). Configure in
 // .env.local; neutral fallbacks keep the build working without them.
-const OWNER_BIRTHDATE = process.env.OWNER_BIRTHDATE || '1980-01-01'
+const OWNER_BIRTHDATE = process.env.OWNER_BIRTHDATE || '1981-09-05'
 const MORTGAGE_START_BALANCE = Number(process.env.MORTGAGE_START_BALANCE || '0')
 const PAYOFF_AGE = 50
 const DEFAULT_RATE = 0.055
