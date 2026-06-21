@@ -22,6 +22,13 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next()
   }
 
+  // Public shortcut into the read-only demo: the route handler mints the demo
+  // session cookie and redirects to the dashboard. Must be reachable without an
+  // existing session.
+  if (pathname === '/demo') {
+    return NextResponse.next()
+  }
+
   if (pathname === '/login') {
     // Redirect authenticated users away from login
     const token = request.cookies.get(COOKIE_NAME)?.value
