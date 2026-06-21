@@ -8,7 +8,7 @@ export function WeekdayChart({ data }: { data: { weekday: number; amount: number
   const max = Math.max(1, ...ordered.map((d) => d.amount))
 
   return (
-    <div className="flex h-40 items-end justify-between gap-2">
+    <div className="flex h-40 items-stretch justify-between gap-2">
       {ordered.map((d) => {
         const isWeekend = d.weekday === 0 || d.weekday === 6
         return (
