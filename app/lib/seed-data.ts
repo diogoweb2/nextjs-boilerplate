@@ -41,6 +41,9 @@ export const CATEGORY_SEED: CategorySeed[] = [
   { name: 'Tax Refund', color: '#84cc16', kind: 'income' },
   { name: 'Interest', color: '#14b8a6', kind: 'income' },
   { name: 'Other Income', color: '#4ade80', kind: 'income' },
+  // Money pulled back out of a savings goal to fund its purpose (offsets the
+  // real purchase so net stays correct). See BUSINESS_RULES.md §10.
+  { name: 'Goal Spend', color: '#34d399', kind: 'income' },
   // Neutral (inter-account / ignored transfers; excluded from analytics).
   { name: 'Transfer', color: '#cbd5e1', kind: 'neutral' },
 ]

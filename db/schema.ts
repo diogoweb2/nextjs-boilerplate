@@ -295,10 +295,12 @@ export const goalEntries = pgTable(
 )
 
 /**
- * The dashboard "needs a decision" queue. On import, every Scotia transfer the
- * classifier routes to Investment (the $900 kitchen transfer and any non-$1,100
- * customer transfer) gets a pending row, surfaced prominently on the dashboard
- * until the owner says what it was for (see app/actions/import.ts).
+ * The dashboard "needs a decision" queue. Two directions (see app/actions/import.ts):
+ *  - 'out' — outbound investment transfers (the $900 kitchen transfer and any
+ *    non-$1,100 customer transfer) the owner attributes to a goal (money in).
+ *  - 'in'  — inbound money landing in chequing from the investment account (an
+ *    unknown deposit). Tag it to a goal → it counts as income offsetting a real
+ *    purchase ("spend from a goal"); otherwise keep it as Other Income or ignore.
  */
 export const transferReviews = pgTable('transfer_reviews', {
   id: serial('id').primaryKey(),
@@ -309,6 +311,11 @@ export const transferReviews = pgTable('transfer_reviews', {
   status: text('status', { enum: ['pending', 'resolved', 'dismissed'] })
     .notNull()
     .default('pending'),
+  // 'out' = money leaving to investments (grows a goal); 'in' = money returning
+  // from investments (a goal "spend", counted as income).
+  direction: text('direction', { enum: ['out', 'in'] })
+    .notNull()
+    .default('out'),
   // Auto-suggested goal, learned from prior transfers of the same amount.
   suggestedGoalId: integer('suggested_goal_id').references(() => goals.id, {
     onDelete: 'set null',

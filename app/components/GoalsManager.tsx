@@ -14,6 +14,7 @@ import {
   deleteGoal,
   toggleNotify,
   addContribution,
+  spendFromGoal,
   adjustValue,
   updateMortgageBalance,
   type GoalView,
@@ -124,15 +125,16 @@ export function GoalsManager({
   goals,
   asOfYm,
   suggestNetZero,
+  monthStats,
 }: {
   goals: GoalView[]
   asOfYm: string
   suggestNetZero: boolean
+  monthStats: { thisMonth: number; lastMonth: number }
 }) {
   const active = goals.filter((g) => !g.archived)
   const archived = goals.filter((g) => g.archived)
   const savings = active.filter((g) => g.kind === 'savings')
-  const totalSaved = savings.reduce((s, g) => s + g.value, 0)
   const [showArchived, setShowArchived] = useState(false)
   const orderedActive = useReorder(active)
 
@@ -143,11 +145,20 @@ export function GoalsManager({
         <div className="flex items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold tracking-tight">Your Goals 🎯</h1>
-            <p className="mt-1 text-sm text-[var(--muted)]">
-              {savings.length
-                ? `${formatCurrency(totalSaved)} saved toward ${savings.length} ${savings.length === 1 ? 'goal' : 'goals'}. Keep going!`
-                : 'Set your first goal and watch it grow.'}
-            </p>
+            {savings.length > 0 ? (
+              <div className="mt-1 flex items-baseline gap-2">
+                <span className="text-2xl font-bold tabular-nums">{formatCurrency(monthStats.thisMonth)}</span>
+                <span className="text-sm text-[var(--muted)]">invested this month</span>
+                {monthStats.lastMonth > 0 && (
+                  <span className={`text-sm font-medium ${monthStats.thisMonth >= monthStats.lastMonth ? 'text-[var(--positive)]' : 'text-[var(--negative)]'}`}>
+                    {monthStats.thisMonth >= monthStats.lastMonth ? '↑' : '↓'}{' '}
+                    {formatCurrency(Math.abs(monthStats.thisMonth - monthStats.lastMonth))} vs last month
+                  </span>
+                )}
+              </div>
+            ) : (
+              <p className="mt-1 text-sm text-[var(--muted)]">Set your first goal and watch it grow.</p>
+            )}
           </div>
           <span className="hidden text-4xl sm:block">🚀</span>
         </div>
@@ -192,7 +203,7 @@ export function GoalsManager({
   )
 }
 
-type Panel = 'none' | 'add' | 'adjust' | 'balance' | 'edit'
+type Panel = 'none' | 'add' | 'spend' | 'adjust' | 'balance' | 'edit'
 
 function GoalCard({ goal, asOfYm, drag }: { goal: GoalView; asOfYm: string; drag?: DragProps }) {
   const router = useRouter()
@@ -272,6 +283,13 @@ function GoalCard({ goal, asOfYm, drag }: { goal: GoalView; asOfYm: string; drag
             <button onClick={() => setPanel(panel === 'add' ? 'none' : 'add')} className={PRIMARY_BTN}>
               Add money
             </button>
+            <button
+              onClick={() => setPanel(panel === 'spend' ? 'none' : 'spend')}
+              disabled={goal.value <= 0}
+              className={`${GHOST_BTN} disabled:opacity-40`}
+            >
+              Spend
+            </button>
             <button onClick={() => setPanel(panel === 'adjust' ? 'none' : 'adjust')} className={GHOST_BTN}>
               Adjust value
             </button>
@@ -285,6 +303,12 @@ function GoalCard({ goal, asOfYm, drag }: { goal: GoalView; asOfYm: string; drag
       {/* Inline panels */}
       {panel === 'add' && (
         <AddMoneyPanel onSubmit={(amount, asExpense, note) => run(() => addContribution({ goalId: goal.id, amount, asExpense, note }))} />
+      )}
+      {panel === 'spend' && (
+        <SpendMoneyPanel
+          max={goal.value}
+          onSubmit={(amount, asIncome, note) => run(() => spendFromGoal({ goalId: goal.id, amount, asIncome, note }))}
+        />
       )}
       {panel === 'adjust' && (
         <AdjustPanel current={goal.value} onSubmit={(newValue, note) => run(() => adjustValue({ goalId: goal.id, newValue, note }))} />
@@ -489,6 +513,35 @@ function AddMoneyPanel({ onSubmit }: { onSubmit: (amount: number, asExpense: boo
       <button disabled={!Number(amount)} onClick={() => onSubmit(Number(amount), asExpense, note)} className={PRIMARY_BTN}>
         Add
       </button>
+    </Panel>
+  )
+}
+
+function SpendMoneyPanel({ max, onSubmit }: { max: number; onSubmit: (amount: number, asIncome: boolean, note: string) => void }) {
+  const [amount, setAmount] = useState('')
+  const [asIncome, setAsIncome] = useState(true)
+  const [note, setNote] = useState('')
+  const n = Number(amount)
+  const tooMuch = n > max + 0.005
+  return (
+    <Panel column>
+      <div className="flex flex-wrap items-center gap-2">
+        <input type="number" placeholder="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} className={`${INPUT_CLASS} w-28`} />
+        <button type="button" onClick={() => setAmount(String(Math.round(max * 100) / 100))} className={GHOST_BTN}>
+          All ({formatCurrency(max)})
+        </button>
+        <input type="text" placeholder="What for? (optional)" value={note} onChange={(e) => setNote(e.target.value)} className={`${INPUT_CLASS} min-w-0 flex-1`} />
+      </div>
+      <label className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
+        <input type="checkbox" checked={asIncome} onChange={(e) => setAsIncome(e.target.checked)} />
+        count as income (offsets the purchase in your budget)
+      </label>
+      <div className="flex items-center gap-2">
+        <button disabled={!n || tooMuch} onClick={() => onSubmit(n, asIncome, note)} className={PRIMARY_BTN}>
+          Spend
+        </button>
+        {tooMuch && <span className="text-xs text-[var(--negative)]">More than this goal holds.</span>}
+      </div>
     </Panel>
   )
 }

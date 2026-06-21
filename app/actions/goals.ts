@@ -35,6 +35,11 @@ const MORTGAGE_START_BALANCE = Number(process.env.MORTGAGE_START_BALANCE || '0')
 const PAYOFF_AGE = 50
 const DEFAULT_RATE = 0.055
 
+function prevMonth(ym: string): string {
+  const [y, m] = ym.split('-').map(Number)
+  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`
+}
+
 function revalidateGoals() {
   revalidatePath('/goals')
   revalidatePath('/')
@@ -132,7 +137,7 @@ async function ensureMortgageGoal(): Promise<void> {
   }
 }
 
-export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: string; suggestNetZero: boolean }> {
+export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: string; suggestNetZero: boolean; monthStats: { thisMonth: number; lastMonth: number } }> {
   await ensureMortgageGoal()
   await reconcileNetZeroGoals()
 
@@ -226,7 +231,18 @@ export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: stri
   const currentYearNet = netOverRange(flows, `${curYear}-01`, asOfYm)
   const suggestNetZero = !goalRows.some((g) => g.kind === 'netzero') && currentYearNet < -0.005
 
-  return { goals: views, asOfYm, suggestNetZero }
+  const savingsGoalIds = new Set(goalRows.filter((g) => g.kind === 'savings').map((g) => g.id))
+  const prevYm = prevMonth(asOfYm)
+  let thisMonth = 0
+  let lastMonth = 0
+  for (const e of entries) {
+    if (!savingsGoalIds.has(e.goalId) || e.kind !== 'contribution' || Number(e.amount) <= 0) continue
+    const ym = e.occurredAt.slice(0, 7)
+    if (ym === asOfYm) thisMonth += Number(e.amount)
+    else if (ym === prevYm) lastMonth += Number(e.amount)
+  }
+
+  return { goals: views, asOfYm, suggestNetZero, monthStats: { thisMonth: Math.round(thisMonth * 100) / 100, lastMonth: Math.round(lastMonth * 100) / 100 } }
 }
 
 /** Net (income − spend) over the inclusive month range, matching the Income /
@@ -368,6 +384,8 @@ function mortgageMessage(proj: MortgageProjection | null): string {
 export type PendingReview = {
   id: number
   transactionId: number
+  /** 'out' = money moved to investments (grows a goal); 'in' = money returned. */
+  direction: 'out' | 'in'
   date: string
   amount: number
   merchant: string
@@ -381,6 +399,7 @@ export async function loadPendingReviews(): Promise<PendingReview[]> {
     .select({
       id: transferReviews.id,
       transactionId: transferReviews.transactionId,
+      direction: transferReviews.direction,
       suggestedGoalId: transferReviews.suggestedGoalId,
       date: transactions.txnDate,
       amount: transactions.amount,
@@ -402,8 +421,10 @@ export async function loadPendingReviews(): Promise<PendingReview[]> {
   return rows.map((r) => ({
     id: r.id,
     transactionId: r.transactionId,
+    direction: r.direction,
     date: r.date,
-    amount: Number(r.amount),
+    // Inbound deposits are stored negative (money in); show a positive figure.
+    amount: Math.abs(Number(r.amount)),
     merchant: r.merchant,
     suggestedGoalId: r.suggestedGoalId,
     goals: goalOpts,
@@ -602,6 +623,67 @@ export async function addContribution(input: {
   revalidateGoals()
 }
 
+/**
+ * Spend money out of a savings goal — the goal acting as a savings account for a
+ * specific purpose (e.g. pull from "Travel" to fund a flight). Reduces the goal's
+ * value via a negative contribution. `asIncome` (the default) also inserts a real
+ * income transaction in the "Goal Spend" category so it offsets the purchase and
+ * net stays correct; turning it off just lowers the goal with no budget impact.
+ *
+ * When the real money moves in from the investment account, attribute the imported
+ * deposit via the dashboard inbound review instead, so you don't count it twice.
+ */
+export async function spendFromGoal(input: {
+  goalId: number
+  amount: number
+  occurredAt?: string
+  note?: string
+  asIncome?: boolean
+}): Promise<void> {
+  await requireAuth()
+  const requested = Math.round(input.amount * 100) / 100
+  if (!Number.isFinite(requested) || requested <= 0) return
+  const [goal] = await db.select().from(goals).where(eq(goals.id, input.goalId)).limit(1)
+  if (!goal || goal.kind !== 'savings') return
+  const before = await currentSavingsValue(goal.id)
+  if (before <= 0) return
+  // Can't spend more than the goal holds.
+  const amount = Math.min(requested, before)
+  const occurredAt = input.occurredAt || todayIso()
+
+  let transactionId: number | null = null
+  if (input.asIncome !== false) {
+    const categoryId = await categoryIdByName('Goal Spend')
+    const merchantId = await merchantIdByName('Goal Withdrawal', 'Goal Spend')
+    const [txn] = await db
+      .insert(transactions)
+      .values({
+        source: 'scotia',
+        flow: 'income',
+        categoryId,
+        externalId: `goal:${goal.id}:spend:${randomUUID().slice(0, 8)}`,
+        txnDate: occurredAt,
+        rawDescription: `Goal spend — ${goal.name}`,
+        merchantId,
+        // Income is stored negative (money in); see the sign convention.
+        amount: (-amount).toFixed(2),
+      })
+      .returning({ id: transactions.id })
+    transactionId = txn.id
+  }
+
+  await db.insert(goalEntries).values({
+    goalId: goal.id,
+    kind: 'contribution',
+    amount: (-amount).toFixed(2),
+    transactionId,
+    occurredAt,
+    note: input.note?.trim() || 'Goal spend',
+  })
+  await notifyGoalChange(goal, before, before - amount)
+  revalidateGoals()
+}
+
 /** Reconcile a savings goal to a new market value (stocks move up/down). */
 export async function adjustValue(input: {
   goalId: number
@@ -675,17 +757,52 @@ export async function updateMortgageBalance(input: {
 
 export type ReviewAllocation = { goalId: number; amount: number }
 
+/** Tag goal allocations to a transaction. `sign` = +1 grows goals (outbound
+ *  contribution), −1 reduces them (inbound spend). Returns nothing. */
+async function allocateToGoals(
+  allocations: ReviewAllocation[],
+  txn: { id: number; txnDate: string },
+  sign: 1 | -1,
+  note: string,
+): Promise<void> {
+  const valid = allocations.filter((a) => a.amount > 0 && Number.isInteger(a.goalId))
+  for (const a of valid) {
+    const [goal] = await db.select().from(goals).where(eq(goals.id, a.goalId)).limit(1)
+    if (!goal || goal.kind !== 'savings') continue
+    const before = await currentSavingsValue(goal.id)
+    const delta = sign * (Math.round(a.amount * 100) / 100)
+    await db.insert(goalEntries).values({
+      goalId: goal.id,
+      kind: 'contribution',
+      amount: delta.toFixed(2),
+      transactionId: txn.id,
+      occurredAt: txn.txnDate,
+      note,
+    })
+    await notifyGoalChange(goal, before, before + delta)
+  }
+}
+
 /**
  * Resolve a dashboard transfer review.
+ *
+ * Outbound ('out' — money moving to investments):
  *  - 'expense'  → keep it an Investment expense; tag the allocations to goals.
  *  - 'neutral'  → re-flag as a transfer (better-interest move; leaves analytics);
  *                 still tag the allocations so the goal value grows.
  *  - 'mortgage' → not a goal: recategorize to Home / Mortgage (extra principal).
- *  - 'dismiss'  → leave the transaction as-is.
+ *
+ * Inbound ('in' — money returning from investments):
+ *  - 'goal'     → keep it income (category Goal Spend) so it offsets the real
+ *                 purchase; tag the allocations to REDUCE those goals.
+ *  - 'income'   → keep it as plain Other Income, not tied to any goal.
+ *  - 'ignore'   → re-flag as a transfer (an investment move we don't track).
+ *
+ * Both: 'dismiss' → leave the transaction as-is.
  */
 export async function resolveTransferReview(input: {
   reviewId: number
-  treatment: 'expense' | 'neutral' | 'mortgage' | 'dismiss'
+  treatment: 'expense' | 'neutral' | 'mortgage' | 'goal' | 'income' | 'ignore' | 'dismiss'
   allocations?: ReviewAllocation[]
 }): Promise<void> {
   await requireAuth()
@@ -694,15 +811,34 @@ export async function resolveTransferReview(input: {
   const [txn] = await db.select().from(transactions).where(eq(transactions.id, review.transactionId)).limit(1)
   if (!txn) return
 
+  const resolve = (status: 'resolved' | 'dismissed') =>
+    db.update(transferReviews).set({ status, resolvedAt: new Date() }).where(eq(transferReviews.id, review.id))
+
   if (input.treatment === 'dismiss') {
-    await db
-      .update(transferReviews)
-      .set({ status: 'dismissed', resolvedAt: new Date() })
-      .where(eq(transferReviews.id, review.id))
+    await resolve('dismissed')
     revalidateGoals()
     return
   }
 
+  if (review.direction === 'in') {
+    if (input.treatment === 'goal') {
+      const goalSpendId = await categoryIdByName('Goal Spend')
+      await db.update(transactions).set({ flow: 'income', categoryId: goalSpendId }).where(eq(transactions.id, txn.id))
+      await allocateToGoals(input.allocations ?? [], txn, -1, 'Goal spend')
+    } else if (input.treatment === 'ignore') {
+      const transferId = await categoryIdByName('Transfer')
+      await db.update(transactions).set({ flow: 'transfer', categoryId: transferId }).where(eq(transactions.id, txn.id))
+    } else {
+      // 'income' → keep it as plain Other Income, not tied to a goal.
+      const otherId = await categoryIdByName('Other Income')
+      await db.update(transactions).set({ flow: 'income', categoryId: otherId }).where(eq(transactions.id, txn.id))
+    }
+    await resolve('resolved')
+    revalidateGoals()
+    return
+  }
+
+  // Outbound.
   if (input.treatment === 'mortgage') {
     const homeId = await categoryIdByName('Home')
     const merchantId = await merchantIdByName('Mortgage', 'Home')
@@ -710,10 +846,7 @@ export async function resolveTransferReview(input: {
       .update(transactions)
       .set({ flow: 'expense', categoryId: homeId, merchantId })
       .where(eq(transactions.id, txn.id))
-    await db
-      .update(transferReviews)
-      .set({ status: 'resolved', resolvedAt: new Date() })
-      .where(eq(transferReviews.id, review.id))
+    await resolve('resolved')
     revalidateGoals()
     return
   }
@@ -726,27 +859,7 @@ export async function resolveTransferReview(input: {
     const investId = await categoryIdByName('Investment')
     await db.update(transactions).set({ flow: 'expense', categoryId: investId }).where(eq(transactions.id, txn.id))
   }
-
-  const allocations = (input.allocations ?? []).filter((a) => a.amount > 0 && Number.isInteger(a.goalId))
-  for (const a of allocations) {
-    const [goal] = await db.select().from(goals).where(eq(goals.id, a.goalId)).limit(1)
-    if (!goal || goal.kind !== 'savings') continue
-    const before = await currentSavingsValue(goal.id)
-    const amount = Math.round(a.amount * 100) / 100
-    await db.insert(goalEntries).values({
-      goalId: goal.id,
-      kind: 'contribution',
-      amount: amount.toFixed(2),
-      transactionId: txn.id,
-      occurredAt: txn.txnDate,
-      note: 'From transfer',
-    })
-    await notifyGoalChange(goal, before, before + amount)
-  }
-
-  await db
-    .update(transferReviews)
-    .set({ status: 'resolved', resolvedAt: new Date() })
-    .where(eq(transferReviews.id, review.id))
+  await allocateToGoals(input.allocations ?? [], txn, 1, 'From transfer')
+  await resolve('resolved')
   revalidateGoals()
 }

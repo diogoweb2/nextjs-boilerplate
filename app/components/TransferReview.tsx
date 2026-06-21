@@ -5,12 +5,19 @@ import { useRouter } from 'next/navigation'
 import { formatCurrency, formatLongDate } from '@/app/lib/format'
 import { resolveTransferReview, type PendingReview, type ReviewAllocation } from '@/app/actions/goals'
 
-type Treatment = 'expense' | 'neutral' | 'mortgage' | 'dismiss'
+type Treatment = 'expense' | 'neutral' | 'mortgage' | 'goal' | 'income' | 'ignore' | 'dismiss'
 
-const TREATMENTS: { value: Treatment; label: string; hint: string }[] = [
+const OUTBOUND_TREATMENTS: { value: Treatment; label: string; hint: string }[] = [
   { value: 'expense', label: 'Count as expense', hint: 'Investment spend (default)' },
   { value: 'neutral', label: "Don't count", hint: 'just a better-interest move' },
   { value: 'mortgage', label: 'Extra mortgage', hint: 'pay down the house' },
+  { value: 'dismiss', label: 'Leave as-is', hint: 'decide later' },
+]
+
+const INBOUND_TREATMENTS: { value: Treatment; label: string; hint: string }[] = [
+  { value: 'goal', label: 'Spend from a goal', hint: 'income — offsets a purchase' },
+  { value: 'income', label: 'Other income', hint: 'not tied to a goal' },
+  { value: 'ignore', label: "Don't count", hint: 'just an investment move' },
   { value: 'dismiss', label: 'Leave as-is', hint: 'decide later' },
 ]
 
@@ -44,14 +51,16 @@ export function TransferReview({ reviews }: { reviews: PendingReview[] }) {
 function ReviewRow({ review }: { review: PendingReview }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const [treatment, setTreatment] = useState<Treatment>('expense')
+  const inbound = review.direction === 'in'
+  const treatments = inbound ? INBOUND_TREATMENTS : OUTBOUND_TREATMENTS
+  const [treatment, setTreatment] = useState<Treatment>(inbound ? 'goal' : 'expense')
   const [allocations, setAllocations] = useState<ReviewAllocation[]>(() =>
     review.goals.length
       ? [{ goalId: review.suggestedGoalId ?? review.goals[0].id, amount: review.amount }]
       : [],
   )
 
-  const allocatable = treatment === 'expense' || treatment === 'neutral'
+  const allocatable = inbound ? treatment === 'goal' : treatment === 'expense' || treatment === 'neutral'
   const allocated = useMemo(() => allocations.reduce((s, a) => s + (a.amount || 0), 0), [allocations])
   const remainder = Math.round((review.amount - allocated) * 100) / 100
 
@@ -77,11 +86,13 @@ function ReviewRow({ review }: { review: PendingReview }) {
         <span className="text-sm font-medium">{review.merchant}</span>
         <span className="tabular-nums text-lg font-bold">{formatCurrency(review.amount)}</span>
       </div>
-      <p className="mb-3 text-xs text-[var(--muted)]">{formatLongDate(review.date)} · what was this for?</p>
+      <p className="mb-3 text-xs text-[var(--muted)]">
+        {formatLongDate(review.date)} · {inbound ? 'money landed in chequing — what for?' : 'what was this for?'}
+      </p>
 
       {/* Treatment */}
       <div className="mb-3 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-        {TREATMENTS.map((t) => (
+        {treatments.map((t) => (
           <button
             key={t.value}
             type="button"

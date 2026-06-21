@@ -43,6 +43,7 @@ const SOURCE_COLORS: Record<string, string> = {
   family: '#f59e0b',
   insurance: '#8b5cf6',
   benefits: '#14b8a6',
+  goal: '#34d399',
   other: '#94a3b8',
 }
 const SELF_COLOR = '#22c55e'
@@ -71,6 +72,7 @@ function incomeSourceOf(t: EnrichedTxn, self: string, partner: string): { key: s
   if (t.categoryName === 'Family Support') return { key: 'family', name: 'Family', color: SOURCE_COLORS.family }
   if (t.categoryName === 'Insurance') return { key: 'insurance', name: 'Insurance', color: SOURCE_COLORS.insurance }
   if (t.categoryName === 'Benefits') return { key: 'benefits', name: 'Benefits', color: SOURCE_COLORS.benefits }
+  if (t.categoryName === 'Goal Spend') return { key: 'goal', name: 'Goal Spend', color: SOURCE_COLORS.goal }
   return { key: 'other', name: 'Other', color: SOURCE_COLORS.other }
 }
 

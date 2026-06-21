@@ -5,10 +5,10 @@ import { loadGoalsData } from '@/app/actions/goals'
 export const dynamic = 'force-dynamic'
 
 export default async function GoalsPage() {
-  const { goals, asOfYm, suggestNetZero } = await loadGoalsData()
+  const { goals, asOfYm, suggestNetZero, monthStats } = await loadGoalsData()
   return (
     <AppShell>
-      <GoalsManager goals={goals} asOfYm={asOfYm} suggestNetZero={suggestNetZero} />
+      <GoalsManager goals={goals} asOfYm={asOfYm} suggestNetZero={suggestNetZero} monthStats={monthStats} />
     </AppShell>
   )
 }

@@ -458,25 +458,56 @@ transfer was *for*, track progress to a target, and handle market-valued and mor
   deposit), `adjustment` (savings market reconcile; `amount` = signed delta so the running Σ
   equals the new value), `balance` (mortgage only; `amount` = the absolute statement balance).
 - **`transfer_reviews`** — the dashboard prompt queue (`pending|resolved|dismissed`, unique on
-  `transactionId`, optional `suggestedGoalId`).
+  `transactionId`, optional `suggestedGoalId`, **`direction: 'out' | 'in'`** — outbound money moving
+  to investments vs inbound money returning from them).
 
-A **savings** goal's value = Σ contribution+adjustment amounts. Budget/analytics impact is carried
-**only** by the underlying transaction's `flow`, so goal contributions never double-count.
+A **savings** goal's value = Σ contribution+adjustment amounts (a `contribution` may be **negative** —
+a goal "spend", see below). Budget/analytics impact is carried **only** by the underlying
+transaction's `flow`, so goal contributions never double-count.
 
-### Import hook (`app/actions/import.ts` → `createTransferReviews`)
-After each import, every newly-inserted Scotia transfer the classifier routed to the
-**`Investment (iTrade)`** payee (the recurring **$900** and any **non-$1,100** customer transfer —
-`classifyScotia`) gets a `pending` review. The exact **$1,100 → Mortgage** still auto-classifies
-with **no** prompt. `suggestedGoalId` is learned: the goal most often tagged on a prior transfer of
-the same rounded amount. Idempotent.
+### Spending from a goal (the goal as a purpose-built savings account)
+A savings goal you funded (each contribution counted as an Investment **expense**, so the money already
+left your net) can later be **spent** for its purpose. Spending records the amount as **income** so it
+offsets the real purchase and net stays correct over the full lifecycle (e.g. save $3k to "Travel" as
+expense → buy a $5k flight, a real expense → spend $3k from the goal as income → the trip nets −$5k, no
+double count). Two entry points (`asIncome` / inbound review create an `income`-flow transaction in the
+new **`Goal Spend`** income category, so it shows on the Income page as its own line):
+- **Manual "Spend"** (`spendFromGoal`, the goal card) — reduces the goal via a **negative**
+  `contribution` (capped at the goal's value) and, when "count as income" is on (default), inserts the
+  offsetting `Goal Spend` income transaction. Use it when you paid by card and no bank transfer will be
+  imported. `totalContributed` still counts positive contributions only, so withdrawals don't inflate it.
+- **Inbound transfer review** — when the real money lands (see below).
+
+### Import hook (`app/actions/import.ts` → `createTransferReviews` / `createInboundReviews`)
+After each import:
+- **Outbound** (`createTransferReviews`, `direction='out'`): every newly-inserted Scotia transfer the
+  classifier routed to the **`Investment (iTrade)`** payee (the recurring **$900** and any
+  **non-$1,100** customer transfer — `classifyScotia`) gets a `pending` review. The exact
+  **$1,100 → Mortgage** still auto-classifies with **no** prompt. `suggestedGoalId` is learned: the goal
+  most often tagged on a prior transfer of the same rounded amount.
+- **Inbound** (`createInboundReviews`, `direction='in'`): every newly-inserted **unknown deposit** (the
+  `Other Deposit` fallback merchant — recognized income like salary/benefits/insurance is already
+  classified and never lands here) gets a `pending` review. These are the ambiguous credits — e.g. money
+  pulled back from the investment account — the owner labels (default classification stays Other Income
+  until resolved).
+
+Both are idempotent (`transactionId` is unique).
 
 ### Dashboard prompt (`app/components/TransferReview.tsx`)
 Pending reviews render a prominent `--warning` card at the **top** of the dashboard until resolved.
-Per transfer (`resolveTransferReview`): **Count as expense** (default — keep `flow=expense`,
-category `Investment`) · **Don't count** (better-interest move → `flow=transfer`, category
-`Transfer`; leaves analytics) · **Extra mortgage** (not a goal → recategorize to Home / `Mortgage`)
-· **Leave as-is** (dismiss). For the two counting options the owner allocates the amount across one
-or more **savings** goals (split a single transfer across goals).
+Treatments depend on `direction` (`resolveTransferReview`):
+- **Outbound** (money to investments): **Count as expense** (default — keep `flow=expense`, category
+  `Investment`) · **Don't count** (better-interest move → `flow=transfer`, category `Transfer`; leaves
+  analytics) · **Extra mortgage** (not a goal → recategorize to Home / `Mortgage`) · **Leave as-is**
+  (dismiss). The two counting options allocate the amount across one or more savings goals, **growing**
+  them (positive contributions).
+- **Inbound** (money returning): **Spend from a goal** (default — keep `flow=income`, category
+  `Goal Spend`; allocate the amount to **reduce** one or more savings goals — negative contributions) ·
+  **Other income** (keep `flow=income`, category `Other Income`, not tied to a goal) · **Don't count**
+  (an investment move we don't track → `flow=transfer`, category `Transfer`) · **Leave as-is** (dismiss).
+
+Allocations split a single transfer across goals; the shared sign helper grows (out) or reduces (in)
+each tagged goal.
 
 ### Mortgage goal (auto-created, smart projection)
 Bootstrapped on first `/goals` load from `.env.local` (privacy — never committed): **`OWNER_BIRTHDATE`**
@@ -512,9 +543,11 @@ over").
   read-only with a link to `/budget` to plan the gap.
 
 ### Notifications (immediate, per goal)
-When a goal with `notify` on changes value (`addContribution`, `adjustValue`,
+When a goal with `notify` on changes value (`addContribution`, `spendFromGoal`, `adjustValue`,
 `updateMortgageBalance`, or a `resolveTransferReview` allocation), an immediate Web Push fires via
 `sendPushToAll` (reusing the digest's subscriptions) showing the new value + signed %/$ delta;
 mortgage uses a ⬇ "closer to payoff" framing. No new endpoint or table.
 
 Run after pulling this change: `npm run db:push` (adds `goals`, `goal_entries`, `transfer_reviews`).
+The goal-spend feature adds `transfer_reviews.direction` and a `Goal Spend` income category — rerun
+`npm run db:push && npm run db:seed`.

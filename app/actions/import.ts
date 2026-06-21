@@ -218,8 +218,10 @@ export async function ingestStatement(
   // analytics stay correct every year without manual edits.
   await reconcileBelairSplit()
 
-  // Queue investment transfers for the dashboard "what was this for?" prompt.
+  // Queue investment transfers (out) and unknown inbound deposits (in) for the
+  // dashboard "what was this for?" prompt.
   await createTransferReviews(inserted.map((r) => r.id))
+  await createInboundReviews(inserted.map((r) => r.id))
 
   // Keep the net-zero recovery goal in sync (auto-complete / revive on new data).
   await reconcileNetZeroGoals()
@@ -323,7 +325,38 @@ async function createTransferReviews(insertedIds: number[]): Promise<void> {
   for (const r of rows) {
     await db
       .insert(transferReviews)
-      .values({ transactionId: r.id, suggestedGoalId: suggestFor(Number(r.amount)) })
+      .values({ transactionId: r.id, direction: 'out', suggestedGoalId: suggestFor(Number(r.amount)) })
+      .onConflictDoNothing({ target: transferReviews.transactionId })
+  }
+}
+
+/**
+ * Queue an inbound Goals review for every freshly-imported unknown deposit (the
+ * "Other Deposit" fallback in bank-classify). These are the ambiguous credits —
+ * e.g. money pulled back from the investment account — that the owner needs to
+ * label: a "spend from a goal" (income offsetting a real purchase), plain Other
+ * Income, or an ignored inter-account move. Recognized income (salary, benefits,
+ * insurance, …) is already classified and never lands here. Idempotent.
+ */
+async function createInboundReviews(insertedIds: number[]): Promise<void> {
+  if (insertedIds.length === 0) return
+
+  const rows = await db
+    .select({ id: transactions.id })
+    .from(transactions)
+    .innerJoin(merchants, eq(transactions.merchantId, merchants.id))
+    .where(
+      and(
+        inArray(transactions.id, insertedIds),
+        eq(transactions.flow, 'income'),
+        eq(merchants.name, 'Other Deposit')
+      )
+    )
+
+  for (const r of rows) {
+    await db
+      .insert(transferReviews)
+      .values({ transactionId: r.id, direction: 'in' })
       .onConflictDoNothing({ target: transferReviews.transactionId })
   }
 }
