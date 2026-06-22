@@ -21,6 +21,19 @@ export const SYNC_SOURCES: SyncSource[] = [
 /** A sync older than this is "stale" — shown in red and flagged in the digest. */
 export const SYNC_STALE_MS = 3 * 24 * 60 * 60 * 1000
 
+/**
+ * Freshness = the more recent of the last imported batch and the last successful
+ * sync run. A successful sync that imports 0 new rows (very common for Tangerine,
+ * whose export only lists *new* transactions) advances `sync_runs.lastSuccessAt`
+ * but creates no import batch — so without this it would look perpetually stale.
+ */
+export function mostRecentIso(a: string | null, b: string | null): string | null {
+  if (!a) return b
+  if (!b) return a
+  // ISO-8601 UTC strings sort chronologically as plain strings.
+  return a > b ? a : b
+}
+
 export function syncAgeMs(lastSync: string | null, now = Date.now()): number | null {
   if (!lastSync) return null
   return now - new Date(lastSync).getTime()

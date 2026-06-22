@@ -6,7 +6,7 @@ import { UploadDialog } from '@/app/components/UploadDialog'
 import { PeriodSelector } from '@/app/components/PeriodSelector'
 import { SyncStatusBar } from '@/app/components/SyncStatusBar'
 import { SyncErrorBanner, type SyncFailure } from '@/app/components/SyncErrorBanner'
-import { SYNC_SOURCES } from '@/app/lib/sync'
+import { SYNC_SOURCES, mostRecentIso } from '@/app/lib/sync'
 import { StatCard } from '@/app/components/charts/StatCard'
 import { Donut } from '@/app/components/charts/Donut'
 import { BarList } from '@/app/components/charts/BarList'
@@ -92,11 +92,12 @@ export default async function Home({
     }]
   })
   const failedLabels = new Set(syncFailures.map((f) => f.label))
-  const syncEntries = SYNC_SOURCES.map((s, i) => ({
-    label: s.label,
-    lastSync: syncTimes[i],
-    failed: failedLabels.has(s.label),
-  }))
+  const syncEntries = SYNC_SOURCES.map((s, i) => {
+    const run = syncRunRows.find((r) => r.source === s.source)
+    // Freshness counts empty-but-successful syncs (no batch), not just imports.
+    const lastSync = mostRecentIso(syncTimes[i], run?.lastSuccessAt?.toISOString() ?? null)
+    return { label: s.label, lastSync, failed: failedLabels.has(s.label) }
+  })
   const all = allFlows.filter((t) => t.flow === 'expense')
 
   const anchor = anchorMonth(all)

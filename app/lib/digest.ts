@@ -12,7 +12,7 @@
  */
 import { and, desc, eq, gte } from 'drizzle-orm'
 import { db } from '@/db'
-import { importBatches, transactions, merchants, categories, budgetGoals } from '@/db/schema'
+import { importBatches, transactions, merchants, categories, budgetGoals, syncRuns } from '@/db/schema'
 import { loadAllFlows, anchorMonth, type EnrichedTxn } from '@/app/lib/analytics'
 import { buildInsights } from '@/app/lib/insights'
 import { computeBudget, FIXED_CATEGORIES, type CategoryMeta } from '@/app/lib/budget'
@@ -20,7 +20,7 @@ import { computeMonthBurndown, daysInMonth, pacePercent, type PaceLevel } from '
 import { getBudgetSettings } from '@/app/actions/budget'
 import { loadProjectionRules } from '@/app/actions/projection'
 import { formatCurrency } from '@/app/lib/format'
-import { SYNC_SOURCES, syncStale } from '@/app/lib/sync'
+import { SYNC_SOURCES, syncStale, mostRecentIso } from '@/app/lib/sync'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -65,7 +65,14 @@ export async function buildDigest(now: number = Date.now(), failedSources: strin
     loadProjectionRules(),
   ])
 
-  // 1. Sync health — last import per source, flagged stale past SYNC_STALE_MS.
+  // Per-source run health: drives both freshness (lastSuccessAt counts empty
+  // syncs that import no batch) and the failure reconciliation further down.
+  const runRows = await db
+    .select({ source: syncRuns.source, status: syncRuns.status, lastSuccessAt: syncRuns.lastSuccessAt })
+    .from(syncRuns)
+  const runBySource = new Map(runRows.map((r) => [r.source, r]))
+
+  // 1. Sync health — last import or successful run per source, flagged stale.
   const sync: DigestSync[] = await Promise.all(
     SYNC_SOURCES.map(async ({ source, label }) => {
       const [row] = await db
@@ -74,7 +81,10 @@ export async function buildDigest(now: number = Date.now(), failedSources: strin
         .where(eq(importBatches.source, source))
         .orderBy(desc(importBatches.createdAt))
         .limit(1)
-      const lastSync = row?.createdAt?.toISOString() ?? null
+      const lastSync = mostRecentIso(
+        row?.createdAt?.toISOString() ?? null,
+        runBySource.get(source)?.lastSuccessAt?.toISOString() ?? null
+      )
       return { source, label, lastSync, stale: syncStale(lastSync, now) }
     })
   )
@@ -134,9 +144,21 @@ export async function buildDigest(now: number = Date.now(), failedSources: strin
       }
     : null
 
+  // The runner reports failures from its local per-source status files, but a
+  // manual re-upload marks that source ok in sync_runs. Honour that override so
+  // a hand-fixed bank stops being named here.
+  const clearedSources = new Set(
+    runRows.filter((r) => r.status === 'ok').map((r) => r.source)
+  )
+  const labelToSource = new Map(SYNC_SOURCES.map((s) => [s.label, s.source]))
+  const activeFailures = failedSources.filter((label) => {
+    const src = labelToSource.get(label)
+    return !src || !clearedSources.has(src)
+  })
+
   // ----- compose the notification -----
   const overPace = pace ? pace.projected > pace.budget : false
-  const alert = sync.some((s) => s.stale) || overPace || failedSources.length > 0
+  const alert = sync.some((s) => s.stale) || overPace || activeFailures.length > 0
 
   // Title: total spent since the last import (unchanged copy).
   const title = `Budget ${alert ? '⚠️' : '✓'}${
@@ -150,7 +172,7 @@ export async function buildDigest(now: number = Date.now(), failedSources: strin
     below: 'Behind pace ✗',
   }
   const paceStr = pace ? `${PACE_LABEL[pace.level]} · ${pace.pct >= 0 ? '+' : ''}${pace.pct}%` : ''
-  const failStr = failedSources.length > 0 ? `Failed: ${failedSources.join(', ')}` : ''
+  const failStr = activeFailures.length > 0 ? `Failed: ${activeFailures.join(', ')}` : ''
   const body = [paceStr, failStr].filter(Boolean).join('\n')
 
   return { alert, title, body, sync, newSpend, pace, newMerchants, outlier }

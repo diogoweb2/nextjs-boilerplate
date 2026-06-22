@@ -11,6 +11,7 @@ import {
   importBatches,
   goalEntries,
   transferReviews,
+  syncRuns,
 } from '@/db/schema'
 import { requireAuth } from '@/app/lib/auth-guard'
 import { parseStatement, type ImportSource, type ParsedRow } from '@/app/lib/csv'
@@ -118,6 +119,23 @@ async function resolveMerchants(rows: ParsedRow[]): Promise<Map<number, number>>
   return result
 }
 
+/**
+ * Mark a source healthy after a successful manual upload: clear the failure flags
+ * and stamp lastSuccessAt = now, so the owner hand-fixing a sync counts as a fresh
+ * successful sync (clears the dashboard banner *and* the stale "Xd ago" badge).
+ * Best-effort: a missing row is unexpected here but handled by the insert.
+ */
+async function clearSyncFailure(source: ImportSource): Promise<void> {
+  const now = new Date()
+  await db
+    .insert(syncRuns)
+    .values({ source, status: 'ok', lastRunAt: now, lastSuccessAt: now, failureCount: 0 })
+    .onConflictDoUpdate({
+      target: syncRuns.source,
+      set: { status: 'ok', error: null, failureCount: 0, lastRunAt: now, lastSuccessAt: now },
+    })
+}
+
 export async function importCsv(formData: FormData): Promise<ImportResult> {
   await requireAuth()
 
@@ -136,6 +154,9 @@ export async function importCsv(formData: FormData): Promise<ImportResult> {
   const result = await ingestStatement(text, file.name, expected)
 
   if (result.ok) {
+    // The owner fixing a broken sync by hand should silence its failure: clear
+    // the dashboard banner for this source (the daily digest reconciles too).
+    await clearSyncFailure(result.source)
     revalidatePath('/')
     revalidatePath('/trends')
     revalidatePath('/income')
@@ -165,7 +186,9 @@ export async function ingestStatement(
 
   const { source, rows } = parsed
   if (rows.length === 0) {
-    return { ok: false, error: 'No usable rows found in the file.' }
+    // A recognized export that simply had no transactions in the window — this
+    // is a successful sync with nothing to insert, not an error.
+    return { ok: true, source, inserted: 0, skipped: 0, period: new Date().toISOString().slice(0, 7) }
   }
 
   // Period label = latest transaction month in the file.

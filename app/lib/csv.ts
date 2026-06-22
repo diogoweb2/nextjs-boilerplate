@@ -312,7 +312,9 @@ function hashRow(parts: string[]): string {
 /** Parse a full CSV file, auto-detecting the source (card or bank). */
 export function parseStatement(text: string, expected?: ImportSource): ParseResult {
   const rows = parseCsv(text)
-  if (rows.length < 2) throw new Error('The file has no data rows.')
+  if (rows.length === 0) throw new Error('The file is empty.')
+  // A header with no data rows is a valid export for a window with no activity;
+  // detect the source from the header and let the parsers yield zero rows.
   const source = detectSource(rows[0])
   if (!source) {
     throw new Error('Could not recognize this CSV. Expected a Master, Amex, Scotia, or Tangerine export.')
