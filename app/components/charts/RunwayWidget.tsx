@@ -103,13 +103,13 @@ export function RunwayWidget({
           <span>
             You can move{' '}
             <span className="font-semibold text-[var(--positive)]">{formatCurrency(headroom.headroom)}</span>{' '}
-            elsewhere and still keep {TARGET} months if {headroom.worstEarnerName} lost their job.
+            elsewhere and still keep {TARGET} months if {headroom.worstEarnerName} lost income.
           </span>
         ) : (
           <span>
             Add{' '}
             <span className="font-semibold text-[var(--negative)]">{formatCurrency(-headroom.headroom)}</span>{' '}
-            to reach {TARGET} months if {headroom.worstEarnerName} lost their job.
+            to reach {TARGET} months if {headroom.worstEarnerName} lost income.
           </span>
         )}
       </div>
