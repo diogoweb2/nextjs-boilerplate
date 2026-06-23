@@ -39,6 +39,7 @@ export async function loadBankFlows(): Promise<BankFlow[]> {
       source: transactions.source,
       txnDate: transactions.txnDate,
       amount: transactions.amount,
+      createdAt: transactions.createdAt,
     })
     .from(transactions)
     .where(
@@ -47,7 +48,12 @@ export async function loadBankFlows(): Promise<BankFlow[]> {
         notLike(transactions.externalId, 'goal:%'),
       ),
     )
-  return rows.map((r) => ({ source: r.source as FundSource, txnDate: r.txnDate, amount: Number(r.amount) }))
+  return rows.map((r) => ({
+    source: r.source as FundSource,
+    txnDate: r.txnDate,
+    amount: Number(r.amount),
+    createdAt: r.createdAt.toISOString(),
+  }))
 }
 
 async function loadSnapshots(): Promise<BalanceSnapshot[]> {
@@ -56,10 +62,16 @@ async function loadSnapshots(): Promise<BalanceSnapshot[]> {
       source: accountSnapshots.source,
       balance: accountSnapshots.balance,
       occurredAt: accountSnapshots.occurredAt,
+      createdAt: accountSnapshots.createdAt,
     })
     .from(accountSnapshots)
     .orderBy(asc(accountSnapshots.occurredAt))
-  return rows.map((r) => ({ source: r.source as FundSource, balance: Number(r.balance), occurredAt: r.occurredAt }))
+  return rows.map((r) => ({
+    source: r.source as FundSource,
+    balance: Number(r.balance),
+    occurredAt: r.occurredAt,
+    createdAt: r.createdAt.toISOString(),
+  }))
 }
 
 /**

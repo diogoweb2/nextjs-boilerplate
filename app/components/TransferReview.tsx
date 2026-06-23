@@ -5,10 +5,11 @@ import { useRouter } from 'next/navigation'
 import { formatCurrency, formatLongDate } from '@/app/lib/format'
 import { resolveTransferReview, type PendingReview, type ReviewAllocation } from '@/app/actions/goals'
 
-type Treatment = 'expense' | 'neutral' | 'mortgage' | 'goal' | 'income' | 'ignore' | 'dismiss'
+type Treatment = 'expense' | 'neutral' | 'mortgage' | 'goal' | 'income' | 'ignore' | 'transfer' | 'dismiss'
 
 const OUTBOUND_TREATMENTS: { value: Treatment; label: string; hint: string }[] = [
   { value: 'expense', label: 'Count as expense', hint: 'Investment spend (default)' },
+  { value: 'transfer', label: 'Internal transfer', hint: 'moved between my accounts' },
   { value: 'neutral', label: "Don't count", hint: 'just a better-interest move' },
   { value: 'mortgage', label: 'Extra mortgage', hint: 'pay down the house' },
   { value: 'dismiss', label: 'Leave as-is', hint: 'decide later' },
@@ -16,6 +17,7 @@ const OUTBOUND_TREATMENTS: { value: Treatment; label: string; hint: string }[] =
 
 const INBOUND_TREATMENTS: { value: Treatment; label: string; hint: string }[] = [
   { value: 'goal', label: 'Spend from a goal', hint: 'income — offsets a purchase' },
+  { value: 'transfer', label: 'Internal transfer', hint: 'moved between my accounts' },
   { value: 'income', label: 'Other income', hint: 'not tied to a goal' },
   { value: 'ignore', label: "Don't count", hint: 'just an investment move' },
   { value: 'dismiss', label: 'Leave as-is', hint: 'decide later' },
@@ -54,14 +56,18 @@ function ReviewRow({ review }: { review: PendingReview }) {
   const inbound = review.direction === 'in'
   const treatments = inbound ? INBOUND_TREATMENTS : OUTBOUND_TREATMENTS
   const [treatment, setTreatment] = useState<Treatment>(inbound ? 'goal' : 'expense')
-  const [allocations, setAllocations] = useState<ReviewAllocation[]>(() =>
-    review.goals.length
-      ? [{ goalId: review.suggestedGoalId ?? review.goals[0].id, amount: review.amount }]
-      : [],
-  )
+
+  const defaultAllocations = (t: Treatment): ReviewAllocation[] => {
+    if (!review.goals.length) return []
+    // neutral = better-interest move, default to no goal assigned
+    if (t === 'neutral') return [{ goalId: 0, amount: review.amount }]
+    return [{ goalId: review.suggestedGoalId ?? review.goals[0].id, amount: review.amount }]
+  }
+
+  const [allocations, setAllocations] = useState<ReviewAllocation[]>(() => defaultAllocations(inbound ? 'goal' : 'expense'))
 
   const allocatable = inbound ? treatment === 'goal' : treatment === 'expense' || treatment === 'neutral'
-  const allocated = useMemo(() => allocations.reduce((s, a) => s + (a.amount || 0), 0), [allocations])
+  const allocated = useMemo(() => allocations.filter((a) => a.goalId !== 0).reduce((s, a) => s + (a.amount || 0), 0), [allocations])
   const remainder = Math.round((review.amount - allocated) * 100) / 100
 
   const setAlloc = (i: number, patch: Partial<ReviewAllocation>) =>
@@ -75,7 +81,7 @@ function ReviewRow({ review }: { review: PendingReview }) {
       await resolveTransferReview({
         reviewId: review.id,
         treatment,
-        allocations: allocatable ? allocations.filter((a) => a.amount > 0) : [],
+        allocations: allocatable ? allocations.filter((a) => a.amount > 0 && a.goalId !== 0) : [],
       })
       router.refresh()
     })
@@ -96,7 +102,7 @@ function ReviewRow({ review }: { review: PendingReview }) {
           <button
             key={t.value}
             type="button"
-            onClick={() => setTreatment(t.value)}
+            onClick={() => { setTreatment(t.value); setAllocations(defaultAllocations(t.value)) }}
             className={`flex flex-col items-start rounded-lg border px-2.5 py-1.5 text-left text-xs transition-colors ${
               treatment === t.value
                 ? 'border-[var(--accent)] bg-[var(--surface)] text-[var(--foreground)]'
@@ -124,6 +130,7 @@ function ReviewRow({ review }: { review: PendingReview }) {
                   onChange={(e) => setAlloc(i, { goalId: Number(e.target.value) })}
                   className={`${SELECT_CLASS} min-w-0 flex-1`}
                 >
+                  <option value={0}>— no goal —</option>
                   {review.goals.map((g) => (
                     <option key={g.id} value={g.id}>
                       {g.emoji} {g.name}

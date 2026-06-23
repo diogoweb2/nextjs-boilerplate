@@ -846,7 +846,7 @@ async function allocateToGoals(
  */
 export async function resolveTransferReview(input: {
   reviewId: number
-  treatment: 'expense' | 'neutral' | 'mortgage' | 'goal' | 'income' | 'ignore' | 'dismiss'
+  treatment: 'expense' | 'neutral' | 'mortgage' | 'goal' | 'income' | 'ignore' | 'transfer' | 'dismiss'
   allocations?: ReviewAllocation[]
 }): Promise<void> {
   await requireAuth()
@@ -860,6 +860,17 @@ export async function resolveTransferReview(input: {
 
   if (input.treatment === 'dismiss') {
     await resolve('dismissed')
+    revalidateGoals()
+    return
+  }
+
+  // Plain internal transfer between the owner's own accounts (either leg) — not
+  // income, not a goal. flow=transfer keeps it out of spend/runway/safe-to-move
+  // while the Emergency Fund still moves the account balance (it ignores flow).
+  if (input.treatment === 'transfer') {
+    const transferId = await categoryIdByName('Transfer')
+    await db.update(transactions).set({ flow: 'transfer', categoryId: transferId }).where(eq(transactions.id, txn.id))
+    await resolve('resolved')
     revalidateGoals()
     return
   }

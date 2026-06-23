@@ -505,13 +505,19 @@ new **`Goal Spend`** income category, so it shows on the Income page as its own 
   imported. `totalContributed` still counts positive contributions only, so withdrawals don't inflate it.
 - **Inbound transfer review** — when the real money lands (see below).
 
-### Import hook (`app/actions/import.ts` → `createTransferReviews` / `createInboundReviews`)
+### Import hook (`app/actions/import.ts` → `createTransferReviews` / `createWithdrawalReviews` / `createInboundReviews`)
 After each import:
 - **Outbound** (`createTransferReviews`, `direction='out'`): every newly-inserted Scotia transfer the
   classifier routed to the **`Investment (iTrade)`** payee (the recurring **$900** and any
   **non-$1,100** customer transfer — `classifyScotia`) gets a `pending` review. The exact
   **$1,100 → Mortgage** still auto-classifies with **no** prompt. `suggestedGoalId` is learned: the goal
   most often tagged on a prior transfer of the same rounded amount.
+- **Outbound withdrawals** (`createWithdrawalReviews`, `direction='out'`): every newly-inserted
+  *unidentified* bank outflow — the catch-all `AMBIGUOUS_OUTBOUND_MERCHANTS` (**E-Transfer Out**,
+  **Bank Withdrawal**, **Cheque Withdrawal**) — also gets a `pending` review. This is the **debit leg of
+  an internal Tangerine↔Scotia transfer**, which the classifier otherwise leaves as a spurious
+  `Other`/wants expense (polluting spend analytics *and* the runway burn). Recognized expenses (Koodo,
+  Highway 407, …) never use these labels, so they aren't queued.
 - **Inbound** (`createInboundReviews`, `direction='in'`): every newly-inserted **unknown deposit** (the
   `Other Deposit` fallback merchant — recognized income like salary/benefits/insurance is already
   classified and never lands here) gets a `pending` review. These are the ambiguous credits — e.g. money
@@ -524,14 +530,21 @@ Both are idempotent (`transactionId` is unique).
 Pending reviews render a prominent `--warning` card at the **top** of the dashboard until resolved.
 Treatments depend on `direction` (`resolveTransferReview`):
 - **Outbound** (money to investments): **Count as expense** (default — keep `flow=expense`, category
-  `Investment`) · **Don't count** (better-interest move → `flow=transfer`, category `Transfer`; leaves
-  analytics) · **Extra mortgage** (not a goal → recategorize to Home / `Mortgage`) · **Leave as-is**
-  (dismiss). The two counting options allocate the amount across one or more savings goals, **growing**
-  them (positive contributions).
+  `Investment`) · **Internal transfer** (moved between the owner's own accounts → `flow=transfer`,
+  category `Transfer`) · **Don't count** (better-interest move → `flow=transfer`, category `Transfer`;
+  leaves analytics) · **Extra mortgage** (not a goal → recategorize to Home / `Mortgage`) · **Leave
+  as-is** (dismiss). The two counting options allocate the amount across one or more savings goals,
+  **growing** them (positive contributions).
 - **Inbound** (money returning): **Spend from a goal** (default — keep `flow=income`, category
   `Goal Spend`; allocate the amount to **reduce** one or more savings goals — negative contributions) ·
+  **Internal transfer** (moved between the owner's own accounts → `flow=transfer`, category `Transfer`) ·
   **Other income** (keep `flow=income`, category `Other Income`, not tied to a goal) · **Don't count**
   (an investment move we don't track → `flow=transfer`, category `Transfer`) · **Leave as-is** (dismiss).
+- **Internal transfer** (the shared `transfer` treatment): handles **both legs** of a bank-to-bank move
+  (e.g. Tangerine → Scotia). Each leg is set to `flow=transfer` so it's excluded from spend, the Income
+  page, the runway burn, and the safe-to-move schedule — while the **Emergency Fund still moves each
+  account's balance** (it queries every bank row regardless of flow, §12). Net fund total is unchanged;
+  legs that import on different days reconcile once both are in.
 
 Allocations split a single transfer across goals; the shared sign helper grows (out) or reduces (in)
 each tagged goal.
@@ -613,6 +626,12 @@ mortgage uses. Sources are listed in `ACCOUNT_SOURCES` with an `autoTracked` fla
 - **Seed + self-tracking:** the first snapshot per account is the owner-entered **starting
   balance**; thereafter the balance updates from imported bank flows. **Current balance** = latest
   snapshot + Σ of real bank flows since it (`balanceAsOf`). **Fund total** = Σ over all accounts.
+- **Same-day boundary (causality, not date alone):** a flow dated on the snapshot's *own* day counts
+  only if it was imported **after** the snapshot was recorded (`flow.createdAt > snapshot.createdAt`).
+  So a transfer imported the same day you seed/enter a balance still moves the fund, while a manual
+  correction you type *after* a transfer is already imported does **not** double-subtract it. Both
+  `transactions` and `account_snapshots` carry `createdAt`; ties on the same day pick the latest-
+  recorded snapshot as the base.
 - **Manual `investment` source:** a low-risk holding the system can't see in any CSV
   (`autoTracked: false`). It has **no bank flows**, so `balanceAsOf` naturally returns just its last
   snapshot — the owner updates it manually when it changes (same "update balance" control, tagged

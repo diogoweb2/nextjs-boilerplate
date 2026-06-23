@@ -8,6 +8,13 @@
  * Sign: bank CSV amounts are stored NEGATED (positive = money out), so a row's
  * real cash delta on the account is `-amount` (a salary deposit raises the
  * balance; a card payment / investment transfer lowers it).
+ *
+ * Same-day boundary (causality, not just date): a snapshot reflects everything
+ * the system knew when it was RECORDED, so a flow dated on the snapshot's own day
+ * counts only if it was imported AFTER the snapshot (`flow.createdAt >
+ * snapshot.createdAt`). This lets a transfer imported the same day you seeded the
+ * starting balance still lower the fund, while a manual correction you type AFTER
+ * a transfer is already imported doesn't double-subtract it. See BUSINESS_RULES §12.
  */
 
 /** Emergency-fund account sources. `tangerine`/`scotia` auto-track from imported
@@ -20,8 +27,10 @@ export const ACCOUNT_SOURCES: { source: FundSource; label: string; autoTracked: 
   { source: 'investment', label: 'Low-risk investment', autoTracked: false },
 ]
 
-export type BalanceSnapshot = { source: FundSource; balance: number; occurredAt: string } // YYYY-MM-DD
-export type BankFlow = { source: FundSource; txnDate: string; amount: number } // stored (negated) amount
+// occurredAt is the balance date (YYYY-MM-DD); createdAt is the row's insert
+// timestamp (ISO), used to order same-day flows vs snapshots (see header).
+export type BalanceSnapshot = { source: FundSource; balance: number; occurredAt: string; createdAt: string }
+export type BankFlow = { source: FundSource; txnDate: string; amount: number; createdAt: string } // amount = stored (negated)
 
 export type AccountBalance = { source: FundSource; label: string; balance: number; since: string }
 
@@ -41,18 +50,23 @@ function lastDayOfMonth(ym: string): string {
   return `${ym}-${String(d).padStart(2, '0')}`
 }
 
-/** Latest snapshot for `source` at or before `dateStr` (null if none yet). */
+/** Latest snapshot for `source` at or before `dateStr` (null if none yet). Ties on
+ *  the same day are broken by createdAt, so the most recently recorded wins. */
 function baseSnapshot(source: FundSource, snaps: BalanceSnapshot[], dateStr: string): BalanceSnapshot | null {
   const prior = snaps
     .filter((s) => s.source === source && s.occurredAt <= dateStr)
-    .sort((a, b) => (a.occurredAt < b.occurredAt ? -1 : 1))
+    .sort((a, b) => (a.occurredAt !== b.occurredAt ? (a.occurredAt < b.occurredAt ? -1 : 1) : a.createdAt < b.createdAt ? -1 : 1))
   return prior.length ? prior[prior.length - 1] : null
 }
 
 /**
  * Balance of one account as of `dateStr`: the latest snapshot ≤ dateStr plus the
- * net of bank flows strictly after that snapshot up to dateStr. Null until the
- * account has its first (starting-balance) snapshot.
+ * net of bank flows that belong after it, up to dateStr. A flow belongs after the
+ * base snapshot when it is dated after the snapshot's day, OR dated on the same
+ * day but imported after the snapshot was recorded (createdAt) — so a transfer
+ * imported the same day you seeded the balance still moves the fund, without a
+ * later manual correction double-counting it. Null until the account has its
+ * first (starting-balance) snapshot.
  */
 export function balanceAsOf(
   source: FundSource,
@@ -64,7 +78,10 @@ export function balanceAsOf(
   if (!base) return null
   let bal = base.balance
   for (const f of flows) {
-    if (f.source === source && f.txnDate > base.occurredAt && f.txnDate <= dateStr) bal += -f.amount
+    if (f.source !== source || f.txnDate > dateStr) continue
+    const afterBase =
+      f.txnDate > base.occurredAt || (f.txnDate === base.occurredAt && f.createdAt > base.createdAt)
+    if (afterBase) bal += -f.amount
   }
   return round2(bal)
 }

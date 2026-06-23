@@ -241,9 +241,11 @@ export async function ingestStatement(
   // analytics stay correct every year without manual edits.
   await reconcileBelairSplit()
 
-  // Queue investment transfers (out) and unknown inbound deposits (in) for the
+  // Queue investment transfers (out), unknown outbound withdrawals (out, e.g. an
+  // internal Tangerine↔Scotia transfer), and unknown inbound deposits (in) for the
   // dashboard "what was this for?" prompt.
   await createTransferReviews(inserted.map((r) => r.id))
+  await createWithdrawalReviews(inserted.map((r) => r.id))
   await createInboundReviews(inserted.map((r) => r.id))
 
   // Keep the net-zero recovery goal in sync (auto-complete / revive on new data).
@@ -349,6 +351,46 @@ async function createTransferReviews(insertedIds: number[]): Promise<void> {
     await db
       .insert(transferReviews)
       .values({ transactionId: r.id, direction: 'out', suggestedGoalId: suggestFor(Number(r.amount)) })
+      .onConflictDoNothing({ target: transferReviews.transactionId })
+  }
+}
+
+/**
+ * The catch-all merchant labels bank-classify assigns to an *unidentified* bank
+ * outflow — exactly the rows that might be an internal Tangerine↔Scotia transfer
+ * (or any move we couldn't name). A recognized expense (Koodo, Highway 407, …)
+ * never uses these, so it won't be queued.
+ */
+const AMBIGUOUS_OUTBOUND_MERCHANTS = ['E-Transfer Out', 'Bank Withdrawal', 'Cheque Withdrawal']
+
+/**
+ * Queue an outbound review for every freshly-imported *unidentified* bank
+ * withdrawal so the owner can label it — most importantly the debit leg of an
+ * internal transfer between the two chequing accounts (which would otherwise sit
+ * as a spurious `Other`/wants expense, polluting spend analytics and the runway
+ * burn). Picking "Internal transfer" flips it to `flow=transfer`; the Emergency
+ * Fund still moves the account balance (it ignores flow). Idempotent.
+ */
+async function createWithdrawalReviews(insertedIds: number[]): Promise<void> {
+  if (insertedIds.length === 0) return
+
+  const rows = await db
+    .select({ id: transactions.id })
+    .from(transactions)
+    .innerJoin(merchants, eq(transactions.merchantId, merchants.id))
+    .where(
+      and(
+        inArray(transactions.id, insertedIds),
+        inArray(transactions.source, ['tangerine', 'scotia']),
+        eq(transactions.flow, 'expense'),
+        inArray(merchants.name, AMBIGUOUS_OUTBOUND_MERCHANTS)
+      )
+    )
+
+  for (const r of rows) {
+    await db
+      .insert(transferReviews)
+      .values({ transactionId: r.id, direction: 'out' })
       .onConflictDoNothing({ target: transferReviews.transactionId })
   }
 }
