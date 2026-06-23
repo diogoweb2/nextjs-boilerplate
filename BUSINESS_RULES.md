@@ -675,3 +675,51 @@ Pure math in `app/lib/runway.ts` (`computeRunwayInputs` + `buildScenarios`), cli
   back-fill), via the write-during-load pattern (`ensureMortgageGoal`-style). `RunwayHistoryChart`
   plots it with a dashed 9-month target line, the line/area in the **current** status color and each
   dot in its own status color (green/amber/red). `months` is null = ∞ (plotted at the top).
+
+## 14. "Safe to move" cash-flow tool (bottom half of the Emergency runway card)
+
+The Emergency runway card is split vertically: the runway (§13, a *job-loss* horizon) stays on top
+and a **"safe to move"** tool sits below it, answering a different question — *for each chequing
+bank, how much cash can I move to investment today without dipping below a comfort buffer before my
+next pay?* Pure math in `app/lib/cashflow.ts`, loader/actions in `app/actions/cashflow.ts`, client
+widget `app/components/charts/SafeToMoveWidget.tsx` (rendered inside the dashboard's Emergency
+runway `Card`, after `RunwayWidget`). State is one singleton table, `cashflow_config`.
+
+- **The trough model** (`projectAccount`): build a forward calendar of scheduled events per account
+  (income +, bills/CC payment −), walk a **45-day** window day-by-day from today, and take the
+  **lowest running balance** (the trough). `safeToMove = max(0, trough − buffer)`. The day-of-month
+  variation falls out naturally — less is movable before bills hit, more right after payday. The
+  function is pure so the **client recomputes it live** as the owner edits the inputs.
+- **Schedule = inferred, then editable** (`inferSchedule` + `applyOverrides`):
+  - **Income** — `Salary` + other income-kind deposits (reimbursements excluded), split by the bank
+    they land in (Tangerine/Scotia), typical day = median day-of-month, amount = recent-month
+    average. Needs ≥ 2 months of signal.
+  - **Bills** — bank-paid recurring merchants: the fixed **Home** category, projection-rule
+    merchants (§8c), or any `isRecurring` bank-sourced merchant. Account = the bank they post from,
+    day = median, cadence inferred from month-gaps (so quarterly Water lands every 3rd month),
+    amount via `projectedAmountForMonth` when a rule exists else the recent-month average. Card-paid
+    merchants are **skipped** — they're already inside the CC balance.
+  - **CC payment** — one event per card for its **current outstanding balance**
+    (`loadOutstandingByCard`, the unpaid-cycle sum split per card), routed to whichever bank pays it
+    (`cardAccounts` mapping, **default both cards → Tangerine**), on the owner's **`ccPaymentDay`**
+    (default the **11th** — the owner pays both cards the same day; the most important date to be
+    covered for). Plus a **pending-charges cushion** (`ccPendingBuffer`, default **$400** combined)
+    added on the payment day, split across the paying accounts, because charges still *pending* on a
+    card haven't exported to CSV yet so the outstanding figure understates the real payment. Each CC
+    event fires **once** in the window (next cycle's charges are unknown).
+- **Owner edits persist** in `cashflow_config` (singleton): per-account `buffers` (fixed $ cushion),
+  `cardAccounts` (card→bank), `ccPaymentDay` (int) + `ccPendingBuffer` (the card-payment day &
+  pending cushion above), per-event `overrides` (`dayOfMonth`/`amount`/`account`/`enabled`), and
+  `unplannedExpense`. Inference is always the default; overrides only correct it. The editor
+  round-trips them via `saveCashflowConfig` (blocked in demo by `requireAuth`).
+- **Info "i"** — a toggle in the widget header (`InfoPanel`) explains, in plain language, exactly how
+  each figure is derived (the trough model, money in/out, the card payment day, the pending cushion,
+  buffer, unplanned expense, and stale-bill dropping) so the number is never a black box.
+- **Unplanned expense** — a manual "big expense before my next card payment" input (account +
+  amount) applied as a one-time outflow; it drops the affected bank's safe-to-move figure live.
+  Persisted so it survives reload, with a "clear" control. Philosophy: approximate + a safety
+  buffer, and reversible — if a month surprises you, move the cash back from investment.
+- **Demo:** `demoCashflowPlan()` returns a synthetic two-account schedule so the card renders for
+  visitors; edits are blocked.
+
+Run after pulling this change: `npm run db:push` (adds `cashflow_config`).

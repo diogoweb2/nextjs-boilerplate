@@ -74,10 +74,10 @@ async function loadSnapshots(): Promise<BalanceSnapshot[]> {
  * payments for pre-tracking charges leave a misleading negative baseline. With no
  * payment on record yet, the whole charge history counts. Summed, clamped ≥ 0.
  */
-export async function loadOutstandingCardBalance(): Promise<number> {
+export async function loadOutstandingByCard(): Promise<{ master: number; amex: number }> {
   if (await isDemoSession()) {
-    const { demoOutstandingCardBalance } = await import('@/app/lib/demo-data')
-    return demoOutstandingCardBalance()
+    const { demoOutstandingByCard } = await import('@/app/lib/demo-data')
+    return demoOutstandingByCard()
   }
   const rows = await db
     .select({
@@ -89,8 +89,7 @@ export async function loadOutstandingCardBalance(): Promise<number> {
     .from(transactions)
     .where(inArray(transactions.source, ['master', 'amex']))
 
-  let total = 0
-  for (const card of ['master', 'amex'] as const) {
+  const perCard = (card: 'master' | 'amex'): number => {
     const cardRows = rows.filter((r) => r.source === card)
     const lastPayment = cardRows
       .filter((r) => r.isPayment)
@@ -98,9 +97,14 @@ export async function loadOutstandingCardBalance(): Promise<number> {
     const unpaid = cardRows
       .filter((r) => !r.isPayment && (lastPayment === null || r.txnDate > lastPayment))
       .reduce((s, r) => s + Number(r.amount), 0)
-    total += unpaid
+    return Math.max(0, Math.round(unpaid * 100) / 100)
   }
-  return Math.max(0, Math.round(total * 100) / 100)
+  return { master: perCard('master'), amex: perCard('amex') }
+}
+
+export async function loadOutstandingCardBalance(): Promise<number> {
+  const { master, amex } = await loadOutstandingByCard()
+  return Math.round((master + amex) * 100) / 100
 }
 
 export type EmergencyFundData = {

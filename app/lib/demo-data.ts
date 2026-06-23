@@ -13,6 +13,8 @@ import type { EnrichedTxn, ImportSource, Flow } from '@/app/lib/analytics'
 import type { ProjectionRule } from '@/app/lib/projection'
 import type { GoalView, PendingReview } from '@/app/actions/goals'
 import type { EmergencyFundData } from '@/app/actions/emergency'
+import type { CashflowPlan } from '@/app/actions/cashflow'
+import type { ScheduledEvent } from '@/app/lib/cashflow'
 import type { MortgageProjection } from '@/app/lib/mortgage'
 import type { ReportSeries } from '@/db/schema'
 import { CATEGORY_SEED } from '@/app/lib/seed-data'
@@ -681,8 +683,57 @@ export function demoManualSavingsContributions(): { occurredAt: string; amount: 
 }
 
 /** Unpaid credit-card balance the runway nets out of available cash. */
+export function demoOutstandingByCard(): { master: number; amex: number } {
+  return { master: 3200, amex: 1600 }
+}
+
 export function demoOutstandingCardBalance(): number {
-  return 4800
+  const { master, amex } = demoOutstandingByCard()
+  return master + amex
+}
+
+/** Synthetic "safe to move" plan: two chequing accounts with a believable
+ *  income/bill/CC schedule so the dashboard widget renders in the demo. */
+export function demoCashflowPlan(): CashflowPlan {
+  const today = `${ANCHOR_YM}-${String(ANCHOR_DAY).padStart(2, '0')}` // 2026-06-20
+  const fund = demoEmergencyFund()
+  const balanceOf = (s: 'tangerine' | 'scotia') => fund.accounts.find((a) => a.source === s)?.balance ?? 0
+  const { master, amex } = demoOutstandingByCard()
+
+  const ev = (
+    e: Omit<ScheduledEvent, 'nextDue'> & { nextDue: string },
+  ): ScheduledEvent => e
+
+  // Both cards are paid from Tangerine on the 11th, plus a $400 pending cushion.
+  const tangerine: ScheduledEvent[] = [
+    ev({ key: 'income:tangerine|Salary', account: 'tangerine', kind: 'income', label: 'Salary', dayOfMonth: 26, amount: 5200, cadenceMonths: 1, nextDue: `${ANCHOR_YM}-26` }),
+    ev({ key: 'bill:901', account: 'tangerine', kind: 'bill', label: 'Koodo', dayOfMonth: 12, amount: 75, cadenceMonths: 1, nextDue: '2026-07-12' }),
+    ev({ key: 'bill:902', account: 'tangerine', kind: 'bill', label: 'Distributel', dayOfMonth: 5, amount: 60, cadenceMonths: 1, nextDue: '2026-07-05' }),
+    ev({ key: 'cc:master', account: 'tangerine', kind: 'cc', label: 'Mastercard payment', dayOfMonth: 11, amount: master, cadenceMonths: 1, nextDue: '2026-07-11' }),
+    ev({ key: 'cc:amex', account: 'tangerine', kind: 'cc', label: 'Amex payment', dayOfMonth: 11, amount: amex, cadenceMonths: 1, nextDue: '2026-07-11' }),
+    ev({ key: 'cc:pending:tangerine', account: 'tangerine', kind: 'cc', label: 'Pending card charges (not imported)', dayOfMonth: 11, amount: 400, cadenceMonths: 1, nextDue: '2026-07-11' }),
+  ]
+  const scotia: ScheduledEvent[] = [
+    ev({ key: 'income:scotia|Salary', account: 'scotia', kind: 'income', label: 'Salary', dayOfMonth: 28, amount: 4100, cadenceMonths: 1, nextDue: `${ANCHOR_YM}-28` }),
+    ev({ key: 'bill:903', account: 'scotia', kind: 'bill', label: 'Mortgage', dayOfMonth: 15, amount: 2400, cadenceMonths: 1, nextDue: '2026-07-15' }),
+    ev({ key: 'bill:904', account: 'scotia', kind: 'bill', label: 'Toronto Hydro', dayOfMonth: 8, amount: 180, cadenceMonths: 1, nextDue: '2026-07-08' }),
+    ev({ key: 'bill:905', account: 'scotia', kind: 'bill', label: 'Toronto Water', dayOfMonth: 18, amount: 240, cadenceMonths: 3, nextDue: '2026-07-18' }),
+  ]
+
+  return {
+    hasData: true,
+    today,
+    accounts: [
+      { account: 'tangerine', label: 'Tangerine', balance: balanceOf('tangerine'), buffer: 500, events: tangerine },
+      { account: 'scotia', label: 'Scotia', balance: balanceOf('scotia'), buffer: 500, events: scotia },
+    ],
+    cardAccounts: { master: 'tangerine', amex: 'tangerine' },
+    ccPaymentDay: 11,
+    ccPendingBuffer: 400,
+    outstandingByCard: { master, amex },
+    unplannedExpense: { tangerine: 0, scotia: 0 },
+    overrides: [],
+  }
 }
 
 /** Worst-case runway history — a believable climb through red → amber → green. */

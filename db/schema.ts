@@ -365,6 +365,31 @@ export const runwaySnapshots = pgTable('runway_snapshots', {
 })
 
 /**
+ * Singleton holding the owner's edits to the "safe to move" cash-flow tool
+ * (app/lib/cashflow.ts). The schedule (income/bill/CC days & amounts) is INFERRED
+ * from history each load; this row only stores the owner's corrections so the
+ * inference stays the default. See BUSINESS_RULES.md §14.
+ *  - buffers           — fixed $ cushion to keep per account { tangerine, scotia }
+ *  - cardAccounts      — which bank pays each card { master, amex }
+ *  - ccPaymentDay      — the day of month BOTH cards are paid (owner pays ~the 11th)
+ *  - ccPendingBuffer   — combined $ added to the card payment for pending charges
+ *    that haven't exported to CSV yet (a safety margin, default $400)
+ *  - overrides         — array of per-event edits { key, account?, dayOfMonth?, amount?, enabled? }
+ *  - unplannedExpense  — the manual "big expense before next CC payment", PER account
+ *    { tangerine, scotia }
+ */
+export const cashflowConfig = pgTable('cashflow_config', {
+  id: serial('id').primaryKey(),
+  buffers: jsonb('buffers').notNull().default({ tangerine: 0, scotia: 0 }),
+  cardAccounts: jsonb('card_accounts').notNull().default({ master: 'tangerine', amex: 'tangerine' }),
+  ccPaymentDay: integer('cc_payment_day').notNull().default(11),
+  ccPendingBuffer: numeric('cc_pending_buffer', { precision: 10, scale: 2 }).notNull().default('400'),
+  overrides: jsonb('overrides').notNull().default([]),
+  unplannedExpense: jsonb('unplanned_expense').notNull().default({ tangerine: 0, scotia: 0 }),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+})
+
+/**
  * The dashboard "needs a decision" queue. Two directions (see app/actions/import.ts):
  *  - 'out' — outbound investment transfers (the $900 kitchen transfer and any
  *    non-$1,100 customer transfer) the owner attributes to a goal (money in).

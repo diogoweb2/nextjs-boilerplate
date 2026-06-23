@@ -23,11 +23,13 @@ import { computeBudgetRule } from '@/app/lib/fifty-thirty-twenty'
 import { BudgetRuleChart } from '@/app/components/charts/BudgetRuleChart'
 import { computeRunwayInputs, buildScenarios } from '@/app/lib/runway'
 import { RunwayWidget } from '@/app/components/charts/RunwayWidget'
+import { SafeToMoveWidget } from '@/app/components/charts/SafeToMoveWidget'
 import {
   loadEmergencyFund,
   loadOutstandingCardBalance,
   recordAndLoadRunwayHistory,
 } from '@/app/actions/emergency'
+import { loadCashflowPlan } from '@/app/actions/cashflow'
 import { computeMonthBurndown, computePeriodBurndown, type BurndownData } from '@/app/lib/projection'
 import { getBudgetSettings } from '@/app/actions/budget'
 import { loadProjectionRules } from '@/app/actions/projection'
@@ -212,9 +214,10 @@ export default async function Home({
     : null
 
   // Emergency-fund runway (stable monthly average, independent of the selector).
-  const [emergency, outstandingCards] = await Promise.all([
+  const [emergency, outstandingCards, cashflowPlan] = await Promise.all([
     loadEmergencyFund(),
     loadOutstandingCardBalance(),
+    loadCashflowPlan(),
   ])
   const runwayInputs = computeRunwayInputs(allFlows, bucketMeta)
   const earnerNames = {
@@ -350,13 +353,18 @@ export default async function Home({
                 }
               >
                 {emergency.hasData ? (
-                  <RunwayWidget
-                    fund={emergency.total}
-                    committed={outstandingCards}
-                    inputs={runwayInputs}
-                    names={earnerNames}
-                    history={runwayHistory}
-                  />
+                  <div className="flex flex-col gap-4">
+                    <RunwayWidget
+                      fund={emergency.total}
+                      committed={outstandingCards}
+                      inputs={runwayInputs}
+                      names={earnerNames}
+                      history={runwayHistory}
+                    />
+                    <div className="border-t border-[var(--border)] pt-4">
+                      <SafeToMoveWidget plan={cashflowPlan} />
+                    </div>
+                  </div>
                 ) : (
                   <EmptyHint>
                     Set your chequing balances on the Goals page to see how many months your
