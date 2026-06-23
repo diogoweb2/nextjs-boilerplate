@@ -60,6 +60,13 @@ Every row has a `flow`: `expense` | `income` | `transfer`.
   but still visible on Activity. `loadAllFlows` returns every non-payment row (all flows) for
   the Income page.
 
+A transaction's flow can be **overridden manually** from the Activity row editor (`setTxnFlow`,
+`app/actions/transactions.ts`) — the fix for a mis-pressed dashboard transfer review. Choosing
+`transfer` also moves the row to the neutral `Transfer` category; `expense`/`income` change only the
+flow (adjust the category with the picker). Setting `transfer` drops the row out of spend, the Income
+page, the runway burn and safe-to-move, while the Emergency Fund still moves the account balance (§12 —
+it ignores flow).
+
 ### Bank classification (`app/lib/bank-classify.ts`)
 `classifyBank(row)` is pure and maps each bank row → `{ flow, category, merchant, recurring }`
 by description + sub-description + sign. Highlights (owner-confirmed):

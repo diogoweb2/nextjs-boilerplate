@@ -469,6 +469,7 @@ export function demoActivityRows() {
       rawDescription: r.rawDescription,
       amount: r.amount,
       source: r.source,
+      flow: r.flow,
       cardLast4: r.cardLast4,
       isPayment: r.isPayment,
       txnCategoryId: r.txnCategoryId,

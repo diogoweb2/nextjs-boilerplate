@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import {
   setTxnCategory,
   setTxnFlags,
+  setTxnFlow,
   splitTransaction,
   unsplitTransaction,
   type SplitPart,
@@ -26,6 +27,7 @@ export type TxnRow = {
   isSpecial: boolean
   isPayment: boolean
   source: 'master' | 'amex' | 'tangerine' | 'scotia'
+  flow: 'expense' | 'income' | 'transfer'
   person: string
   // A peeled-off part of another transaction.
   isSplitPart: boolean
@@ -161,6 +163,7 @@ export function TransactionsTable({
             inlineCategory={uncategorizedOnly}
             onCategory={(cid) => run(() => setTxnCategory(t.id, t.merchantId, cid))}
             onFlags={(flags) => run(() => setTxnFlags(t.id, flags))}
+            onFlow={(flow) => run(() => setTxnFlow(t.id, flow))}
             onSplit={(parts) => run(() => splitTransaction(t.id, parts))}
             onUnsplit={() => run(() => unsplitTransaction(t.id))}
           />
@@ -203,6 +206,7 @@ function TxnRowView({
   inlineCategory,
   onCategory,
   onFlags,
+  onFlow,
   onSplit,
   onUnsplit,
 }: {
@@ -211,6 +215,7 @@ function TxnRowView({
   inlineCategory: boolean
   onCategory: (categoryId: number | null) => void
   onFlags: (flags: { isRecurring?: boolean | null; isSpecial?: boolean | null }) => void
+  onFlow: (flow: TxnRow['flow']) => void
   onSplit: (parts: SplitPart[]) => void
   onUnsplit: () => void
 }) {
@@ -309,6 +314,21 @@ function TxnRowView({
               ))}
             </select>
           )}
+          <label
+            className="flex items-center gap-1 text-xs text-[var(--muted)]"
+            title="Fix the money-flow — e.g. mark an internal transfer between your own accounts so it drops out of spend, income, runway and safe-to-move (the Emergency Fund still moves)."
+          >
+            Flow
+            <select
+              value={t.flow}
+              onChange={(e) => onFlow(e.target.value as TxnRow['flow'])}
+              className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs"
+            >
+              <option value="expense">Expense</option>
+              <option value="income">Income</option>
+              <option value="transfer">Transfer (internal)</option>
+            </select>
+          </label>
           <button
             onClick={() => onFlags({ isRecurring: !t.isRecurring })}
             className={`rounded-md px-2 py-1 text-xs font-medium ${

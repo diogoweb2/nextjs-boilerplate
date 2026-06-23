@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { revalidatePath } from 'next/cache'
 import { eq, ilike } from 'drizzle-orm'
 import { db } from '@/db'
-import { transactions, merchants } from '@/db/schema'
+import { transactions, merchants, categories } from '@/db/schema'
 import { requireAuth } from '@/app/lib/auth-guard'
 
 function revalidateAll() {
@@ -34,6 +34,30 @@ export async function setTxnCategory(
     .update(transactions)
     .set({ categoryId: null })
     .where(eq(transactions.merchantId, merchantId))
+  revalidateAll()
+}
+
+/**
+ * Override a single transaction's money-flow (expense / income / transfer) — the
+ * manual fix for a mis-pressed dashboard transfer review, from the Activity row
+ * editor. Setting `transfer` also moves the row into the neutral `Transfer`
+ * category so it stays coherent and drops out of spend analytics, the Income page,
+ * the runway burn and the safe-to-move schedule — while the Emergency Fund still
+ * moves the account balance (it ignores flow). `expense`/`income` only change the
+ * flow; use the category picker to fix the category if needed.
+ */
+export async function setTxnFlow(id: number, flow: 'expense' | 'income' | 'transfer'): Promise<void> {
+  await requireAuth()
+  if (flow === 'transfer') {
+    const [tc] = await db
+      .select({ id: categories.id })
+      .from(categories)
+      .where(eq(categories.name, 'Transfer'))
+      .limit(1)
+    await db.update(transactions).set({ flow, categoryId: tc?.id ?? null }).where(eq(transactions.id, id))
+  } else {
+    await db.update(transactions).set({ flow }).where(eq(transactions.id, id))
+  }
   revalidateAll()
 }
 
