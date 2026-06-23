@@ -41,7 +41,11 @@ export function IncomeCharts({
     { key: data.totalIncome.name, color: data.totalIncome.color, values: data.totalIncome.values, dashed: false, width: 3 },
     { key: data.spending.name, color: data.spending.color, values: data.spending.values, dashed: true, width: 2.5 },
   ]
-  const [hidden, setHidden] = useState<Set<string>>(new Set())
+  // Default view: only Total income vs Spending. Per-source income lines start
+  // hidden and can be toggled on via the legend.
+  const [hidden, setHidden] = useState<Set<string>>(
+    () => new Set(data.incomeLines.map((l) => l.name)),
+  )
   const toggle = (key: string) =>
     setHidden((prev) => {
       const next = new Set(prev)

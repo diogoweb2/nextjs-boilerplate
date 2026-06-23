@@ -31,6 +31,7 @@ export function PeriodSelector({
   availableMonths,
   periodOptions,
   extraOptions,
+  leadingExtraOptions,
 }: {
   showSpecialToggle?: boolean
   showCurrent?: boolean
@@ -40,6 +41,8 @@ export function PeriodSelector({
   periodOptions?: number[]
   /** Additional pill buttons that set ?period=X instead of ?months=N. */
   extraOptions?: Array<{ label: string; period: string }>
+  /** Like `extraOptions`, but rendered before the month buttons (e.g. YTD before 2M). */
+  leadingExtraOptions?: Array<{ label: string; period: string }>
 }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -51,7 +54,8 @@ export function PeriodSelector({
   const excludeSpecial = params.get('special') === '0'
   const selectedMonth = params.get('month') ?? ''
   const currentPeriod = params.get('period') ?? ''
-  const isExtraPeriod = Boolean(extraOptions?.some((o) => o.period === currentPeriod))
+  const allExtraOptions = [...(leadingExtraOptions ?? []), ...(extraOptions ?? [])]
+  const isExtraPeriod = allExtraOptions.some((o) => o.period === currentPeriod)
   // "Current" is the default on pages that offer it when nothing else is chosen.
   const isCurrent =
     showCurrent &&
@@ -110,6 +114,19 @@ export function PeriodSelector({
           hasExactMonth ? 'opacity-40' : ''
         }`}
       >
+        {leadingExtraOptions?.map((o) => (
+          <button
+            key={o.period}
+            onClick={() => update({ period: o.period, months: null, month: null })}
+            className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${
+              !hasExactMonth && currentPeriod === o.period
+                ? 'bg-[var(--accent)] text-[var(--accent-fg)]'
+                : 'text-[var(--muted)] hover:text-[var(--foreground)]'
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
         {buildOptions(periodOptions).map((o) => (
           <button
             key={o.months}

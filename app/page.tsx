@@ -51,7 +51,9 @@ export default async function Home({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const rawParams = await searchParams
-  const { months, excludeSpecial, month, current: currentParam } = parsePeriodParams(rawParams)
+  const { months: parsedMonths, excludeSpecial, month, current: currentParam } = parsePeriodParams(rawParams)
+  const rawPeriod = Array.isArray(rawParams.period) ? rawParams.period[0] : rawParams.period
+  const ytd = rawPeriod === 'year'
   // Default to "Current" (the in-progress month) when nothing is chosen.
   const current = currentParam || (!rawParams.period && !rawParams.month && !rawParams.months)
 
@@ -112,9 +114,12 @@ export default async function Home({
   const all = allFlows.filter((t) => t.flow === 'expense')
 
   const anchor = anchorMonth(all)
+  // YTD = January of the anchor year through the anchor month (inclusive).
+  const months = ytd && anchor ? Number(anchor.slice(5, 7)) : parsedMonths
   // "Current" scopes the page to the anchor month (like picking that exact month).
   const exactMonth = month ?? (current ? anchor : null)
   const ov = buildOverview(all, months, excludeSpecial, exactMonth)
+  if (ytd) ov.periodLabel = 'Year to date'
   const months_available = availableMonths(all)
   const insights = buildInsights(all, months, excludeSpecial, exactMonth)
 
@@ -246,7 +251,11 @@ export default async function Home({
         </div>
         <div className="flex flex-col items-end gap-2">
           <SyncStatusBar entries={syncEntries} />
-          <PeriodSelector showCurrent availableMonths={months_available} />
+          <PeriodSelector
+            showCurrent
+            availableMonths={months_available}
+            leadingExtraOptions={[{ label: 'YTD', period: 'year' }]}
+          />
         </div>
       </div>
 
