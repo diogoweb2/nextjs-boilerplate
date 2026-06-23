@@ -2,7 +2,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { revalidatePath } from 'next/cache'
-import { and, asc, desc, eq, ilike, inArray } from 'drizzle-orm'
+import { and, asc, desc, eq, ilike, inArray, isNull } from 'drizzle-orm'
 import { db } from '@/db'
 import {
   goals,
@@ -25,7 +25,13 @@ import {
   milestoneMessage,
   type EntryLite,
 } from '@/app/lib/goals'
-import { projectMortgage, inferRate, type MortgageProjection, type Payment } from '@/app/lib/mortgage'
+import {
+  projectMortgage,
+  inferRate,
+  isExtraMortgagePayment,
+  type MortgageProjection,
+  type Payment,
+} from '@/app/lib/mortgage'
 import { pushConfigured, sendPushToAll } from '@/app/lib/push'
 import { formatCurrency } from '@/app/lib/format'
 
@@ -100,8 +106,8 @@ function mortgagePayments(flows: Awaited<ReturnType<typeof loadAllFlows>>): Paym
     if (t.merchantName !== 'Mortgage' || t.flow !== 'expense') continue
     const ym = t.txnDate.slice(0, 7)
     const cur = byYm.get(ym) ?? { regular: 0, extra: 0 }
-    if (t.rawDescription.toLowerCase().includes('mortgage payment')) cur.regular += t.amount
-    else cur.extra += t.amount
+    if (isExtraMortgagePayment(t)) cur.extra += t.amount
+    else cur.regular += t.amount
     byYm.set(ym, cur)
   }
   return [...byYm.entries()]
@@ -438,6 +444,35 @@ export async function loadPendingReviews(): Promise<PendingReview[]> {
     suggestedGoalId: r.suggestedGoalId,
     goals: goalOpts,
   }))
+}
+
+/**
+ * Manual "extra" savings-goal contributions — those with NO backing transaction
+ * (transactionId IS NULL) on a savings goal. These don't appear in any
+ * transaction flow, so the 50/30/20 rule counts them as Savings explicitly.
+ * Contributions that DO have a transaction (transfers tagged to a goal, or
+ * `asExpense` deposits) already land in the Investment category, so they are
+ * counted there instead — excluding txn-backed ones here avoids double counting.
+ */
+export async function loadManualSavingsContributions(): Promise<{ occurredAt: string; amount: number }[]> {
+  if (await isDemoSession()) {
+    const { demoManualSavingsContributions } = await import('@/app/lib/demo-data')
+    return demoManualSavingsContributions()
+  }
+  const rows = await db
+    .select({ amount: goalEntries.amount, occurredAt: goalEntries.occurredAt })
+    .from(goalEntries)
+    .innerJoin(goals, eq(goalEntries.goalId, goals.id))
+    .where(
+      and(
+        eq(goals.kind, 'savings'),
+        eq(goalEntries.kind, 'contribution'),
+        isNull(goalEntries.transactionId),
+      ),
+    )
+  return rows
+    .map((r) => ({ occurredAt: r.occurredAt, amount: Number(r.amount) }))
+    .filter((r) => r.amount > 0)
 }
 
 // ---------------------------------------------------------------------------

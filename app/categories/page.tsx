@@ -44,6 +44,7 @@ export default async function CategoriesPage() {
     name: c.name,
     color: c.color,
     count: counts.get(c.id) ?? 0,
+    bucket: c.bucket,
   }))
 
   return (
@@ -51,7 +52,8 @@ export default async function CategoriesPage() {
       <div className="mb-4">
         <h1 className="text-xl font-bold tracking-tight">Categories</h1>
         <p className="text-sm text-[var(--muted)]">
-          Organize spending into buckets. Recolor or rename anytime — charts update everywhere.
+          Recolor or rename anytime — charts update everywhere. The bucket drives the
+          dashboard 50/30/20 rule (Needs / Wants / Savings).
         </p>
       </div>
       <CategoriesManager categories={rows} />

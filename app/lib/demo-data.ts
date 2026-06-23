@@ -12,6 +12,7 @@
 import type { EnrichedTxn, ImportSource, Flow } from '@/app/lib/analytics'
 import type { ProjectionRule } from '@/app/lib/projection'
 import type { GoalView, PendingReview } from '@/app/actions/goals'
+import type { EmergencyFundData } from '@/app/actions/emergency'
 import type { MortgageProjection } from '@/app/lib/mortgage'
 import type { ReportSeries } from '@/db/schema'
 import { CATEGORY_SEED } from '@/app/lib/seed-data'
@@ -68,12 +69,19 @@ function someDay(ym: string): string {
 // ---------------------------------------------------------------------------
 // Categories — reuse the real seed so colors/kinds match the app exactly.
 // ---------------------------------------------------------------------------
-export type DemoCategory = { id: number; name: string; color: string; kind: 'expense' | 'income' | 'neutral' }
+export type DemoCategory = {
+  id: number
+  name: string
+  color: string
+  kind: 'expense' | 'income' | 'neutral'
+  bucket: 'needs' | 'wants' | 'savings' | 'none'
+}
 export const DEMO_CATEGORIES: DemoCategory[] = CATEGORY_SEED.map((c, i) => ({
   id: i + 1,
   name: c.name,
   color: c.color,
   kind: c.kind ?? 'expense',
+  bucket: c.bucket ?? 'none',
 }))
 const catId = (name: string): number => DEMO_CATEGORIES.find((c) => c.name === name)!.id
 
@@ -661,6 +669,54 @@ export function demoGoalsData(): {
     asOfYm: ANCHOR_YM,
     suggestNetZero: false,
     monthStats: { thisMonth: 350, lastMonth: 500 },
+  }
+}
+
+/** Manual savings-goal deposits with no backing transaction (for 50/30/20). */
+export function demoManualSavingsContributions(): { occurredAt: string; amount: number }[] {
+  return [
+    { occurredAt: day(addMonths(ANCHOR_YM, -1), 12), amount: 500 },
+    { occurredAt: day(ANCHOR_YM, 8), amount: 350 },
+  ]
+}
+
+/** Unpaid credit-card balance the runway nets out of available cash. */
+export function demoOutstandingCardBalance(): number {
+  return 4800
+}
+
+/** Worst-case runway history — a believable climb through red → amber → green. */
+export function demoRunwayHistory(): { date: string; months: number | null }[] {
+  const dates = ['2026-03-15', '2026-04-01', '2026-04-20', '2026-05-05', '2026-05-20', '2026-06-05', '2026-06-15', '2026-06-23']
+  const months = [3.2, 3.0, 4.4, 5.3, 6.1, 6.9, 8.0, 8.7]
+  return dates.map((date, i) => ({ date, months: months[i] }))
+}
+
+/** Emergency Fund card (Tangerine + Scotia) with a believable climbing history. */
+export function demoEmergencyFund(): EmergencyFundData {
+  const months = 12
+  const series: { ym: string; total: number }[] = []
+  let bal = 9000
+  for (let i = months; i >= 0; i--) {
+    bal += randInt(-400, 900)
+    series.push({ ym: addMonths(ANCHOR_YM, -i), total: Math.round(bal) })
+  }
+  const since = `${addMonths(ANCHOR_YM, -months)}-01`
+  const investment = 8000 // manual low-risk holding, flat across the history
+  const chequing = series[series.length - 1].total
+  const scotia = Math.round(chequing * 0.55)
+  // Fold the (flat) investment into the history total too.
+  const seriesWithInv = series.map((p) => ({ ym: p.ym, total: p.total + investment }))
+  return {
+    hasData: true,
+    total: chequing + investment,
+    accounts: [
+      { source: 'tangerine', label: 'Tangerine', balance: chequing - scotia, since },
+      { source: 'scotia', label: 'Scotia', balance: scotia, since },
+      { source: 'investment', label: 'Low-risk investment', balance: investment, since },
+    ],
+    series: seriesWithInv,
+    asOfYm: ANCHOR_YM,
   }
 }
 

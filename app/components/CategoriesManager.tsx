@@ -2,9 +2,23 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { createCategory, updateCategory, deleteCategory } from '@/app/actions/categories'
+import { createCategory, updateCategory, updateCategoryBucket, deleteCategory } from '@/app/actions/categories'
 
-export type CategoryManageRow = { id: number; name: string; color: string; count: number }
+export type CategoryBucket = 'needs' | 'wants' | 'savings' | 'none'
+export type CategoryManageRow = {
+  id: number
+  name: string
+  color: string
+  count: number
+  bucket: CategoryBucket
+}
+
+const BUCKET_OPTIONS: { value: CategoryBucket; label: string }[] = [
+  { value: 'needs', label: 'Needs' },
+  { value: 'wants', label: 'Wants' },
+  { value: 'savings', label: 'Savings' },
+  { value: 'none', label: '—' },
+]
 
 const PALETTE = [
   '#16a34a', '#f97316', '#0ea5e9', '#eab308', '#8b5cf6', '#ef4444',
@@ -59,6 +73,7 @@ export function CategoriesManager({ categories }: { categories: CategoryManageRo
             c={c}
             onName={(name) => run(() => updateCategory(c.id, { name }))}
             onColor={(color) => run(() => updateCategory(c.id, { color }))}
+            onBucket={(bucket) => run(() => updateCategoryBucket(c.id, bucket))}
             onDelete={() => run(() => deleteCategory(c.id))}
           />
         ))}
@@ -71,11 +86,13 @@ function CategoryRow({
   c,
   onName,
   onColor,
+  onBucket,
   onDelete,
 }: {
   c: CategoryManageRow
   onName: (name: string) => void
   onColor: (color: string) => void
+  onBucket: (bucket: CategoryBucket) => void
   onDelete: () => void
 }) {
   const [name, setName] = useState(c.name)
@@ -94,7 +111,19 @@ function CategoryRow({
         onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
         className="min-w-0 flex-1 rounded-md bg-transparent px-1 py-0.5 text-sm font-medium outline-none hover:bg-[var(--surface-2)] focus:bg-[var(--surface-2)]"
       />
-      <span className="w-20 text-right text-xs tabular-nums text-[var(--muted)]">
+      <select
+        value={c.bucket}
+        onChange={(e) => onBucket(e.target.value as CategoryBucket)}
+        title="50/30/20 bucket"
+        className="shrink-0 rounded-md border border-[var(--border)] bg-[var(--surface)] px-1.5 py-1 text-xs text-[var(--muted)] outline-none focus:border-[var(--accent)]"
+      >
+        {BUCKET_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      <span className="hidden w-16 text-right text-xs tabular-nums text-[var(--muted)] sm:inline">
         {c.count} txn
       </span>
       <button

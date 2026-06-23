@@ -19,10 +19,19 @@ import { loadAllFlows, buildOverview, availableMonths, anchorMonth, periodWindow
 import { buildInsights, type InsightCard as InsightCardData } from '@/app/lib/insights'
 import { parsePeriodParams } from '@/app/lib/params'
 import { computeBudget, computeNetTrajectory, FIXED_CATEGORIES, type CategoryMeta } from '@/app/lib/budget'
+import { computeBudgetRule } from '@/app/lib/fifty-thirty-twenty'
+import { BudgetRuleChart } from '@/app/components/charts/BudgetRuleChart'
+import { computeRunwayInputs, buildScenarios } from '@/app/lib/runway'
+import { RunwayWidget } from '@/app/components/charts/RunwayWidget'
+import {
+  loadEmergencyFund,
+  loadOutstandingCardBalance,
+  recordAndLoadRunwayHistory,
+} from '@/app/actions/emergency'
 import { computeMonthBurndown, computePeriodBurndown, type BurndownData } from '@/app/lib/projection'
 import { getBudgetSettings } from '@/app/actions/budget'
 import { loadProjectionRules } from '@/app/actions/projection'
-import { loadPendingReviews } from '@/app/actions/goals'
+import { loadPendingReviews, loadManualSavingsContributions } from '@/app/actions/goals'
 import { isDemoSession } from '@/app/lib/demo'
 import { TransferReview } from '@/app/components/TransferReview'
 import {
@@ -186,6 +195,39 @@ export default async function Home({
   // calendar year (independent of the period selector) — it's a yearly goal.
   const netTrajectory = computeNetTrajectory(allFlows, settings.targetNet)
 
+  // 50/30/20 rule for the selected period (same window as the Overview above).
+  const manualContributions = await loadManualSavingsContributions()
+  const ruleWindow = exactMonth
+    ? { start: exactMonth, end: exactMonth }
+    : anchor
+      ? periodWindow(anchor, months)
+      : null
+  const bucketMeta = catRows.map((c) => ({ name: c.name, kind: c.kind, bucket: c.bucket }))
+  const budgetRule = ruleWindow
+    ? computeBudgetRule(allFlows, bucketMeta, {
+        start: ruleWindow.start,
+        end: ruleWindow.end,
+        manualContributions,
+      })
+    : null
+
+  // Emergency-fund runway (stable monthly average, independent of the selector).
+  const [emergency, outstandingCards] = await Promise.all([
+    loadEmergencyFund(),
+    loadOutstandingCardBalance(),
+  ])
+  const runwayInputs = computeRunwayInputs(allFlows, bucketMeta)
+  const earnerNames = {
+    self: process.env.SELF_NAME ?? 'Me',
+    partner: process.env.PARTNER_NAME ?? 'Partner',
+  }
+  // Worst-case runway (higher earner loses job) → recorded daily for the trend.
+  const availableCash = Math.max(0, emergency.total - outstandingCards)
+  const worstMonths = buildScenarios(runwayInputs, availableCash, false, earnerNames).scenarios.reduce<
+    number | null
+  >((worst, s) => (s.months === null ? worst : worst === null ? s.months : Math.min(worst, s.months)), null)
+  const runwayHistory = emergency.hasData ? await recordAndLoadRunwayHistory(worstMonths) : []
+
   return (
     <AppShell>
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -281,6 +323,48 @@ export default async function Home({
             >
               <NetGoalTrajectory data={netTrajectory} />
             </Card>
+          )}
+
+          {/* 50/30/20 rule + emergency-fund runway, side by side */}
+          {(budgetRule?.hasData || emergency.hasData) && (
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+              {budgetRule?.hasData && (
+                <Card
+                  title="50/30/20 rule"
+                  action={
+                    <a href="/categories" className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]">
+                      edit buckets →
+                    </a>
+                  }
+                >
+                  <BudgetRuleChart data={budgetRule} />
+                </Card>
+              )}
+
+              <Card
+                title="Emergency runway"
+                action={
+                  <a href="/goals" className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]">
+                    fund →
+                  </a>
+                }
+              >
+                {emergency.hasData ? (
+                  <RunwayWidget
+                    fund={emergency.total}
+                    committed={outstandingCards}
+                    inputs={runwayInputs}
+                    names={earnerNames}
+                    history={runwayHistory}
+                  />
+                ) : (
+                  <EmptyHint>
+                    Set your chequing balances on the Goals page to see how many months your
+                    emergency fund would cover.
+                  </EmptyHint>
+                )}
+              </Card>
+            </div>
           )}
 
           {/* Insights */}

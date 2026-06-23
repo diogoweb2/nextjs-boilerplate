@@ -38,6 +38,17 @@ export async function updateCategory(
   revalidateAll()
 }
 
+/** Set a category's 50/30/20 bucket (see app/lib/fifty-thirty-twenty.ts). */
+export async function updateCategoryBucket(
+  id: number,
+  bucket: 'needs' | 'wants' | 'savings' | 'none'
+): Promise<void> {
+  await requireAuth()
+  if (!['needs', 'wants', 'savings', 'none'].includes(bucket)) return
+  await db.update(categories).set({ bucket }).where(eq(categories.id, id))
+  revalidateAll()
+}
+
 export async function deleteCategory(id: number): Promise<void> {
   await requireAuth()
   // Merchants/transactions referencing it are set null (see schema FK rules).

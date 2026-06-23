@@ -421,6 +421,33 @@ from day 1 — and **defaults to it** when no period is chosen (`app/lib/params.
 `PeriodSelector` `showCurrent`). It scopes the page like picking that exact month, and the widget
 renders day-by-day.
 
+## 8d. 50/30/20 rule (dashboard card)
+
+A dashboard card comparing the **Needs / Wants / Savings** split to the classic 50/30/20 targets,
+scoped to the **selected period** (same window as the rest of the Overview). Logic is pure in
+`app/lib/fifty-thirty-twenty.ts` (`computeBudgetRule`, fed by `loadAllFlows()`); the card body is
+`app/components/charts/BudgetRuleChart.tsx` (reuses `Donut`). Each expense category carries a
+`bucket` (`needs` | `wants` | `savings` | `none`) on the `categories` table, seeded with defaults
+(see `app/lib/seed-data.ts`) and **editable per category** on `/categories`.
+
+- **Income base** = income-flow rows whose **category kind = `income`** only (Salary, Family
+  Support, Benefits, Tax Refund, Interest, Other Income).
+- **Reimbursements:** an income-flow row filed under an **expense-kind** category (e.g. dental
+  insurance under `Dental`) is a reimbursement — it **nets against that category**, never income.
+  This also drives the **Dental coverage** flag: `reimbursed / expense`, warned when **< 80%**.
+- **Per-category net** = Σ expense amounts + Σ income (reimbursement) amounts; each category
+  contributes `max(0, net)` to its bucket (an over-reimbursed category can't go negative).
+- **Extra mortgage → Savings:** the voluntary extra mortgage prepayment (`isExtraMortgagePayment`,
+  `app/lib/mortgage.ts`) is moved out of Needs and counted as **Savings** (principal paydown builds
+  equity). The contractual mortgage payment stays in Needs.
+- **Savings** = the `Investment`-bucket category net (covers transfers tagged to goals and
+  `asExpense` goal deposits, since both create an `Investment` expense) **+** the extra mortgage
+  principal **+** manual savings-goal contributions with **no backing transaction**
+  (`loadManualSavingsContributions` — txn-backed ones are excluded to avoid double-counting).
+- Each bucket shows actual % of income, the target (50/30/20) and the signed difference (points +
+  dollars). Run after the schema change: `npm run db:push` and re-run `npm run db:seed` to backfill
+  bucket defaults (the seed only fills buckets still set to `none`, never clobbering owner edits).
+
 ## 9. Income page (`/income`)
 
 Answers "are we ahead or behind, and which way is it trending?" Logic is pure in
@@ -573,3 +600,78 @@ any session. `isDemoSession()` (`app/lib/demo.ts`) reads that flag.
   layout) says editing is disabled and offers "Exit demo" (logout).
 - The synthetic dataset is committed (safe — it's all made up). When adding a new page/loader,
   add an `isDemoSession()` branch so it doesn't fall through to real data.
+
+## 12. Emergency Fund (Goals page card)
+
+Tracks the owner's **emergency funds** across three accounts: the two chequing accounts
+(Tangerine + Scotia) plus a manual **low-risk investment**. Pure math in `app/lib/emergency.ts`,
+server actions/loaders in `app/actions/emergency.ts`, UI in `app/components/EmergencyFund.tsx`
+(rendered on `/goals`). State is one table, `account_snapshots` (id, `source` ∈ {tangerine, scotia,
+investment}, absolute `balance`, `occurred_at`, note) — the same ABSOLUTE-snapshot model the
+mortgage uses. Sources are listed in `ACCOUNT_SOURCES` with an `autoTracked` flag.
+
+- **Seed + self-tracking:** the first snapshot per account is the owner-entered **starting
+  balance**; thereafter the balance updates from imported bank flows. **Current balance** = latest
+  snapshot + Σ of real bank flows since it (`balanceAsOf`). **Fund total** = Σ over all accounts.
+- **Manual `investment` source:** a low-risk holding the system can't see in any CSV
+  (`autoTracked: false`). It has **no bank flows**, so `balanceAsOf` naturally returns just its last
+  snapshot — the owner updates it manually when it changes (same "update balance" control, tagged
+  *manual* in the UI). No special-casing in the math; `loadBankFlows` only queries the two banks.
+- **Manual correction:** "Update balance" just inserts a newer absolute snapshot, which re-anchors
+  and absorbs any drift (like `updateMortgageBalance`). No relevant interest is modelled (these are
+  chequing accounts).
+- **Which flows move the fund:** `loadBankFlows()` queries `transactions` **directly** (not
+  `loadAllFlows`, which drops card payments) for `source ∈ {tangerine, scotia}` AND `external_id NOT
+  LIKE 'goal:%'`. Real cash delta per row = **`-amount`** (bank amounts are stored negated). So a
+  Scotia payment toward a card, or an investment transfer out, **lowers** the fund; salary/deposits
+  **raise** it. Synthetic goal moves (`goal:%`) are excluded — no real cash moved.
+- **Interaction with goals / 50/30/20 (owner scenarios):**
+  - Move $900 savings → investment: the real Scotia "customer transfer" row **lowers the fund**
+    automatically; tagging it to a goal makes it an `Investment` expense → counts as **Savings**.
+  - Add $900 to a goal as an `asExpense` deposit **without moving money**: creates an `Investment`
+    expense (counts as **Savings**) but its `goal:%` external id is **excluded** from `loadBankFlows`,
+    so the **fund is unchanged**.
+- **History chart:** `historySeries` gives the month-end fund total from the first snapshot month,
+  rendered with `LineChart` to help decide when to move surplus cash into investments.
+
+Run after pulling this change: `npm run db:push` (adds `account_snapshots`).
+
+## 13. Emergency-fund runway (dashboard card)
+
+A dashboard card paired with the 50/30/20 rule (half-width each) answering **"how many months
+would the emergency fund last if income stopped?"** — against the owner's **9-month** target
+(the common rule of thumb is 3–6 months; this household aims higher).
+Pure math in `app/lib/runway.ts` (`computeRunwayInputs` + `buildScenarios`), client widget
+`app/components/charts/RunwayWidget.tsx`, fund total from `loadEmergencyFund()` (§12).
+
+- **Monthly burn** = recent **Needs + Wants** spend (the 50/30/20 consumption buckets),
+  averaged over the most recent **complete** months (default 6; the in-progress anchor month is
+  excluded). Investing/Savings and **extra mortgage prepayment** are assumed **paused** in an
+  emergency, so they're excluded. Travel is tracked separately so the widget's **"Exclude trips"**
+  checkbox can drop it (a discretionary cut). This window is independent of the dashboard period
+  selector — it's a stable monthly figure.
+- **Salary split** matches the Income page: `Salary` category, **Tangerine = self**, **Scotia =
+  partner** (display names from `SELF_NAME` / `PARTNER_NAME`). Non-salary income (family support,
+  benefits, …; excludes Goal Spend) is assumed to **continue**.
+- **Scenarios** (`buildScenarios`): runway = `fund / max(0, burn − remainingIncome)`:
+  - **No salary — self** → remaining = partner salary + other income.
+  - **No salary — partner** → remaining = self salary + other income.
+  - (Both losing pay at once is omitted — treated as not a realistic case.)
+  - When remaining income ≥ burn the runway is **∞** (income covers expenses).
+- **Available cash** (the fund the runway divides by) = emergency-fund total (§12) **−
+  outstanding credit-card balance** (`loadOutstandingCardBalance`: net of all master/amex rows —
+  charges +, payments/refunds −, clamped ≥ 0). A big recent card purchase (e.g. a $10k car) drops
+  the runway immediately, before the statement is even paid; paying it later just moves the money
+  from "card balance due" to a real bank outflow, so available cash — and the runway — stay
+  consistent. This nets out **only in the runway**; the Emergency Fund card (§12) is unaffected.
+- **Visual:** one bar per scenario on a fixed months axis with a **9-month target green zone** and
+  ticks at 6 & 9; the fill is colored red (< 6), amber (6–9) or green (≥ 9 / ∞).
+- **Headroom to target** (`headroomToTarget`): for the **worst single-earner case** (the *higher*
+  earner losing their job — shortest runway), `targetCash = 9 × worstNetBurn`; if available cash
+  exceeds it the surplus is **"move-out" headroom**, otherwise the gap is **"add to reach 9 months."**
+  Recomputed live as the exclude-trips toggle changes the burn.
+- **Runway trend** (`runway_snapshots`, `recordAndLoadRunwayHistory`): the worst-case runway is
+  recorded **once per day it changes**, starting the first day the dashboard is viewed (no
+  back-fill), via the write-during-load pattern (`ensureMortgageGoal`-style). `RunwayHistoryChart`
+  plots it with a dashed 9-month target line, the line/area in the **current** status color and each
+  dot in its own status color (green/amber/red). `months` is null = ∞ (plotted at the top).

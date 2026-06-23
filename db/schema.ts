@@ -26,6 +26,12 @@ export const categories = pgTable('categories', {
   kind: text('kind', { enum: ['expense', 'income', 'neutral'] })
     .notNull()
     .default('expense'),
+  // 50/30/20 rule bucket (see app/lib/fifty-thirty-twenty.ts). 'needs'/'wants'/
+  // 'savings' map a category into the rule; 'none' excludes it (income/neutral
+  // categories, transfers, Goal Spend). User-editable on the Categories page.
+  bucket: text('bucket', { enum: ['needs', 'wants', 'savings', 'none'] })
+    .notNull()
+    .default('none'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 })
 
@@ -318,6 +324,47 @@ export const goalEntries = pgTable(
 )
 
 /**
+ * Emergency Fund tracking (the Goals page card). One row per observed/overridden
+ * ABSOLUTE balance of an account, like the mortgage's balance snapshots. The
+ * first snapshot per source is the owner-entered starting balance; a manual
+ * correction is just a newer snapshot (it re-anchors and absorbs any drift).
+ *
+ * `tangerine`/`scotia` are chequing accounts auto-tracked from imported bank
+ * flows: current balance = latest snapshot + net real flows since (see
+ * app/lib/emergency.ts). `investment` is a low-risk holding the system can't see
+ * in any CSV, so it has NO flows and stays at its last manually-entered snapshot.
+ * The fund total = Σ over all sources. Synthetic goal moves (externalId LIKE
+ * 'goal:%') are excluded from the bank flows. See BUSINESS_RULES.md §12.
+ */
+export const accountSnapshots = pgTable(
+  'account_snapshots',
+  {
+    id: serial('id').primaryKey(),
+    source: text('source', { enum: ['tangerine', 'scotia', 'investment'] }).notNull(),
+    // Absolute balance of the account at occurredAt.
+    balance: numeric('balance', { precision: 12, scale: 2 }).notNull(),
+    occurredAt: date('occurred_at').notNull(),
+    note: text('note'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => [index('account_snapshots_source_idx').on(t.source)]
+)
+
+/**
+ * History of the Emergency-runway widget (dashboard). One point per day the
+ * worst-case runway (the higher earner losing their job, trips included) changes,
+ * starting the first day it's viewed. Lets the chart show whether the runway is
+ * trending up. `months` is null when the runway is effectively infinite (income
+ * covers the burn). See BUSINESS_RULES.md §13.
+ */
+export const runwaySnapshots = pgTable('runway_snapshots', {
+  id: serial('id').primaryKey(),
+  occurredAt: date('occurred_at').notNull(),
+  months: numeric('months', { precision: 6, scale: 2 }),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+
+/**
  * The dashboard "needs a decision" queue. Two directions (see app/actions/import.ts):
  *  - 'out' — outbound investment transfers (the $900 kitchen transfer and any
  *    non-$1,100 customer transfer) the owner attributes to a goal (money in).
@@ -437,3 +484,5 @@ export type LoginAttempt = typeof loginAttempts.$inferSelect
 export type Goal = typeof goals.$inferSelect
 export type GoalEntry = typeof goalEntries.$inferSelect
 export type TransferReview = typeof transferReviews.$inferSelect
+export type AccountSnapshot = typeof accountSnapshots.$inferSelect
+export type RunwaySnapshot = typeof runwaySnapshots.$inferSelect

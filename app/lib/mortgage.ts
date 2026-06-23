@@ -29,6 +29,25 @@ export function addMonths(ym: string, n: number): string {
   return `${ny}-${String(nm).padStart(2, '0')}`
 }
 
+/**
+ * True when a row is a voluntary EXTRA mortgage prepayment (the "customer
+ * transfer" top-ups) rather than the contractual "mortgage payment". Shared by
+ * the goals projection (`mortgagePayments`) and the 50/30/20 rule, which excludes
+ * extra principal from Needs (the extra payment isn't a living cost). Operates on
+ * any txn-like row so it stays pure/db-free.
+ */
+export function isExtraMortgagePayment(t: {
+  merchantName: string
+  flow: string
+  rawDescription: string
+}): boolean {
+  return (
+    t.merchantName === 'Mortgage' &&
+    t.flow === 'expense' &&
+    !t.rawDescription.toLowerCase().includes('mortgage payment')
+  )
+}
+
 /** Whole months from `a` to `b` (b − a). Negative if b precedes a. */
 export function monthsBetween(a: string, b: string): number {
   const [ay, am] = a.split('-').map(Number)

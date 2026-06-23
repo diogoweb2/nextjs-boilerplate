@@ -3,6 +3,7 @@
  * (+ their `contains` rules). Safe to re-run — only creates what's missing, never
  * clobbers user edits. Run with: npm run db:seed
  */
+import { and, eq } from 'drizzle-orm'
 import { db } from './index'
 import { categories, merchants, merchantRules } from './schema'
 import { CATEGORY_SEED, BRAND_SEED } from '../app/lib/seed-data'
@@ -12,8 +13,16 @@ async function seed() {
   for (const c of CATEGORY_SEED) {
     await db
       .insert(categories)
-      .values({ name: c.name, color: c.color, kind: c.kind ?? 'expense' })
+      .values({ name: c.name, color: c.color, kind: c.kind ?? 'expense', bucket: c.bucket ?? 'none' })
       .onConflictDoNothing({ target: categories.name })
+    // Backfill the 50/30/20 bucket onto pre-existing rows, but only when it is
+    // still the default 'none' — never clobber a bucket the owner has set.
+    if (c.bucket && c.bucket !== 'none') {
+      await db
+        .update(categories)
+        .set({ bucket: c.bucket })
+        .where(and(eq(categories.name, c.name), eq(categories.bucket, 'none')))
+    }
   }
   const catRows = await db.select().from(categories)
   const catId = new Map(catRows.map((c) => [c.name, c.id]))

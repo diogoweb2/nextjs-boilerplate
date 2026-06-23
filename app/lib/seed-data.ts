@@ -6,32 +6,39 @@
  */
 
 export type CategoryKind = 'expense' | 'income' | 'neutral'
-export type CategorySeed = { name: string; color: string; kind?: CategoryKind }
+/** 50/30/20 rule bucket; 'none' = excluded from the rule. */
+export type CategoryBucket = 'needs' | 'wants' | 'savings' | 'none'
+export type CategorySeed = { name: string; color: string; kind?: CategoryKind; bucket?: CategoryBucket }
 
+// 50/30/20 default buckets (owner-editable on the Categories page):
+//  - needs   = unavoidable living costs (housing, food, transport, kids, health)
+//  - wants   = discretionary (travel, dining, shopping, entertainment, subs)
+//  - savings = money put toward the future (investments)
+//  - none    = income / neutral / transfer-like — excluded from the rule
 export const CATEGORY_SEED: CategorySeed[] = [
   // Spending (kind defaults to 'expense').
-  { name: 'Groceries', color: '#16a34a' },
-  { name: 'Dining', color: '#f97316' },
+  { name: 'Groceries', color: '#16a34a', bucket: 'needs' },
+  { name: 'Dining', color: '#f97316', bucket: 'wants' },
   // Transport = public transit only; car costs (fuel, parking, maintenance,
   // insurance) all live in "Cars".
-  { name: 'Transport', color: '#0ea5e9' },
-  { name: 'Cars', color: '#eab308' },
-  { name: 'Shopping', color: '#8b5cf6' },
-  { name: 'Health', color: '#ef4444' },
-  { name: 'Dental', color: '#22d3ee' },
-  { name: 'Subscriptions', color: '#6366f1' },
+  { name: 'Transport', color: '#0ea5e9', bucket: 'needs' },
+  { name: 'Cars', color: '#eab308', bucket: 'needs' },
+  { name: 'Shopping', color: '#8b5cf6', bucket: 'wants' },
+  { name: 'Health', color: '#ef4444', bucket: 'needs' },
+  { name: 'Dental', color: '#22d3ee', bucket: 'needs' },
+  { name: 'Subscriptions', color: '#6366f1', bucket: 'wants' },
   // Home = "cost to keep the house": Mortgage, Property Tax, Hydro, Water. It is
   // the single always-fixed/unavoidable category (see app/lib/budget.ts).
-  { name: 'Home', color: '#14b8a6' },
-  { name: 'Utilities', color: '#64748b' },
-  { name: 'Kids', color: '#ec4899' },
-  { name: 'Travel', color: '#06b6d4' },
-  { name: 'Entertainment', color: '#a855f7' },
-  { name: 'Other', color: '#94a3b8' },
+  { name: 'Home', color: '#14b8a6', bucket: 'needs' },
+  { name: 'Utilities', color: '#64748b', bucket: 'needs' },
+  { name: 'Kids', color: '#ec4899', bucket: 'needs' },
+  { name: 'Travel', color: '#06b6d4', bucket: 'wants' },
+  { name: 'Entertainment', color: '#a855f7', bucket: 'wants' },
+  { name: 'Other', color: '#94a3b8', bucket: 'wants' },
   // Bank expenses.
-  { name: 'Investment', color: '#0d9488', kind: 'expense' },
+  { name: 'Investment', color: '#0d9488', kind: 'expense', bucket: 'savings' },
   { name: 'CC Payment', color: '#9ca3af', kind: 'expense' },
-  { name: 'Bank Fees', color: '#71717a', kind: 'expense' },
+  { name: 'Bank Fees', color: '#71717a', kind: 'expense', bucket: 'needs' },
   { name: 'Cash', color: '#a16207', kind: 'expense' },
   // Income.
   { name: 'Salary', color: '#22c55e', kind: 'income' },
