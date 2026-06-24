@@ -14,6 +14,7 @@ const LINKS = [
   { href: '/custom', label: 'Custom', icon: '⊕' },
   { href: '/merchants', label: 'Merchants', icon: '◆' },
   { href: '/transactions', label: 'Activity', icon: '≣' },
+  { href: '/projects', label: 'Projects', icon: '▦' },
   { href: '/settings', label: 'Settings', icon: '⚙' },
 ]
 

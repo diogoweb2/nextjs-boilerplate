@@ -793,3 +793,77 @@ export function demoPendingReviews(): PendingReview[] {
     },
   ]
 }
+
+// --- Projects (the /projects page) ----------------------------------------
+// A single believable synthetic project so the demo renders the feature.
+function demoProjectMembers() {
+  const cats = new Map(demoCategoryRows().map((c) => [c.id, c]))
+  return demoActivityRows()
+    .filter((r) => r.flow === 'expense' && !r.isPayment)
+    .slice(0, 9)
+    .map((r) => {
+      const effCatId = r.txnCategoryId ?? r.merchantCategoryId ?? null
+      const cat = effCatId != null ? cats.get(effCatId) : undefined
+      return {
+        id: r.id,
+        txnDate: r.txnDate,
+        merchantName: r.merchantName,
+        rawDescription: r.rawDescription,
+        amount: r.amount,
+        categoryName: cat?.name ?? 'Uncategorized',
+        categoryColor: cat?.color ?? '#94a3b8',
+        source: r.source,
+        country: null as string | null,
+        person: r.cardLast4 === '8616' ? 'Partner' : 'Me',
+      }
+    })
+}
+
+export function demoProjects() {
+  const members = demoProjectMembers()
+  const total = members.reduce((s, m) => s + m.amount, 0)
+  return [
+    {
+      id: 9001,
+      name: 'Italy 2025',
+      emoji: '🇮🇹',
+      color: '#0ea5e9',
+      coverImageUrl: null as string | null,
+      startDate: '2025-09-06',
+      endDate: '2025-09-16',
+      total,
+      count: members.length,
+    },
+  ]
+}
+
+export function demoProjectDetail(id: number) {
+  const card = demoProjects().find((p) => p.id === id) ?? demoProjects()[0]
+  const members = demoProjectMembers()
+  const total = members.reduce((s, m) => s + m.amount, 0)
+
+  const catAgg = new Map<string, { name: string; color: string; total: number; count: number }>()
+  for (const m of members) {
+    const cur = catAgg.get(m.categoryName) ?? { name: m.categoryName, color: m.categoryColor, total: 0, count: 0 }
+    cur.total += m.amount
+    cur.count += 1
+    catAgg.set(m.categoryName, cur)
+  }
+  const personAgg = new Map<string, number>()
+  for (const m of members) personAgg.set(m.person, (personAgg.get(m.person) ?? 0) + m.amount)
+
+  return {
+    id: card.id,
+    name: card.name,
+    emoji: card.emoji,
+    color: card.color,
+    coverImageUrl: null as string | null,
+    startDate: card.startDate,
+    endDate: card.endDate,
+    notes: 'Ten days in Italy — flights, lodging, trains and a lot of pasta.',
+    total,
+    members,
+    byCategory: [...catAgg.values()].sort((a, b) => b.total - a.total),
+    byPerson: [...personAgg.entries()].map(([person, total]) => ({ person, total })).sort((a, b) => b.total - a.total),
+  }
+}

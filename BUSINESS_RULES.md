@@ -749,3 +749,54 @@ runway `Card`, after `RunwayWidget`). State is one singleton table, `cashflow_co
   visitors; edits are blocked.
 
 Run after pulling this change: `npm run db:push` (adds `cashflow_config`).
+
+## 15. Projects (`/projects`)
+
+Answers "how much did one real-world thing cost?" — a trip ("UK 2026"), a renovation, a
+wedding — by **grouping arbitrary transactions**, independent of categories. State is two
+tables (`db/schema.ts`): `projects` (name, emoji, color, optional `cover_image_url`,
+`start_date`/`end_date`, notes, sortOrder, archived) and `project_transactions` (a
+many-to-many join, unique on `(project, transaction)`, cascade on either delete). Logic/loaders
++ actions are in `app/actions/projects.ts`; pages `app/projects/page.tsx` (grid of cards) and
+`app/projects/[id]/page.tsx` (detail); UI `ProjectsManager.tsx` + `ProjectDetail.tsx`.
+
+- **Pure overlay (no AI).** Membership never recategorizes a transaction or changes its `flow`,
+  so spend analytics, Budget, Income and the runway are **untouched**. A transaction can belong
+  to more than one project. Removing it from a project never alters the transaction. All
+  categorization here is deterministic — there is no LLM anywhere in the app.
+- **Project total** = Σ member `amount` (refunds net normally; payments aren't added). The detail
+  page breaks the total down **by effective category** and **by who paid** (`cardholderName`, §4b),
+  and lists the member transactions with a per-row "✕ Remove".
+- **Cover photo** lives in **Vercel Blob** (`@vercel/blob`): `setProjectCover` `put()`s the file
+  and stores only the public URL on `projects.cover_image_url`; replacing/removing `del()`s the old
+  blob. Needs `BLOB_READ_WRITE_TOKEN` in the environment (create a Blob store in Vercel). Without
+  it, cover upload errors but every other part of the feature works.
+- **Adding members** — the Activity page (`/transactions`) has a **Select** mode: checkboxes →
+  a sticky bar → pick an existing project (or type a new name) → `addTransactionsToProject`. Rows
+  already in a project show a small project badge. (`loadProjectsForPicker` +
+  `loadProjectMemberships` feed this.)
+- **"Suggested — review"** (`loadProjectCandidates`): transactions inside the project's
+  `[start,end]` window whose `country` is **unknown** (Amex/bank rows carry no country code, so we
+  can't prove they were foreign), excluding payments and current members. The owner adds the ones
+  that belong. This is the manual safety net for the country-data gap below.
+
+### First project — UK 2026 (one-time deterministic seed, since removed)
+The "UK 2026" project (2–12 Apr 2026) was bootstrapped once by a throwaway script
+(`scripts/seed-uk-2026.ts`, deleted after it ran — future projects are made in the UI). It
+applied these deterministic rules; recorded here so the membership is explainable:
+1. **Air Canada** flights bought in **Feb 2026** (the May Air Canada charges are a *different*
+   trip — excluded).
+2. **Airbnb** charged **Mar 1 → Apr 12** (after Feb, capped at the trip end so a later Airbnb for
+   the other trip is left out).
+3. **Foreign spend in the window (Apr 2–12)**: `country` present and **≠ `CAN`** (codes are
+   ISO-3). In-Canada rows (e.g. Ontario camping) are excluded automatically.
+
+> **Country-data caveat:** `country` is only populated for **Master/Rogers** card rows (from
+> "Merchant Country Code"). **Amex and bank rows have no country**, so foreign Amex/bank spend in
+> the window is **not** auto-added — it surfaces in "Suggested — review" for manual confirmation.
+
+- **Demo:** `demoProjects()` / `demoProjectDetail()` (`app/lib/demo-data.ts`) return a synthetic
+  "Italy 2025" project so the feature renders for visitors; writes are blocked by `requireAuth`.
+
+Run after pulling this change: `npm install` (adds `@vercel/blob`) and `npm run db:push` (adds
+`projects`, `project_transactions`).

@@ -10,6 +10,11 @@ import {
   unsplitTransaction,
   type SplitPart,
 } from '@/app/actions/transactions'
+import {
+  addTransactionsToProject,
+  createProject,
+  type ProjectPickerItem,
+} from '@/app/actions/projects'
 import { formatCurrency, formatLongDate } from '@/app/lib/format'
 import type { CategoryOption } from '@/app/components/MerchantsManager'
 
@@ -39,13 +44,19 @@ export function TransactionsTable({
   transactions,
   categories,
   initialCategoryFilter = '',
+  projects = [],
+  membershipsByTxn = {},
 }: {
   transactions: TxnRow[]
   categories: CategoryOption[]
   initialCategoryFilter?: string
+  projects?: ProjectPickerItem[]
+  membershipsByTxn?: Record<number, ProjectPickerItem[]>
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
+  const [selectMode, setSelectMode] = useState(false)
+  const [selected, setSelected] = useState<Set<number>>(new Set())
   const [query, setQuery] = useState('')
   const [categoryFilter, setCategoryFilter] = useState<string>(initialCategoryFilter)
   const [hidePayments, setHidePayments] = useState(true)
@@ -66,6 +77,19 @@ export function TransactionsTable({
       await fn()
       router.refresh()
     })
+
+  const toggleSelect = (id: number) =>
+    setSelected((cur) => {
+      const next = new Set(cur)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
+  const exitSelect = () => {
+    setSelectMode(false)
+    setSelected(new Set())
+  }
 
   const people = useMemo(
     () => [...new Set(transactions.map((t) => t.person))].sort(),
@@ -138,6 +162,12 @@ export function TransactionsTable({
           <FilterChip active={sortBy === 'amount'} onClick={() => setSortBy((v) => v === 'amount' ? 'date' : 'amount')}>
             Sort by amount
           </FilterChip>
+          <FilterChip
+            active={selectMode}
+            onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}
+          >
+            Select
+          </FilterChip>
           {people.length > 1 &&
             people.map((p) => (
               <FilterChip
@@ -154,13 +184,17 @@ export function TransactionsTable({
         </p>
       </div>
 
-      <div className="card divide-y divide-[var(--border)] overflow-hidden">
+      <div className={`card divide-y divide-[var(--border)] overflow-hidden ${selectMode && selected.size > 0 ? 'mb-20' : ''}`}>
         {rows.map((t) => (
           <TxnRowView
             key={t.id}
             t={t}
             categories={categories}
             inlineCategory={uncategorizedOnly}
+            selectMode={selectMode}
+            selected={selected.has(t.id)}
+            onToggleSelect={() => toggleSelect(t.id)}
+            memberships={membershipsByTxn[t.id] ?? []}
             onCategory={(cid) => run(() => setTxnCategory(t.id, t.merchantId, cid))}
             onFlags={(flags) => run(() => setTxnFlags(t.id, flags))}
             onFlow={(flow) => run(() => setTxnFlow(t.id, flow))}
@@ -171,6 +205,99 @@ export function TransactionsTable({
         {rows.length === 0 && (
           <p className="p-6 text-center text-sm text-[var(--muted)]">No transactions match.</p>
         )}
+      </div>
+
+      {selectMode && selected.size > 0 && (
+        <AddToProjectBar
+          count={selected.size}
+          projects={projects}
+          onAdd={async (projectId) => {
+            await addTransactionsToProject(projectId, [...selected])
+            exitSelect()
+            router.refresh()
+          }}
+          onCreateAndAdd={async (name) => {
+            const id = await createProject({ name })
+            await addTransactionsToProject(id, [...selected])
+            exitSelect()
+            router.refresh()
+          }}
+          onClear={exitSelect}
+        />
+      )}
+    </div>
+  )
+}
+
+/**
+ * Sticky bar shown while rows are selected on the Activity page: pick an existing
+ * project (or type a new name) and add the selected transactions to it. Projects
+ * are a pure overlay — this never recategorizes or alters the transactions.
+ */
+function AddToProjectBar({
+  count,
+  projects,
+  onAdd,
+  onCreateAndAdd,
+  onClear,
+}: {
+  count: number
+  projects: ProjectPickerItem[]
+  onAdd: (projectId: number) => Promise<void>
+  onCreateAndAdd: (name: string) => Promise<void>
+  onClear: () => void
+}) {
+  const [pending, startTransition] = useTransition()
+  const [value, setValue] = useState('')
+  const [newName, setNewName] = useState('')
+
+  const go = () => {
+    if (value === '__new__') {
+      if (!newName.trim()) return
+      startTransition(() => onCreateAndAdd(newName.trim()))
+    } else if (value) {
+      startTransition(() => onAdd(Number(value)))
+    }
+  }
+
+  return (
+    <div className="fixed inset-x-0 bottom-16 z-40 px-4 sm:bottom-4">
+      <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-lg">
+        <span className="text-sm font-medium">{count} selected</span>
+        <select
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm"
+        >
+          <option value="">Add to project…</option>
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.emoji} {p.name}
+            </option>
+          ))}
+          <option value="__new__">+ New project…</option>
+        </select>
+        {value === '__new__' && (
+          <input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="New project name"
+            className="min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm"
+          />
+        )}
+        <button
+          disabled={pending || !value || (value === '__new__' && !newName.trim())}
+          onClick={go}
+          className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-[var(--accent-fg)] disabled:opacity-40"
+        >
+          Add
+        </button>
+        <button
+          onClick={onClear}
+          className="ml-auto rounded-lg px-2 py-1.5 text-sm font-medium text-[var(--muted)] hover:text-[var(--foreground)]"
+        >
+          Clear
+        </button>
       </div>
     </div>
   )
@@ -204,6 +331,10 @@ function TxnRowView({
   t,
   categories,
   inlineCategory,
+  selectMode,
+  selected,
+  onToggleSelect,
+  memberships,
   onCategory,
   onFlags,
   onFlow,
@@ -213,6 +344,10 @@ function TxnRowView({
   t: TxnRow
   categories: CategoryOption[]
   inlineCategory: boolean
+  selectMode: boolean
+  selected: boolean
+  onToggleSelect: () => void
+  memberships: ProjectPickerItem[]
   onCategory: (categoryId: number | null) => void
   onFlags: (flags: { isRecurring?: boolean | null; isSpecial?: boolean | null }) => void
   onFlow: (flow: TxnRow['flow']) => void
@@ -223,8 +358,17 @@ function TxnRowView({
   const [splitting, setSplitting] = useState(false)
 
   return (
-    <div className="flex flex-col gap-2 p-3">
+    <div className={`flex flex-col gap-2 p-3 ${selected ? 'bg-[color-mix(in_srgb,var(--accent)_8%,transparent)]' : ''}`}>
       <div className="flex items-center gap-3">
+        {selectMode && (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelect}
+            className="h-4 w-4 shrink-0 accent-[var(--accent)]"
+            aria-label="Select transaction"
+          />
+        )}
         <span
           className="h-8 w-1 shrink-0 rounded-full"
           style={{ background: t.categoryColor }}
@@ -255,6 +399,15 @@ function TxnRowView({
                 payment
               </span>
             )}
+            {memberships.map((m) => (
+              <span
+                key={m.id}
+                title={`In project: ${m.name}`}
+                className="rounded bg-[var(--surface-2)] px-1 text-[10px] text-[var(--muted)]"
+              >
+                {m.emoji} {m.name}
+              </span>
+            ))}
           </div>
           <span className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
             <span className="inline-flex items-center gap-1 rounded-full bg-[var(--surface-2)] px-1.5 py-0.5 font-medium text-[var(--foreground)]">

@@ -8,6 +8,7 @@ import { cardholderName } from '@/app/lib/cardholders'
 import { parsePeriodParams } from '@/app/lib/params'
 import { addMonths } from '@/app/lib/analytics'
 import { isDemoSession } from '@/app/lib/demo'
+import { loadProjectsForPicker, loadProjectMemberships } from '@/app/actions/projects'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,6 +22,7 @@ export default async function TransactionsPage({
   const sp = await searchParams
   const { category } = parsePeriodParams(sp)
   const rawMonth = Array.isArray(sp.month) ? sp.month[0] : sp.month
+  const rawPeriod = Array.isArray(sp.period) ? sp.period[0] : sp.period
   const rawMonths = Number(Array.isArray(sp.months) ? sp.months[0] : sp.months)
   const monthsWindow = [1, 2, 3, 6, 12].includes(rawMonths) ? rawMonths : null
 
@@ -58,6 +60,11 @@ export default async function TransactionsPage({
         db.select({ txnDate: transactions.txnDate }).from(transactions),
       ])
 
+  const [projectItems, memberships] = await Promise.all([
+    loadProjectsForPicker(),
+    loadProjectMemberships(),
+  ])
+
   const catMap = new Map(catRows.map((c) => [c.id, c]))
 
   // Rows that have had parts peeled off them, so the UI can offer "Unsplit".
@@ -93,13 +100,20 @@ export default async function TransactionsPage({
   const anchor = months_available[0] ?? null
 
   // Period filter precedence: explicit "all months" → everything; an exact month
-  // → that month; a window (2M/3M/6M/12M) → that many months ending at the anchor;
+  // → that month; YTD (?period=year) → Jan of the anchor year through the anchor;
+  // a window (2M/3M/6M/12M) → that many months ending at the anchor;
   // nothing chosen → the current (latest) month by default.
   let txns: TxnRow[]
-  if (rawMonth === 'all' || !anchor) {
+  if (rawMonth === 'all' || rawPeriod === 'all' || !anchor) {
     txns = allTxns
   } else if (rawMonth && /^\d{4}-\d{2}$/.test(rawMonth)) {
     txns = allTxns.filter((t) => t.txnDate.slice(0, 7) === rawMonth)
+  } else if (rawPeriod === 'year') {
+    const start = `${anchor.slice(0, 4)}-01`
+    txns = allTxns.filter((t) => {
+      const ym = t.txnDate.slice(0, 7)
+      return ym >= start && ym <= anchor
+    })
   } else if (monthsWindow) {
     const start = addMonths(anchor, -(monthsWindow - 1))
     txns = allTxns.filter((t) => {
@@ -124,6 +138,8 @@ export default async function TransactionsPage({
           showSpecialToggle={false}
           currentMonthDefault
           availableMonths={months_available}
+          leadingExtraOptions={[{ label: 'YTD', period: 'year' }]}
+          extraOptions={[{ label: 'ALL', period: 'all' }]}
         />
       </div>
 
@@ -139,6 +155,8 @@ export default async function TransactionsPage({
         <TransactionsTable
           transactions={txns}
           categories={catRows.map((c) => ({ id: c.id, name: c.name, color: c.color }))}
+          projects={projectItems}
+          membershipsByTxn={memberships}
           initialCategoryFilter={
             category
               ? category === NO_CAT.name || category === 'uncategorized'

@@ -9,6 +9,7 @@ import {
   boolean,
   jsonb,
   index,
+  uniqueIndex,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
@@ -447,6 +448,57 @@ export const loginAttempts = pgTable('login_attempts', {
   lockedUntil: timestamp('locked_until'),
 })
 
+/**
+ * Projects (the /projects page). A "project" groups arbitrary transactions so
+ * the owner can total and compare a real-world thing — a trip ("UK 2026"), a
+ * renovation, a wedding — independent of categories. It is a pure OVERLAY: a
+ * transaction's membership never recategorizes it or changes its flow, so all
+ * spend analytics, the budget and the Income page are untouched. Membership is
+ * many-to-many (a txn can sit in more than one project) via project_transactions.
+ * See BUSINESS_RULES.md §15.
+ */
+export const projects = pgTable('projects', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  emoji: text('emoji').notNull().default('🧳'),
+  color: text('color').notNull().default('#6366f1'),
+  // Cover photo, stored in Vercel Blob (the URL only). Null = show emoji/color.
+  coverImageUrl: text('cover_image_url'),
+  // Optional real-world span of the project (e.g. the trip dates). Drives the
+  // detail page's date range and the auto-population window.
+  startDate: date('start_date'),
+  endDate: date('end_date'),
+  notes: text('notes'),
+  sortOrder: integer('sort_order').notNull().default(0),
+  archived: boolean('archived').notNull().default(false),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+
+/**
+ * Membership join: which transactions belong to which project. Many-to-many,
+ * unique per (project, transaction). Cascades on either side's delete so
+ * removing a project — or undoing the import batch that owns a transaction —
+ * never leaves dangling rows. Deleting a membership never touches the txn.
+ */
+export const projectTransactions = pgTable(
+  'project_transactions',
+  {
+    id: serial('id').primaryKey(),
+    projectId: integer('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    transactionId: integer('transaction_id')
+      .notNull()
+      .references(() => transactions.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('project_txn_unique_idx').on(t.projectId, t.transactionId),
+    index('project_txn_project_idx').on(t.projectId),
+    index('project_txn_txn_idx').on(t.transactionId),
+  ]
+)
+
 export const categoriesRelations = relations(categories, ({ many }) => ({
   merchants: many(merchants),
   transactions: many(transactions),
@@ -483,6 +535,21 @@ export const transactionsRelations = relations(transactions, ({ one }) => ({
   }),
 }))
 
+export const projectsRelations = relations(projects, ({ many }) => ({
+  members: many(projectTransactions),
+}))
+
+export const projectTransactionsRelations = relations(projectTransactions, ({ one }) => ({
+  project: one(projects, {
+    fields: [projectTransactions.projectId],
+    references: [projects.id],
+  }),
+  transaction: one(transactions, {
+    fields: [projectTransactions.transactionId],
+    references: [transactions.id],
+  }),
+}))
+
 export const goalsRelations = relations(goals, ({ many }) => ({
   entries: many(goalEntries),
 }))
@@ -511,3 +578,5 @@ export type GoalEntry = typeof goalEntries.$inferSelect
 export type TransferReview = typeof transferReviews.$inferSelect
 export type AccountSnapshot = typeof accountSnapshots.$inferSelect
 export type RunwaySnapshot = typeof runwaySnapshots.$inferSelect
+export type Project = typeof projects.$inferSelect
+export type ProjectTransaction = typeof projectTransactions.$inferSelect
