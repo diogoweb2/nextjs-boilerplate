@@ -19,7 +19,7 @@ const LINKS = [
 ]
 
 // On mobile only the first few links live in the bottom bar; the rest collapse
-// into a "More" sheet. Desktop shows the full list in the top bar.
+// into a "More" sheet. Desktop shows the full list in the sidebar.
 const MOBILE_PRIMARY_COUNT = 4
 const MOBILE_PRIMARY = LINKS.slice(0, MOBILE_PRIMARY_COUNT)
 const MOBILE_MORE = LINKS.slice(MOBILE_PRIMARY_COUNT)
@@ -59,41 +59,56 @@ export function NavBar() {
 
   return (
     <>
-      {/* Top bar (all viewports) */}
-      <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[color-mix(in_srgb,var(--background)_85%,transparent)] backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
+      {/* Desktop sidebar */}
+      <aside className="hidden sm:flex sm:w-52 sm:flex-none sm:flex-col sm:sticky sm:top-0 sm:h-screen sm:border-r sm:border-[var(--border)] sm:bg-[var(--background)] sm:px-3 sm:py-5">
+        <Link
+          href={navHref('/')}
+          className="mb-6 flex items-center gap-2 px-2 font-bold tracking-tight"
+        >
+          <span className="grid h-7 w-7 flex-none place-items-center rounded-lg bg-[var(--accent)] text-sm text-[var(--accent-fg)]">
+            $
+          </span>
+          <span>Family Budget</span>
+        </Link>
+
+        <nav className="flex flex-1 flex-col gap-0.5">
+          {LINKS.map((l) => (
+            <Link
+              key={l.href}
+              href={navHref(l.href)}
+              className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                isActive(pathname, l.href)
+                  ? 'bg-[var(--surface-2)] text-[var(--foreground)]'
+                  : 'text-[var(--muted)] hover:text-[var(--foreground)]'
+              }`}
+            >
+              <span className="text-base leading-none">{l.icon}</span>
+              {l.label}
+            </Link>
+          ))}
+        </nav>
+
+        <form action={logout}>
+          <button
+            type="submit"
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-[var(--muted)] transition-colors hover:text-[var(--negative)]"
+          >
+            <span className="text-base leading-none">⏏</span>
+            Sign out
+          </button>
+        </form>
+      </aside>
+
+      {/* Mobile top bar */}
+      <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[color-mix(in_srgb,var(--background)_85%,transparent)] backdrop-blur sm:hidden">
+        <div className="flex items-center justify-between px-4 py-3">
           <Link href={navHref('/')} className="flex items-center gap-2 font-bold tracking-tight">
             <span className="grid h-7 w-7 place-items-center rounded-lg bg-[var(--accent)] text-sm text-[var(--accent-fg)]">
               $
             </span>
             <span>Family Budget</span>
           </Link>
-
-          <nav className="hidden items-center gap-1 sm:flex">
-            {LINKS.map((l) => (
-              <Link
-                key={l.href}
-                href={navHref(l.href)}
-                className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                  isActive(pathname, l.href)
-                    ? 'bg-[var(--surface-2)] text-[var(--foreground)]'
-                    : 'text-[var(--muted)] hover:text-[var(--foreground)]'
-                }`}
-              >
-                {l.label}
-              </Link>
-            ))}
-            <form action={logout}>
-              <button
-                type="submit"
-                className="ml-1 rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--muted)] transition-colors hover:text-[var(--negative)]"
-              >
-                Sign out
-              </button>
-            </form>
-          </nav>
-
-          <form action={logout} className="sm:hidden">
+          <form action={logout}>
             <button
               type="submit"
               className="rounded-lg px-2 py-1 text-xs font-medium text-[var(--muted)]"

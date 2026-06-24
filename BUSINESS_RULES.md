@@ -777,8 +777,11 @@ many-to-many join, unique on `(project, transaction)`, cascade on either delete)
   `loadProjectMemberships` feed this.)
 - **"Suggested — review"** (`loadProjectCandidates`): transactions inside the project's
   `[start,end]` window whose `country` is **unknown** (Amex/bank rows carry no country code, so we
-  can't prove they were foreign), excluding payments and current members. The owner adds the ones
-  that belong. This is the manual safety net for the country-data gap below.
+  can't prove they were foreign), excluding payments and any txn that already has a membership row
+  (member *or* dismissed). The owner **Adds** the ones that belong or **Dismisses** the rest
+  (per-row or "Dismiss all"). Dismiss writes a `dismissed = true` tombstone row so the txn never
+  reappears here; Adding it later flips it back to a real member. This is the manual safety net for
+  the country-data gap below.
 
 ### First project — UK 2026 (one-time deterministic seed, since removed)
 The "UK 2026" project (2–12 Apr 2026) was bootstrapped once by a throwaway script

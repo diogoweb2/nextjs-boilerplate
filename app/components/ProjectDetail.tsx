@@ -8,6 +8,7 @@ import {
   deleteProject,
   addTransactionsToProject,
   removeTransactionsFromProject,
+  dismissCandidates,
   setProjectCover,
   removeProjectCover,
   type ProjectDetail,
@@ -159,17 +160,26 @@ export function ProjectDetailView({
         <Card
           title={`Suggested — review (${candidates.length})`}
           action={
-            <button
-              onClick={() => run(() => addTransactionsToProject(detail.id, candidates.map((c) => c.id)))}
-              className="rounded-lg bg-[var(--accent)] px-2.5 py-1 text-xs font-medium text-[var(--accent-fg)]"
-            >
-              Add all
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => run(() => addTransactionsToProject(detail.id, candidates.map((c) => c.id)))}
+                className="rounded-lg bg-[var(--accent)] px-2.5 py-1 text-xs font-medium text-[var(--accent-fg)]"
+              >
+                Add all
+              </button>
+              <button
+                onClick={() => run(() => dismissCandidates(detail.id, candidates.map((c) => c.id)))}
+                className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-medium text-[var(--muted)] hover:text-[var(--foreground)]"
+              >
+                Dismiss all
+              </button>
+            </div>
           }
         >
           <p className="mb-3 text-xs text-[var(--muted)]">
             In the project’s dates but we can’t tell if they were abroad (Amex / bank
-            rows carry no country). Add the ones that belong to this project.
+            rows carry no country). Add the ones that belong, dismiss the rest — dismissed
+            rows won’t show up here again.
           </p>
           <div className="card divide-y divide-[var(--border)] overflow-hidden">
             {candidates.map((t) => (
@@ -178,6 +188,8 @@ export function ProjectDetailView({
                 t={t}
                 actionLabel="+ Add"
                 onAction={() => run(() => addTransactionsToProject(detail.id, [t.id]))}
+                secondaryLabel="Dismiss"
+                onSecondary={() => run(() => dismissCandidates(detail.id, [t.id]))}
               />
             ))}
           </div>
@@ -215,10 +227,14 @@ function MemberRow({
   t,
   actionLabel,
   onAction,
+  secondaryLabel,
+  onSecondary,
 }: {
   t: ProjectTxn
   actionLabel: string
   onAction: () => void
+  secondaryLabel?: string
+  onSecondary?: () => void
 }) {
   return (
     <div className="flex items-center gap-3 p-3">
@@ -240,6 +256,14 @@ function MemberRow({
       >
         {actionLabel}
       </button>
+      {secondaryLabel && onSecondary && (
+        <button
+          onClick={onSecondary}
+          className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--foreground)]"
+        >
+          {secondaryLabel}
+        </button>
+      )}
     </div>
   )
 }

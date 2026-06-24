@@ -3,9 +3,9 @@ import { NavBar } from '@/app/components/NavBar'
 /** Page chrome: top + bottom nav with a centered, padded content column. */
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen sm:flex">
       <NavBar />
-      <main className="mx-auto max-w-5xl px-4 pb-24 pt-5 sm:pb-10">{children}</main>
+      <main className="mx-auto max-w-5xl px-4 pb-24 pt-5 sm:flex-1 sm:min-w-0 sm:pb-10 sm:pt-6">{children}</main>
     </div>
   )
 }

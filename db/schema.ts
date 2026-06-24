@@ -479,6 +479,12 @@ export const projects = pgTable('projects', {
  * unique per (project, transaction). Cascades on either side's delete so
  * removing a project — or undoing the import batch that owns a transaction —
  * never leaves dangling rows. Deleting a membership never touches the txn.
+ *
+ * `dismissed = true` is a tombstone: the owner reviewed a SUGGESTED candidate
+ * (in-window, unknown-country row) and said "not part of this project". It is
+ * NOT a member (excluded from totals, the member list and Activity badges) but
+ * still suppresses that txn from the "Suggested — review" list so it never
+ * reappears. Adding the txn later flips it back to a real member (dismissed=false).
  */
 export const projectTransactions = pgTable(
   'project_transactions',
@@ -490,6 +496,7 @@ export const projectTransactions = pgTable(
     transactionId: integer('transaction_id')
       .notNull()
       .references(() => transactions.id, { onDelete: 'cascade' }),
+    dismissed: boolean('dismissed').notNull().default(false),
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (t) => [

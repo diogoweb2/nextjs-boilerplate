@@ -198,6 +198,10 @@ function parseAmex(rows: string[][]): ParsedRow[] {
     amount: colIndex(header, 'Amount'),
   }
   const out: ParsedRow[] = []
+  // Two tickets at the same price on the same day produce an identical hash.
+  // Track occurrences within this parse so the 2nd gets a `:2` suffix, keeping
+  // re-uploads idempotent (Amex always exports rows in the same order).
+  const seenIds = new Map<string, number>()
   for (const r of rows.slice(1)) {
     const rawDesc = r[idx.description] ?? ''
     // Strip trailing city/phone on the raw (2+ space split) before normalizing.
@@ -207,9 +211,12 @@ function parseAmex(rows: string[][]): ParsedRow[] {
     if (!txnDate || !merchant) continue
     const amount = parseAmount(r[idx.amount] ?? '0')
     const account = (r[idx.account] ?? '').trim()
+    const baseId = `amex:${hashRow(['amex', txnDate, fullDesc, String(amount), account])}`
+    const n = (seenIds.get(baseId) ?? 0) + 1
+    seenIds.set(baseId, n)
     out.push({
       source: 'amex',
-      externalId: `amex:${hashRow(['amex', txnDate, fullDesc, String(amount), account])}`,
+      externalId: n === 1 ? baseId : `${baseId}:${n}`,
       txnDate,
       postedDate: parseDate(r[idx.processed] ?? '') ?? null,
       rawDescription: merchant,
@@ -270,13 +277,17 @@ function parseTangerine(rows: string[][]): ParsedRow[] {
     amount: colIndex(header, 'Amount'),
   }
   const out: ParsedRow[] = []
+  const seenIds = new Map<string, number>()
   for (const r of rows.slice(1)) {
     const txnDate = parseDate(r[idx.date] ?? '')
     const name = fixMojibake(r[idx.name] ?? '')
     if (!txnDate || !name) continue
     const memo = fixMojibake(r[idx.memo] ?? '')
     const amount = parseAmount(r[idx.amount] ?? '0')
-    const externalId = `tangerine:${hashRow(['tangerine', txnDate, name, amount.toFixed(2)])}`
+    const baseId = `tangerine:${hashRow(['tangerine', txnDate, name, amount.toFixed(2)])}`
+    const n = (seenIds.get(baseId) ?? 0) + 1
+    seenIds.set(baseId, n)
+    const externalId = n === 1 ? baseId : `${baseId}:${n}`
     out.push(bankRow('tangerine', txnDate, name, memo, amount, externalId))
   }
   return out
@@ -292,6 +303,7 @@ function parseScotia(rows: string[][]): ParsedRow[] {
     amount: colIndex(header, 'Amount'),
   }
   const out: ParsedRow[] = []
+  const seenIds = new Map<string, number>()
   for (const r of rows.slice(1)) {
     const txnDate = parseDate(r[idx.date] ?? '')
     const description = fixMojibake(r[idx.description] ?? '')
@@ -299,7 +311,10 @@ function parseScotia(rows: string[][]): ParsedRow[] {
     const sub = fixMojibake(r[idx.sub] ?? '')
     const amount = parseAmount(r[idx.amount] ?? '0')
     // Balance is deliberately excluded from the id so duplicates collapse.
-    const externalId = `scotia:${hashRow(['scotia', txnDate, description, sub, amount.toFixed(2)])}`
+    const baseId = `scotia:${hashRow(['scotia', txnDate, description, sub, amount.toFixed(2)])}`
+    const n = (seenIds.get(baseId) ?? 0) + 1
+    seenIds.set(baseId, n)
+    const externalId = n === 1 ? baseId : `${baseId}:${n}`
     out.push(bankRow('scotia', txnDate, description, sub, amount, externalId))
   }
   return out

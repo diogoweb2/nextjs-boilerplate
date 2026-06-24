@@ -143,7 +143,13 @@ export async function loadProjects(): Promise<ProjectListItem[]> {
       count: sql<number>`count(${transactions.id})`,
     })
     .from(projects)
-    .leftJoin(projectTransactions, eq(projectTransactions.projectId, projects.id))
+    .leftJoin(
+      projectTransactions,
+      and(
+        eq(projectTransactions.projectId, projects.id),
+        eq(projectTransactions.dismissed, false)
+      )
+    )
     .leftJoin(transactions, eq(transactions.id, projectTransactions.transactionId))
     .where(eq(projects.archived, false))
     .groupBy(projects.id)
@@ -170,7 +176,7 @@ export async function loadProjectDetail(id: number): Promise<ProjectDetail | nul
     .from(projectTransactions)
     .innerJoin(transactions, eq(transactions.id, projectTransactions.transactionId))
     .innerJoin(merchants, eq(merchants.id, transactions.merchantId))
-    .where(eq(projectTransactions.projectId, id))
+    .where(and(eq(projectTransactions.projectId, id), eq(projectTransactions.dismissed, false)))
     .orderBy(transactions.txnDate)
 
   const members = enrich(memberRows, catMap)
@@ -272,6 +278,7 @@ export async function loadProjectMemberships(): Promise<
     })
     .from(projectTransactions)
     .innerJoin(projects, eq(projects.id, projectTransactions.projectId))
+    .where(eq(projectTransactions.dismissed, false))
 
   const map: Record<number, ProjectPickerItem[]> = {}
   for (const r of rows) {
@@ -349,11 +356,35 @@ export async function addTransactionsToProject(
   if (ids.length === 0) return
   await db
     .insert(projectTransactions)
-    .values(ids.map((transactionId) => ({ projectId, transactionId })))
-    .onConflictDoNothing()
+    .values(ids.map((transactionId) => ({ projectId, transactionId, dismissed: false })))
+    .onConflictDoUpdate({
+      target: [projectTransactions.projectId, projectTransactions.transactionId],
+      set: { dismissed: false },
+    })
   revalidatePath('/projects')
   revalidatePath(`/projects/${projectId}`)
   revalidatePath('/transactions')
+}
+
+/**
+ * Mark suggested candidates as "not part of this project" so they stop appearing
+ * in the project's "Suggested — review" list. Stored as a dismissed (tombstone)
+ * membership row — not a member, just a suppression. Re-adding the txn later
+ * (here or from Activity) flips it back to a real member.
+ */
+export async function dismissCandidates(projectId: number, txnIds: number[]): Promise<void> {
+  await requireAuth()
+  const ids = [...new Set(txnIds)].filter((n) => Number.isInteger(n))
+  if (ids.length === 0) return
+  await db
+    .insert(projectTransactions)
+    .values(ids.map((transactionId) => ({ projectId, transactionId, dismissed: true })))
+    .onConflictDoUpdate({
+      target: [projectTransactions.projectId, projectTransactions.transactionId],
+      set: { dismissed: true },
+    })
+  revalidatePath('/projects')
+  revalidatePath(`/projects/${projectId}`)
 }
 
 export async function removeTransactionsFromProject(
