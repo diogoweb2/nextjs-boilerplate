@@ -212,6 +212,9 @@ export const budgetSettings = pgTable('budget_settings', {
   periodMode: text('period_mode', { enum: ['year', '12mo'] })
     .notNull()
     .default('year'),
+  // Latest anchor month (YYYY-MM) the seasonal proposal was auto-adopted for.
+  // When the anchor advances past this, the budget auto-proposes the new month.
+  budgetedMonth: text('budgeted_month'),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 })
 

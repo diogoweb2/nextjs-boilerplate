@@ -418,8 +418,8 @@ export function demoMerchantRows() {
 }
 
 /** budget_settings shape. */
-export function demoBudgetSettings(): { targetNet: number; periodMode: 'year' | '12mo' } {
-  return { targetNet: 0, periodMode: 'year' }
+export function demoBudgetSettings(): { targetNet: number; periodMode: 'year' | '12mo'; budgetedMonth: string | null } {
+  return { targetNet: 0, periodMode: 'year', budgetedMonth: null }
 }
 
 /** budget_goals rows ({ categoryId, goalAmount } — a few overrides; rest use AI). */

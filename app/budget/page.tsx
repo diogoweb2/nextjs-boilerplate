@@ -11,7 +11,8 @@ import { isDemoSession } from '@/app/lib/demo'
 export const dynamic = 'force-dynamic'
 
 export default async function BudgetPage() {
-  const [all, catRows, goalRows, settings, rules] = (await isDemoSession())
+  const demo = await isDemoSession()
+  const [all, catRows, goalRows, settings, rules] = demo
     ? await (async () => {
         const d = await import('@/app/lib/demo-data')
         return [d.demoAllFlows(), d.demoCategoryRows(), d.demoBudgetGoalRows(), d.demoBudgetSettings(), d.demoProjectionRules()] as const
@@ -31,6 +32,7 @@ export default async function BudgetPage() {
     periodMode: settings.periodMode,
     savedGoals,
     rules,
+    budgetedMonth: settings.budgetedMonth,
   })
 
   return (
@@ -47,7 +49,7 @@ export default async function BudgetPage() {
           <EmptyHint>No data yet. Import a statement from the Overview page.</EmptyHint>
         </Card>
       ) : (
-        <BudgetPlanner data={data} />
+        <BudgetPlanner data={data} autoPropose={!demo} />
       )}
     </AppShell>
   )

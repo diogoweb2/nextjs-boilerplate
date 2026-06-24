@@ -375,7 +375,62 @@ goal override, unique on `category_id`).
   target is always end-of-this-year.
 
 Goal overrides persist per category (`saveGoal`); "Reset to suggested" deletes them (`resetGoals`).
-Run after adding the tables: `npm run db:push` (no seed change).
+A batch `saveAllGoals` upserts many overrides at once (used by Auto-balance and the seasonal
+proposal). Run after adding the tables: `npm run db:push` (no seed change).
+
+### Auto-balance (client, `computeAutoBalance`)
+A button in the Category-goals card. Disabled when nothing is over budget (all green). It turns every
+over-budget (red) category green while keeping `ΣG ≤ B` — which is *exactly* the year-end-net-goal
+constraint, since `projected ≥ target ⟺ ΣG ≤ B`. Mechanics:
+- Red categories can't un-spend → their goal rises to the month's actual spend (green).
+- The extra is funded by trimming the **cushion** (`goal − actual`) of the flexible green categories,
+  proportionally. **Fixed** categories (Home) are never trimmed below their committed goal.
+- Floor: a trimmed goal never drops below that category's own actual spend, so it can't go red again.
+- **Impossible** when even zero-cushion flexible spending plus commitments exceed `B`; the UI then
+  shows a warning naming the minimum achievable total and the overage, instead of rebalancing. The
+  warning auto-clears once edits (e.g. raising the target) make rebalancing viable again.
+
+### Non-budget categories
+Financial / transfer-like expense categories — **CC Payment, Cash, Bank Fees** (`NON_BUDGET_CATEGORIES`)
+— are excluded from the budgetable category list (goals, suggestions, proposal). They still count toward
+net/spend via the un-categorized `spendOver` totals (an untracked card payment is the only signal of that
+spending — see `bank-classify.ts` `cardPayment`), but you don't set a discretionary *goal* for "paying a
+credit card", and a seasonal lift on them was producing nonsense lines. (Transfer is `kind:'neutral'`,
+already excluded.)
+
+### Seasonal proposal (`proposeSeasonal`, shown whenever there are budgetable categories)
+A "new month" starting budget that respects the year-end goal. Per category it picks a *seasonal
+average*, then fits all of them to `B` via `suggestGoals` (empty zero-list — the zeroing is already
+baked into the chosen averages):
+- **Groceries** → 3-month rolling average (tracks steadily rising prices); flagged when it moves >$15.
+- **Everything else** → the same-calendar-month average across prior years (≤5), used when ≥2 prior
+  years exist and the swing is material (≥10% **and** ≥$25; a normally-$0 category needs only the $25
+  absolute move). This is what captures **summer camping (Travel), Kids summer/spring-break camp, and
+  extra summer fuel (Transport)** — note a normally zero-defaulted category like **Travel can be
+  lifted** by a strong seasonal signal here, unlike the regular suggestion.
+- **Investment** stays a deliberate $0 lever (never lifted by history).
+- Recurring/quarterly bills (Toronto Water) and weekly-mortgage "5-payment" months are handled by the
+  unavoidable `F` projection (§8c), not here.
+Each lifted line carries a human reason shown in a reasoning box; the table lists **every** budgetable
+category (Regular→Proposed→Δ, biggest changes first, seasonal ones marked ●) so it reads as a full plan,
+not a partial one. If a lift forced the pool haircut to trim other flexible lines, a note says so.
+"Apply this proposal" batch-saves all lines as overrides.
+
+### Auto-adopt on a new month (`commitMonthlyBudget`, `budget_settings.budgetedMonth`)
+`budgetedMonth` (YYYY-MM, nullable) records the anchor month the proposal was last adopted for. On load
+the client compares it to the anchor:
+- **null** (first run) → just record the marker; existing goals are **not** touched.
+- **marker < anchor** (month advanced) → adopt the seasonal proposal as the new starting budget
+  (`commitMonthlyBudget(anchor, proposedGoals)`), show a one-time banner; the owner then adjusts.
+- **marker == anchor** → nothing (so in-month manual edits are preserved).
+The server action re-reads the marker before writing, so a double client fire is a no-op. Demo sessions
+pass `autoPropose={false}` (never write). Run after the schema change: `npm run db:push`.
+
+### Live year-end feedback (Category-goals card)
+While dragging any goal/target slider, the card surfaces the year-end-net status without scrolling: a
+pill badge ("Year-end close" yellow / "Year-end ✗" red) plus a ~1.5s coloured ring that flashes when
+the status worsens. Thresholds: **red** when `projected < target`; **yellow** within
+`max($500, 10%·|target|)` above the target.
 
 ## 8c. Projected bills, Settings & the dashboard Net-trajectory
 
