@@ -6,6 +6,7 @@ import {
   date,
   timestamp,
   integer,
+  bigint,
   boolean,
   jsonb,
   index,
@@ -115,6 +116,23 @@ export const syncRuns = pgTable('sync_runs', {
   lastSuccessAt: timestamp('last_success_at'),
   error: text('error'),
   failureCount: integer('failure_count').notNull().default(0),
+})
+
+/**
+ * One row per database backup attempt (weekly launchd job + manual `npm run
+ * backup`). Written by sync/backup → POST /api/backup-status. Unlike sync_runs
+ * this is append-only history (no per-source unique row): the dashboard reads
+ * the most recent successful row to decide if backups have gone stale (>2 weeks
+ * → BackupStatusBanner). See sync/backup/README.md.
+ */
+export const backupRuns = pgTable('backup_runs', {
+  id: serial('id').primaryKey(),
+  status: text('status', { enum: ['ok', 'fail'] }).notNull(),
+  lastRunAt: timestamp('last_run_at').defaultNow().notNull(),
+  lastSuccessAt: timestamp('last_success_at'),
+  filename: text('filename'),
+  sizeBytes: bigint('size_bytes', { mode: 'number' }),
+  error: text('error'),
 })
 
 /**

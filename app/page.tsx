@@ -1,11 +1,13 @@
 import { desc, eq } from 'drizzle-orm'
 import { db } from '@/db'
-import { importBatches, categories, budgetGoals, syncRuns } from '@/db/schema'
+import { importBatches, categories, budgetGoals, syncRuns, backupRuns } from '@/db/schema'
 import { AppShell, Card, EmptyHint } from '@/app/components/AppShell'
 import { UploadDialog } from '@/app/components/UploadDialog'
 import { PeriodSelector } from '@/app/components/PeriodSelector'
 import { SyncStatusBar } from '@/app/components/SyncStatusBar'
 import { SyncErrorBanner, type SyncFailure } from '@/app/components/SyncErrorBanner'
+import { BackupStatusBanner } from '@/app/components/BackupStatusBanner'
+import { backupStale } from '@/app/lib/backup'
 import { SYNC_SOURCES, mostRecentIso } from '@/app/lib/sync'
 import { StatCard } from '@/app/components/charts/StatCard'
 import { Donut } from '@/app/components/charts/Donut'
@@ -66,8 +68,19 @@ export default async function Home({
       .limit(1)
       .then((rows) => rows[0]?.createdAt?.toISOString() ?? null)
 
+  // Most recent successful database backup (sync/backup → /api/backup-status),
+  // used to warn on the dashboard when backups have gone stale.
+  const lastBackupQuery = () =>
+    db
+      .select({ lastSuccessAt: backupRuns.lastSuccessAt })
+      .from(backupRuns)
+      .where(eq(backupRuns.status, 'ok'))
+      .orderBy(desc(backupRuns.lastSuccessAt))
+      .limit(1)
+      .then((rows) => rows[0]?.lastSuccessAt?.toISOString() ?? null)
+
   const demo = await isDemoSession()
-  const [allFlows, catRows, goalRows, settings, rules, batches, syncTimes, syncRunRows, pendingReviews] = demo
+  const [allFlows, catRows, goalRows, settings, rules, batches, syncTimes, syncRunRows, pendingReviews, backupLastSuccess] = demo
     ? await (async () => {
         const d = await import('@/app/lib/demo-data')
         return [
@@ -80,6 +93,7 @@ export default async function Home({
           d.demoSyncTimes(),
           [] as (typeof syncRuns.$inferSelect)[],
           d.demoPendingReviews(),
+          null as string | null,
         ] as const
       })()
     : await Promise.all([
@@ -92,6 +106,7 @@ export default async function Home({
         Promise.all(SYNC_SOURCES.map((s) => lastSyncQuery(s.source))),
         db.select().from(syncRuns),
         loadPendingReviews(),
+        lastBackupQuery(),
       ])
   // Banks whose latest automated sync reported a failure — surfaced as a banner.
   const syncFailures: SyncFailure[] = SYNC_SOURCES.flatMap((s) => {
@@ -258,6 +273,12 @@ export default async function Home({
       {syncFailures.length > 0 && (
         <div className="mb-5">
           <SyncErrorBanner failures={syncFailures} />
+        </div>
+      )}
+
+      {backupStale(backupLastSuccess) && (
+        <div className="mb-5">
+          <BackupStatusBanner lastSuccessAt={backupLastSuccess} />
         </div>
       )}
 

@@ -5,13 +5,15 @@ import { verifySessionToken, COOKIE_NAME } from '@/app/lib/session'
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // The sync ingest + digest + status endpoints authenticate with a bearer token,
-  // not the session cookie, so let them through to their own auth (see
-  // app/api/ingest + app/api/digest + app/api/sync-status route handlers).
+  // The sync ingest + digest + status + backup-status endpoints authenticate
+  // with a bearer token, not the session cookie, so let them through to their
+  // own auth (see app/api/ingest + app/api/digest + app/api/sync-status +
+  // app/api/backup-status route handlers).
   if (
     pathname.startsWith('/api/ingest') ||
     pathname.startsWith('/api/digest') ||
-    pathname.startsWith('/api/sync-status')
+    pathname.startsWith('/api/sync-status') ||
+    pathname.startsWith('/api/backup-status')
   ) {
     return NextResponse.next()
   }

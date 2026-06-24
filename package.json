@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "sync": "bash sync/run-all.sh",
+    "backup": "bash sync/backup/backup.sh",
+    "restore": "bash sync/backup/restore.sh",
     "db:push": "dotenv -e .env.local -- drizzle-kit push",
     "db:seed": "dotenv -e .env.local -- tsx db/seed.ts",
     "db:studio": "dotenv -e .env.local -- drizzle-kit studio"

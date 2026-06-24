@@ -1,7 +1,10 @@
 # budget-sync
 
 Automated daily ingestion of bank/card CSVs. See [`../AUTO_SYNC_PLAN.md`](../AUTO_SYNC_PLAN.md)
-for the full design. Runs **on the Mac** (not Vercel): it needs a persistent browser profile,
+for the full design.
+
+> Looking for the weekly **database backup → Google Drive** (and restore)? That's a
+> separate job — see [`backup/README.md`](./backup/README.md). Runs **on the Mac** (not Vercel): it needs a persistent browser profile,
 real residential IP, and macOS Keychain — none of which exist on serverless.
 
 ## Layout
