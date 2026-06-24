@@ -409,7 +409,18 @@ function TxnRowView({
               </span>
             ))}
           </div>
-          <span className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
+          <span className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--muted)]">
+            <span
+              className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 font-medium text-[var(--foreground)]"
+              style={{ background: `color-mix(in srgb, ${t.categoryColor} 18%, transparent)` }}
+            >
+              <span
+                className="h-2 w-2 shrink-0 rounded-full"
+                style={{ background: t.categoryColor }}
+                aria-hidden
+              />
+              {t.categoryName || 'Uncategorized'}
+            </span>
             <span className="inline-flex items-center gap-1 rounded-full bg-[var(--surface-2)] px-1.5 py-0.5 font-medium text-[var(--foreground)]">
               <span
                 className="grid h-3.5 w-3.5 place-items-center rounded-full bg-[var(--accent)] text-[8px] font-bold text-[var(--accent-fg)]"
