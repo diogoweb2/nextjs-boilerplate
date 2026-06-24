@@ -18,3 +18,12 @@ export function cardholderName(last4: string | null): string {
   const selfName = process.env.SELF_NAME ?? 'Me'
   return last4 && partnerCards.includes(last4) ? partnerName : selfName
 }
+
+/** Display names + partner card last-4s for the auto-fill feature (server-side). */
+export function getPersonNames(): { selfName: string; partnerName: string; partnerCards: string[] } {
+  return {
+    selfName: process.env.SELF_NAME ?? 'Me',
+    partnerName: process.env.PARTNER_NAME ?? 'Partner',
+    partnerCards: (process.env.PARTNER_CARDS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+  }
+}

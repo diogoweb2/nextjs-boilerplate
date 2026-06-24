@@ -471,6 +471,11 @@ export const projects = pgTable('projects', {
   notes: text('notes'),
   sortOrder: integer('sort_order').notNull().default(0),
   archived: boolean('archived').notNull().default(false),
+  // Auto-fill: when set, all credit-card (master/amex) transactions in the
+  // date window for the chosen cardholder(s) are auto-added on project creation
+  // and when "Refresh auto-fill" is triggered. Recurring transactions go to
+  // "needs review" instead of being auto-added. null = manual-only project.
+  autoFill: text('auto_fill', { enum: ['self', 'partner', 'both'] }),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 })
 
@@ -497,6 +502,10 @@ export const projectTransactions = pgTable(
       .notNull()
       .references(() => transactions.id, { onDelete: 'cascade' }),
     dismissed: boolean('dismissed').notNull().default(false),
+    // true = auto-filled but pending owner review (recurring/bill-like txns).
+    // Not counted in project totals or member list until approved (needsReview→false).
+    // dismissed wins: a dismissed row is always suppressed regardless of needsReview.
+    needsReview: boolean('needs_review').notNull().default(false),
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (t) => [
@@ -587,3 +596,4 @@ export type AccountSnapshot = typeof accountSnapshots.$inferSelect
 export type RunwaySnapshot = typeof runwaySnapshots.$inferSelect
 export type Project = typeof projects.$inferSelect
 export type ProjectTransaction = typeof projectTransactions.$inferSelect
+export type AutoFill = 'self' | 'partner' | 'both'

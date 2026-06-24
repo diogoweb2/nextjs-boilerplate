@@ -783,6 +783,34 @@ many-to-many join, unique on `(project, transaction)`, cascade on either delete)
   reappears here; Adding it later flips it back to a real member. This is the manual safety net for
   the country-data gap below.
 
+### Auto-fill (trip mode)
+
+An optional setting on a project (`projects.auto_fill ∈ {self, partner, both, null}`) that
+auto-populates credit-card transactions for the chosen cardholder(s) within the project's
+`[start_date, end_date]` window. Only **master/amex** (credit card) sources are included —
+bank rows are left for the existing "Suggested — review" path. Card ownership is determined
+from `PARTNER_CARDS` in `.env.local` (the same mapping as the cardholder badge on Activity).
+
+Two destinations:
+- **Auto-added** (`needsReview = false`) — transactions that are NOT effectively recurring (i.e.
+  `coalesce(txn.is_recurring, merchant.default_recurring, false) = false`). These appear
+  immediately in the project member list and count toward the total.
+- **Auto-filled — needs review** (`needsReview = true`) — effectively recurring transactions
+  (bill-like: subscriptions, Koodo, insurance, etc.). Shown in a separate "needs review" section
+  above "Suggested — review". The owner **Adds** (flips `needsReview → false`) or **Dismisses**
+  them.
+
+`project_transactions.needs_review = true` rows are excluded from the project total, member list,
+and Activity badges — they are staging, not confirmed members.
+
+Auto-fill runs automatically on project creation (if dates + auto_fill are set) and can be
+re-triggered via **"Refresh auto-fill"** on the detail page to pick up new transactions imported
+since the last fill. It is idempotent: uses `onConflictDoNothing` so existing user decisions
+(manual adds, dismissals, approvals) are never overwritten.
+
+`loadProjectMemberships` (Activity badges) excludes `needsReview = true` rows so the badge only
+appears once the owner confirms the transaction belongs to the project.
+
 ### First project — UK 2026 (one-time deterministic seed, since removed)
 The "UK 2026" project (2–12 Apr 2026) was bootstrapped once by a throwaway script
 (`scripts/seed-uk-2026.ts`, deleted after it ran — future projects are made in the UI). It

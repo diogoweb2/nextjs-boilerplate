@@ -4,13 +4,22 @@ import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createProject, type ProjectListItem } from '@/app/actions/projects'
+import { type AutoFill } from '@/db/schema'
 import { formatCurrency, formatLongDate } from '@/app/lib/format'
 import { Card, EmptyHint } from '@/app/components/AppShell'
 
 const EMOJI_CHOICES = ['🧳', '✈️', '🏖️', '🏔️', '🏠', '🍝', '🎉', '💍', '🚗', '🎄', '🇬🇧', '🇮🇹']
 const COLOR_CHOICES = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6']
 
-export function ProjectsManager({ projects }: { projects: ProjectListItem[] }) {
+export function ProjectsManager({
+  projects,
+  selfName,
+  partnerName,
+}: {
+  projects: ProjectListItem[]
+  selfName: string
+  partnerName: string
+}) {
   const router = useRouter()
   const [creating, setCreating] = useState(false)
 
@@ -27,6 +36,8 @@ export function ProjectsManager({ projects }: { projects: ProjectListItem[] }) {
 
       {creating && (
         <NewProjectForm
+          selfName={selfName}
+          partnerName={partnerName}
           onDone={() => {
             setCreating(false)
             router.refresh()
@@ -38,7 +49,7 @@ export function ProjectsManager({ projects }: { projects: ProjectListItem[] }) {
         <Card>
           <EmptyHint>
             No projects yet. Create one above, then add transactions from the
-            Activity page (select rows → “Add to project”).
+            Activity page (select rows → "Add to project").
           </EmptyHint>
         </Card>
       ) : (
@@ -93,13 +104,22 @@ function ProjectCard({ p }: { p: ProjectListItem }) {
   )
 }
 
-function NewProjectForm({ onDone }: { onDone: () => void }) {
+function NewProjectForm({
+  selfName,
+  partnerName,
+  onDone,
+}: {
+  selfName: string
+  partnerName: string
+  onDone: () => void
+}) {
   const [pending, startTransition] = useTransition()
   const [name, setName] = useState('')
   const [emoji, setEmoji] = useState(EMOJI_CHOICES[0])
   const [color, setColor] = useState(COLOR_CHOICES[0])
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
+  const [autoFill, setAutoFill] = useState<AutoFill | ''>('')
 
   const submit = () => {
     if (!name.trim()) return
@@ -110,10 +130,18 @@ function NewProjectForm({ onDone }: { onDone: () => void }) {
         color,
         startDate: startDate || null,
         endDate: endDate || null,
+        autoFill: (autoFill as AutoFill) || null,
       })
       onDone()
     })
   }
+
+  const autoFillOptions: { value: AutoFill | ''; label: string }[] = [
+    { value: '', label: 'Off — add manually' },
+    { value: 'self', label: `${selfName}'s cards` },
+    { value: 'partner', label: `${partnerName}'s cards` },
+    { value: 'both', label: 'Both' },
+  ]
 
   return (
     <Card title="New project">
@@ -144,6 +172,35 @@ function NewProjectForm({ onDone }: { onDone: () => void }) {
             />
           </label>
         </div>
+
+        {/* Auto-fill: trip-mode card selector */}
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-[var(--muted)]">Auto-add card transactions</label>
+          <div className="flex flex-wrap gap-2">
+            {autoFillOptions.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setAutoFill(opt.value)}
+                className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors ${
+                  autoFill === opt.value
+                    ? 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)]'
+                    : 'border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          {autoFill && (
+            <p className="text-xs text-[var(--muted)]">
+              {startDate && endDate
+                ? 'Trip expenses will be auto-added on creation. Recurring charges go to a review queue.'
+                : 'Set start & end dates to enable auto-fill.'}
+            </p>
+          )}
+        </div>
+
         <div className="flex flex-wrap items-center gap-1.5">
           {EMOJI_CHOICES.map((e) => (
             <button
@@ -174,7 +231,7 @@ function NewProjectForm({ onDone }: { onDone: () => void }) {
             onClick={submit}
             className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-[var(--accent-fg)] disabled:opacity-40"
           >
-            Create project
+            {pending ? 'Creating…' : 'Create project'}
           </button>
         </div>
       </div>

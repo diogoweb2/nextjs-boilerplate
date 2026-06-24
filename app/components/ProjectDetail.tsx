@@ -9,24 +9,34 @@ import {
   addTransactionsToProject,
   removeTransactionsFromProject,
   dismissCandidates,
+  approveAutoFillReview,
+  runProjectAutoFill,
   setProjectCover,
   removeProjectCover,
   type ProjectDetail,
   type ProjectTxn,
 } from '@/app/actions/projects'
+import { type AutoFill } from '@/db/schema'
 import { formatCurrency, formatLongDate } from '@/app/lib/format'
 import { Card } from '@/app/components/AppShell'
 
 export function ProjectDetailView({
   detail,
   candidates,
+  autoFillReviews,
+  selfName,
+  partnerName,
 }: {
   detail: ProjectDetail
   candidates: ProjectTxn[]
+  autoFillReviews: ProjectTxn[]
+  selfName: string
+  partnerName: string
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [editing, setEditing] = useState(false)
+  const [refreshResult, setRefreshResult] = useState<{ added: number; review: number } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const refresh = () => router.refresh()
@@ -35,6 +45,14 @@ export function ProjectDetailView({
       await fn()
       refresh()
     })
+
+  const handleRefreshAutoFill = () => {
+    startTransition(async () => {
+      const result = await runProjectAutoFill(detail.id)
+      setRefreshResult(result)
+      refresh()
+    })
+  }
 
   const range =
     detail.startDate && detail.endDate
@@ -53,19 +71,56 @@ export function ProjectDetailView({
     run(() => setProjectCover(fd))
   }
 
+  const autoFillLabel =
+    detail.autoFill === 'self'
+      ? `${selfName}'s cards`
+      : detail.autoFill === 'partner'
+        ? `${partnerName}'s cards`
+        : detail.autoFill === 'both'
+          ? 'both cards'
+          : null
+
   return (
     <div className={`flex flex-col gap-4 ${pending ? 'opacity-70 transition-opacity' : ''}`}>
       <div className="flex items-center justify-between">
         <Link href="/projects" className="text-sm text-[var(--muted)] hover:text-[var(--foreground)]">
           ← Projects
         </Link>
-        <button
-          onClick={() => setEditing((v) => !v)}
-          className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-medium text-[var(--muted)] hover:text-[var(--foreground)]"
-        >
-          {editing ? 'Done' : 'Edit'}
-        </button>
+        <div className="flex items-center gap-2">
+          {detail.autoFill && detail.startDate && detail.endDate && (
+            <button
+              onClick={handleRefreshAutoFill}
+              disabled={pending}
+              className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-medium text-[var(--muted)] hover:text-[var(--foreground)] disabled:opacity-40"
+            >
+              Refresh auto-fill
+            </button>
+          )}
+          <button
+            onClick={() => setEditing((v) => !v)}
+            className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-medium text-[var(--muted)] hover:text-[var(--foreground)]"
+          >
+            {editing ? 'Done' : 'Edit'}
+          </button>
+        </div>
       </div>
+
+      {/* Refresh result banner */}
+      {refreshResult && (
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-4 py-2.5 text-sm">
+          Auto-fill complete: <span className="font-medium">{refreshResult.added}</span> added
+          {refreshResult.review > 0 && (
+            <>, <span className="font-medium">{refreshResult.review}</span> sent to review</>
+          )}
+          {refreshResult.added === 0 && refreshResult.review === 0 && ' — no new transactions found'}
+          <button
+            onClick={() => setRefreshResult(null)}
+            className="ml-3 text-xs text-[var(--muted)] hover:text-[var(--foreground)]"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Cover + header */}
       <div className="card overflow-hidden">
@@ -109,6 +164,11 @@ export function ProjectDetailView({
             <h1 className="text-xl font-bold tracking-tight">{detail.name}</h1>
           </div>
           {range && <p className="mt-0.5 text-sm text-[var(--muted)]">{range}</p>}
+          {autoFillLabel && (
+            <p className="mt-0.5 text-xs text-[var(--muted)]">
+              Auto-filling {autoFillLabel}
+            </p>
+          )}
           {detail.notes && <p className="mt-2 text-sm text-[var(--foreground)]">{detail.notes}</p>}
           <div className="mt-3 flex items-baseline gap-2">
             <span className="text-2xl font-bold tabular-nums">{formatCurrency(detail.total)}</span>
@@ -119,7 +179,15 @@ export function ProjectDetailView({
         </div>
       </div>
 
-      {editing && <EditForm detail={detail} onSaved={refresh} onDeleted={() => router.push('/projects')} />}
+      {editing && (
+        <EditForm
+          detail={detail}
+          selfName={selfName}
+          partnerName={partnerName}
+          onSaved={refresh}
+          onDeleted={() => router.push('/projects')}
+        />
+      )}
 
       {/* Breakdowns */}
       {detail.byCategory.length > 0 && (
@@ -155,7 +223,51 @@ export function ProjectDetailView({
         </Card>
       )}
 
-      {/* Suggested candidates */}
+      {/* Auto-fill review: recurring/bill-like transactions flagged during auto-fill */}
+      {autoFillReviews.length > 0 && (
+        <Card
+          title={`Auto-filled — needs review (${autoFillReviews.length})`}
+          action={
+            <div className="flex gap-2">
+              <button
+                onClick={() =>
+                  run(() => approveAutoFillReview(detail.id, autoFillReviews.map((t) => t.id)))
+                }
+                className="rounded-lg bg-[var(--accent)] px-2.5 py-1 text-xs font-medium text-[var(--accent-fg)]"
+              >
+                Add all
+              </button>
+              <button
+                onClick={() =>
+                  run(() => dismissCandidates(detail.id, autoFillReviews.map((t) => t.id)))
+                }
+                className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs font-medium text-[var(--muted)] hover:text-[var(--foreground)]"
+              >
+                Dismiss all
+              </button>
+            </div>
+          }
+        >
+          <p className="mb-3 text-xs text-[var(--muted)]">
+            These look like recurring bills rather than trip expenses. Add the ones that
+            belong, dismiss the ones that don't — dismissed rows won't reappear.
+          </p>
+          <div className="card divide-y divide-[var(--border)] overflow-hidden">
+            {autoFillReviews.map((t) => (
+              <MemberRow
+                key={t.id}
+                t={t}
+                actionLabel="+ Add"
+                onAction={() => run(() => approveAutoFillReview(detail.id, [t.id]))}
+                secondaryLabel="Dismiss"
+                onSecondary={() => run(() => dismissCandidates(detail.id, [t.id]))}
+              />
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Unknown-country candidates (existing "Suggested — review") */}
       {candidates.length > 0 && (
         <Card
           title={`Suggested — review (${candidates.length})`}
@@ -177,9 +289,9 @@ export function ProjectDetailView({
           }
         >
           <p className="mb-3 text-xs text-[var(--muted)]">
-            In the project’s dates but we can’t tell if they were abroad (Amex / bank
+            In the project's dates but we can't tell if they were abroad (Amex / bank
             rows carry no country). Add the ones that belong, dismiss the rest — dismissed
-            rows won’t show up here again.
+            rows won't show up here again.
           </p>
           <div className="card divide-y divide-[var(--border)] overflow-hidden">
             {candidates.map((t) => (
@@ -204,7 +316,7 @@ export function ProjectDetailView({
             <Link href="/transactions" className="text-[var(--accent)] underline">
               Activity page
             </Link>{' '}
-            (select rows → “Add to project”).
+            (select rows → "Add to project").
           </p>
         ) : (
           <div className="card divide-y divide-[var(--border)] overflow-hidden">
@@ -270,10 +382,14 @@ function MemberRow({
 
 function EditForm({
   detail,
+  selfName,
+  partnerName,
   onSaved,
   onDeleted,
 }: {
   detail: ProjectDetail
+  selfName: string
+  partnerName: string
   onSaved: () => void
   onDeleted: () => void
 }) {
@@ -283,6 +399,7 @@ function EditForm({
   const [startDate, setStartDate] = useState(detail.startDate ?? '')
   const [endDate, setEndDate] = useState(detail.endDate ?? '')
   const [notes, setNotes] = useState(detail.notes ?? '')
+  const [autoFill, setAutoFill] = useState<AutoFill | ''>(detail.autoFill ?? '')
 
   const save = () =>
     startTransition(async () => {
@@ -292,6 +409,7 @@ function EditForm({
         startDate: startDate || null,
         endDate: endDate || null,
         notes,
+        autoFill: (autoFill as AutoFill) || null,
       })
       onSaved()
     })
@@ -301,6 +419,13 @@ function EditForm({
       await deleteProject(detail.id)
       onDeleted()
     })
+
+  const autoFillOptions: { value: AutoFill | ''; label: string }[] = [
+    { value: '', label: 'Off' },
+    { value: 'self', label: `${selfName}'s cards` },
+    { value: 'partner', label: `${partnerName}'s cards` },
+    { value: 'both', label: 'Both' },
+  ]
 
   return (
     <Card title="Edit project">
@@ -338,6 +463,25 @@ function EditForm({
             />
           </label>
         </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-[var(--muted)]">Auto-add card transactions</label>
+          <div className="flex flex-wrap gap-2">
+            {autoFillOptions.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setAutoFill(opt.value)}
+                className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors ${
+                  autoFill === opt.value
+                    ? 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)]'
+                    : 'border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <textarea
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
@@ -356,7 +500,7 @@ function EditForm({
           <button
             disabled={pending}
             onClick={() => {
-              if (confirm(`Delete “${detail.name}”? Transactions are kept; only the project is removed.`)) remove()
+              if (confirm(`Delete "${detail.name}"? Transactions are kept; only the project is removed.`)) remove()
             }}
             className="rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--negative)] hover:bg-[var(--surface-2)]"
           >

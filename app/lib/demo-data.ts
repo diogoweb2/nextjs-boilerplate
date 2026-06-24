@@ -861,6 +861,7 @@ export function demoProjectDetail(id: number) {
     startDate: card.startDate,
     endDate: card.endDate,
     notes: 'Ten days in Italy — flights, lodging, trains and a lot of pasta.',
+    autoFill: null as null,
     total,
     members,
     byCategory: [...catAgg.values()].sort((a, b) => b.total - a.total),

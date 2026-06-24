@@ -1,6 +1,6 @@
 'use server'
 
-import { and, eq, inArray, isNull, notInArray, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNull, notInArray, or, sql } from 'drizzle-orm'
 import { put, del } from '@vercel/blob'
 import { revalidatePath } from 'next/cache'
 import { db } from '@/db'
@@ -10,9 +10,10 @@ import {
   transactions,
   merchants,
   categories,
+  type AutoFill,
 } from '@/db/schema'
 import { requireAuth } from '@/app/lib/auth-guard'
-import { cardholderName } from '@/app/lib/cardholders'
+import { cardholderName, getPersonNames } from '@/app/lib/cardholders'
 import { isDemoSession } from '@/app/lib/demo'
 
 const NO_CAT = { name: 'Uncategorized', color: '#94a3b8' }
@@ -55,6 +56,7 @@ export type ProjectDetail = {
   startDate: string | null
   endDate: string | null
   notes: string | null
+  autoFill: AutoFill | null
   total: number
   members: ProjectTxn[]
   /** Spend grouped by effective category, descending. */
@@ -147,7 +149,8 @@ export async function loadProjects(): Promise<ProjectListItem[]> {
       projectTransactions,
       and(
         eq(projectTransactions.projectId, projects.id),
-        eq(projectTransactions.dismissed, false)
+        eq(projectTransactions.dismissed, false),
+        eq(projectTransactions.needsReview, false)
       )
     )
     .leftJoin(transactions, eq(transactions.id, projectTransactions.transactionId))
@@ -176,7 +179,13 @@ export async function loadProjectDetail(id: number): Promise<ProjectDetail | nul
     .from(projectTransactions)
     .innerJoin(transactions, eq(transactions.id, projectTransactions.transactionId))
     .innerJoin(merchants, eq(merchants.id, transactions.merchantId))
-    .where(and(eq(projectTransactions.projectId, id), eq(projectTransactions.dismissed, false)))
+    .where(
+      and(
+        eq(projectTransactions.projectId, id),
+        eq(projectTransactions.dismissed, false),
+        eq(projectTransactions.needsReview, false)
+      )
+    )
     .orderBy(transactions.txnDate)
 
   const members = enrich(memberRows, catMap)
@@ -203,6 +212,7 @@ export async function loadProjectDetail(id: number): Promise<ProjectDetail | nul
     startDate: p.startDate,
     endDate: p.endDate,
     notes: p.notes,
+    autoFill: (p.autoFill as AutoFill | null) ?? null,
     total,
     members,
     byCategory: [...catAgg.values()].sort((a, b) => b.total - a.total),
@@ -210,6 +220,30 @@ export async function loadProjectDetail(id: number): Promise<ProjectDetail | nul
       .map(([person, total]) => ({ person, total }))
       .sort((a, b) => b.total - a.total),
   }
+}
+
+/**
+ * Transactions auto-filled by runProjectAutoFill that were flagged as
+ * recurring/bill-like and need the owner's review before being counted.
+ * Shown in the "Auto-filled — needs review" section of the project detail.
+ */
+export async function loadAutoFillReviews(id: number): Promise<ProjectTxn[]> {
+  if (await isDemoSession()) return []
+  const catMap = await categoryMap()
+  const rows = await db
+    .select(MEMBER_COLUMNS)
+    .from(projectTransactions)
+    .innerJoin(transactions, eq(transactions.id, projectTransactions.transactionId))
+    .innerJoin(merchants, eq(merchants.id, transactions.merchantId))
+    .where(
+      and(
+        eq(projectTransactions.projectId, id),
+        eq(projectTransactions.dismissed, false),
+        eq(projectTransactions.needsReview, true)
+      )
+    )
+    .orderBy(transactions.txnDate)
+  return enrich(rows, catMap)
 }
 
 /**
@@ -278,7 +312,12 @@ export async function loadProjectMemberships(): Promise<
     })
     .from(projectTransactions)
     .innerJoin(projects, eq(projects.id, projectTransactions.projectId))
-    .where(eq(projectTransactions.dismissed, false))
+    .where(
+      and(
+        eq(projectTransactions.dismissed, false),
+        eq(projectTransactions.needsReview, false)
+      )
+    )
 
   const map: Record<number, ProjectPickerItem[]> = {}
   for (const r of rows) {
@@ -298,6 +337,7 @@ export type ProjectInput = {
   startDate?: string | null
   endDate?: string | null
   notes?: string | null
+  autoFill?: AutoFill | null
 }
 
 export async function createProject(input: ProjectInput): Promise<number> {
@@ -313,9 +353,16 @@ export async function createProject(input: ProjectInput): Promise<number> {
       startDate: input.startDate || null,
       endDate: input.endDate || null,
       notes: input.notes?.trim() || null,
+      autoFill: input.autoFill || null,
     })
     .returning({ id: projects.id })
   revalidatePath('/projects')
+
+  // Immediately auto-fill if configured and dates are set.
+  if (input.autoFill && input.startDate && input.endDate) {
+    await _runProjectAutoFill(row.id)
+  }
+
   return row.id
 }
 
@@ -328,6 +375,7 @@ export async function updateProject(id: number, patch: Partial<ProjectInput>): P
   if (patch.startDate !== undefined) set.startDate = patch.startDate || null
   if (patch.endDate !== undefined) set.endDate = patch.endDate || null
   if (patch.notes !== undefined) set.notes = patch.notes?.trim() || null
+  if (patch.autoFill !== undefined) set.autoFill = patch.autoFill || null
   if (Object.keys(set).length === 0) return
   await db.update(projects).set(set).where(eq(projects.id, id))
   revalidatePath('/projects')
@@ -356,10 +404,10 @@ export async function addTransactionsToProject(
   if (ids.length === 0) return
   await db
     .insert(projectTransactions)
-    .values(ids.map((transactionId) => ({ projectId, transactionId, dismissed: false })))
+    .values(ids.map((transactionId) => ({ projectId, transactionId, dismissed: false, needsReview: false })))
     .onConflictDoUpdate({
       target: [projectTransactions.projectId, projectTransactions.transactionId],
-      set: { dismissed: false },
+      set: { dismissed: false, needsReview: false },
     })
   revalidatePath('/projects')
   revalidatePath(`/projects/${projectId}`)
@@ -378,7 +426,7 @@ export async function dismissCandidates(projectId: number, txnIds: number[]): Pr
   if (ids.length === 0) return
   await db
     .insert(projectTransactions)
-    .values(ids.map((transactionId) => ({ projectId, transactionId, dismissed: true })))
+    .values(ids.map((transactionId) => ({ projectId, transactionId, dismissed: true, needsReview: false })))
     .onConflictDoUpdate({
       target: [projectTransactions.projectId, projectTransactions.transactionId],
       set: { dismissed: true },
@@ -405,6 +453,120 @@ export async function removeTransactionsFromProject(
   revalidatePath('/projects')
   revalidatePath(`/projects/${projectId}`)
   revalidatePath('/transactions')
+}
+
+/**
+ * Approve auto-fill review items: flip needsReview → false so they become
+ * confirmed members counted in the project total.
+ */
+export async function approveAutoFillReview(projectId: number, txnIds: number[]): Promise<void> {
+  await requireAuth()
+  const ids = [...new Set(txnIds)].filter((n) => Number.isInteger(n))
+  if (ids.length === 0) return
+  await db
+    .update(projectTransactions)
+    .set({ needsReview: false })
+    .where(
+      and(
+        eq(projectTransactions.projectId, projectId),
+        inArray(projectTransactions.transactionId, ids)
+      )
+    )
+  revalidatePath('/projects')
+  revalidatePath(`/projects/${projectId}`)
+}
+
+/**
+ * Internal auto-fill logic. Queries all credit-card (master/amex) transactions
+ * in the project's date window for the configured cardholder(s), then inserts:
+ *  - needsReview = false → non-recurring: auto-added as a project member
+ *  - needsReview = true  → recurring/bill-like: shown in "needs review" section
+ * Uses onConflictDoNothing so existing user decisions (manual adds, dismissals,
+ * or previously approved reviews) are never overwritten.
+ */
+async function _runProjectAutoFill(
+  projectId: number
+): Promise<{ added: number; review: number }> {
+  const [p] = await db
+    .select({
+      autoFill: projects.autoFill,
+      startDate: projects.startDate,
+      endDate: projects.endDate,
+    })
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .limit(1)
+
+  if (!p?.autoFill || !p.startDate || !p.endDate) return { added: 0, review: 0 }
+
+  const { partnerCards } = getPersonNames()
+
+  // Build the card-owner filter (credit cards only).
+  let cardFilter: ReturnType<typeof inArray> | ReturnType<typeof or> | undefined
+  if (p.autoFill === 'partner') {
+    if (partnerCards.length === 0) return { added: 0, review: 0 }
+    cardFilter = inArray(transactions.cardLast4, partnerCards)
+  } else if (p.autoFill === 'self') {
+    // Rows with null cardLast4 or a card not in PARTNER_CARDS belong to self.
+    cardFilter =
+      partnerCards.length > 0
+        ? or(isNull(transactions.cardLast4), notInArray(transactions.cardLast4, partnerCards))
+        : undefined
+  }
+  // 'both': no card filter
+
+  // Subquery: all txn IDs already tracked (member, review, or dismissed).
+  const existing = db
+    .select({ id: projectTransactions.transactionId })
+    .from(projectTransactions)
+    .where(eq(projectTransactions.projectId, projectId))
+
+  const conditions = [
+    sql`${transactions.txnDate} between ${p.startDate} and ${p.endDate}`,
+    eq(transactions.flow, 'expense'),
+    eq(transactions.isPayment, false),
+    inArray(transactions.source, ['master', 'amex'] as const),
+    notInArray(transactions.id, existing),
+    cardFilter,
+  ].filter(Boolean) as Parameters<typeof and>
+
+  const rows = await db
+    .select({
+      id: transactions.id,
+      txnIsRecurring: transactions.isRecurring,
+      merchantDefaultRecurring: merchants.defaultRecurring,
+    })
+    .from(transactions)
+    .innerJoin(merchants, eq(merchants.id, transactions.merchantId))
+    .where(and(...conditions))
+
+  if (rows.length === 0) return { added: 0, review: 0 }
+
+  const toInsert = rows.map((r) => ({
+    projectId,
+    transactionId: r.id,
+    dismissed: false,
+    // Effectively recurring = true → send to review (likely a bill, not a trip expense).
+    needsReview: r.txnIsRecurring ?? r.merchantDefaultRecurring ?? false,
+  }))
+
+  await db.insert(projectTransactions).values(toInsert).onConflictDoNothing()
+
+  revalidatePath('/projects')
+  revalidatePath(`/projects/${projectId}`)
+
+  return {
+    added: toInsert.filter((r) => !r.needsReview).length,
+    review: toInsert.filter((r) => r.needsReview).length,
+  }
+}
+
+/** Public action: re-run auto-fill to pick up new transactions since last fill. */
+export async function runProjectAutoFill(
+  projectId: number
+): Promise<{ added: number; review: number }> {
+  await requireAuth()
+  return _runProjectAutoFill(projectId)
 }
 
 /**
