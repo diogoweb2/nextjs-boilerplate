@@ -12,8 +12,6 @@ import { saveGoal, saveSettings, resetGoals } from '@/app/actions/budget'
 
 const SPEND_COLOR = '#ef4444'
 const BUDGET_COLOR = '#6366f1'
-const ACTUAL_COLOR = '#0ea5e9'
-
 function sum(ns: number[]): number {
   return ns.reduce((a, b) => a + b, 0)
 }
@@ -315,24 +313,6 @@ export function BudgetPlanner({ data }: { data: BudgetData }) {
         </p>
       </Card>
 
-      {/* Net trajectory toward the target */}
-      <Card title="Net trajectory" action={<span className="text-xs text-[var(--muted)]">cumulative net → Dec 31 target</span>}>
-        <NetTrajectory
-          labels={data.monthly.labels}
-          cumulativeNet={data.monthly.cumulativeNet}
-          currentIndex={data.currentMonthIndex}
-          completedBaseline={data.completedBaseline}
-          targetNet={targetNet}
-          monthsRemaining={data.monthsRemaining}
-          onTrack={onTrack}
-        />
-        <Legend
-          items={[
-            { color: ACTUAL_COLOR, label: 'Actual cumulative net' },
-            { color: onTrack ? 'var(--positive)' : 'var(--negative)', label: 'Required path to target' },
-          ]}
-        />
-      </Card>
     </div>
   )
 }
@@ -350,100 +330,4 @@ function Legend({ items }: { items: { color: string; label: string }[] }) {
   )
 }
 
-/**
- * Small SVG that handles negative cumulative net: plots actual net through the
- * current month and the straight "required path" from the last completed month's
- * baseline up to the target by December, with a zero reference line.
- */
-function NetTrajectory({
-  labels,
-  cumulativeNet,
-  currentIndex,
-  completedBaseline,
-  targetNet,
-  monthsRemaining,
-  onTrack,
-}: {
-  labels: string[]
-  cumulativeNet: (number | null)[]
-  currentIndex: number
-  completedBaseline: number
-  targetNet: number
-  monthsRemaining: number
-  onTrack: boolean
-}) {
-  const width = 640
-  const height = 200
-  const padX = 40
-  const padTop = 16
-  const padBottom = 28
-  const n = labels.length
-  const innerW = width - padX * 2
-  const innerH = height - padTop - padBottom
-  const lastCompleted = currentIndex - 1 // index of the last fully-complete month
 
-  // Required path: baseline at lastCompleted → target at Dec (index 11).
-  const slope = monthsRemaining > 0 ? (targetNet - completedBaseline) / monthsRemaining : 0
-  const guide: { i: number; v: number }[] = []
-  for (let i = Math.max(0, lastCompleted); i <= n - 1; i++) {
-    guide.push({ i, v: completedBaseline + (i - lastCompleted) * slope })
-  }
-
-  const actual = cumulativeNet
-    .map((v, i) => (v === null ? null : { i, v }))
-    .filter((p): p is { i: number; v: number } => p !== null)
-
-  const allV = [...actual.map((p) => p.v), ...guide.map((p) => p.v), 0]
-  const min = Math.min(...allV)
-  const max = Math.max(...allV)
-  const span = max - min || 1
-  const x = (i: number) => padX + (i / (n - 1)) * innerW
-  const y = (v: number) => padTop + innerH - ((v - min) / span) * innerH
-
-  const guideColor = onTrack ? 'var(--positive)' : 'var(--negative)'
-  const toPts = (ps: { i: number; v: number }[]) => ps.map((p) => `${x(p.i)},${y(p.v)}`).join(' ')
-
-  return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="w-full" preserveAspectRatio="none" style={{ height }}>
-      {/* zero line */}
-      <line x1={padX} x2={width - padX} y1={y(0)} y2={y(0)} stroke="var(--border)" strokeWidth={1} />
-      <text x={4} y={y(0) + 3} style={{ fontSize: 9 }} className="fill-[var(--muted)]">
-        $0
-      </text>
-      {/* target marker */}
-      <line
-        x1={padX}
-        x2={width - padX}
-        y1={y(targetNet)}
-        y2={y(targetNet)}
-        stroke={guideColor}
-        strokeWidth={1}
-        strokeDasharray="2 3"
-        opacity={0.5}
-      />
-
-      {/* required path */}
-      <polyline
-        points={toPts(guide)}
-        fill="none"
-        stroke={guideColor}
-        strokeWidth={2}
-        strokeDasharray="5 4"
-        strokeLinejoin="round"
-      />
-      {/* actual */}
-      <polyline points={toPts(actual)} fill="none" stroke={ACTUAL_COLOR} strokeWidth={2.5} strokeLinejoin="round" />
-      {actual.map((p) => (
-        <circle key={p.i} cx={x(p.i)} cy={y(p.v)} r={2.8} fill={ACTUAL_COLOR}>
-          <title>{`${formatMonth(labels[p.i])}: ${formatCurrencyCompact(p.v)}`}</title>
-        </circle>
-      ))}
-
-      {labels.map((lab, i) => (
-        <text key={lab} x={x(i)} y={height - 8} textAnchor="middle" style={{ fontSize: 9 }} className="fill-[var(--muted)]">
-          {formatMonth(lab).replace(' 20', " '")}
-        </text>
-      ))}
-    </svg>
-  )
-}

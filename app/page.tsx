@@ -14,11 +14,11 @@ import { WeekdayChart } from '@/app/components/charts/WeekdayChart'
 import { InsightCard } from '@/app/components/InsightCard'
 import { BatchList } from '@/app/components/BatchList'
 import { BurndownTrajectory } from '@/app/components/BurndownTrajectory'
-import { NetGoalTrajectory } from '@/app/components/NetGoalTrajectory'
+import { NetBudgetTrajectory } from '@/app/components/NetBudgetTrajectory'
 import { loadAllFlows, buildOverview, availableMonths, anchorMonth, periodWindow } from '@/app/lib/analytics'
 import { buildInsights, type InsightCard as InsightCardData } from '@/app/lib/insights'
 import { parsePeriodParams } from '@/app/lib/params'
-import { computeBudget, computeNetTrajectory, FIXED_CATEGORIES, type CategoryMeta } from '@/app/lib/budget'
+import { computeBudget, FIXED_CATEGORIES, type CategoryMeta } from '@/app/lib/budget'
 import { computeBudgetRule } from '@/app/lib/fifty-thirty-twenty'
 import { BudgetRuleChart } from '@/app/components/charts/BudgetRuleChart'
 import { computeRunwayInputs, buildScenarios } from '@/app/lib/runway'
@@ -198,10 +198,6 @@ export default async function Home({
     }
   }
 
-  // Year-to-date net progression toward the year-end net goal. Always the full
-  // calendar year (independent of the period selector) — it's a yearly goal.
-  const netTrajectory = computeNetTrajectory(allFlows, settings.targetNet)
-
   // 50/30/20 rule for the selected period (same window as the Overview above).
   const manualContributions = await loadManualSavingsContributions()
   const ruleWindow = exactMonth
@@ -271,6 +267,25 @@ export default async function Home({
         </div>
       )}
 
+      {emergency.hasData && (() => {
+        const scotia = emergency.accounts.find((a) => a.source === 'scotia')
+        const tangerine = emergency.accounts.find((a) => a.source === 'tangerine')
+        if (!scotia && !tangerine) return null
+        return (
+          <div className="mb-5 flex flex-wrap gap-2">
+            {[tangerine, scotia].filter(Boolean).map((a) => (
+              <span
+                key={a!.source}
+                className="rounded-full bg-[var(--surface-2)] px-3 py-1 text-sm font-semibold tabular-nums"
+              >
+                <span className="font-normal text-[var(--muted)]">{a!.label} </span>
+                {formatCurrency(a!.balance)}
+              </span>
+            ))}
+          </div>
+        )
+      })()}
+
       {!ov.hasData ? (
         <Card title="Get started">
           <p className="mb-4 text-sm text-[var(--muted)]">
@@ -309,32 +324,40 @@ export default async function Home({
               ))}
           </div>
 
-          {/* Net trajectory — discretionary burn-down for the selected period */}
-          {burndown && (
-            <Card
-              title="Net trajectory"
-              action={
-                <a href="/budget" className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]">
-                  goal from budget →
-                </a>
-              }
-            >
-              <BurndownTrajectory data={burndown} periodLabel={ov.periodLabel} />
-            </Card>
-          )}
-
-          {/* Year-end net goal — YTD net progression toward the Dec 31 target */}
-          {netTrajectory.hasData && (
-            <Card
-              title="Year-end net goal"
-              action={
-                <a href="/budget" className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]">
-                  set goal →
-                </a>
-              }
-            >
-              <NetGoalTrajectory data={netTrajectory} />
-            </Card>
+          {/* Net trajectory — burndown + budget trajectory side by side */}
+          {(burndown || budget.hasData) && (
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+              {burndown && (
+                <Card
+                  title="Net trajectory"
+                  action={
+                    <a href="/budget" className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]">
+                      goal from budget →
+                    </a>
+                  }
+                >
+                  <BurndownTrajectory data={burndown} periodLabel={ov.periodLabel} />
+                </Card>
+              )}
+              {budget.hasData && (
+                <Card
+                  title="Net trajectory"
+                  action={
+                    <span className="text-xs text-[var(--muted)]">cumulative net → Dec 31 target</span>
+                  }
+                >
+                  <NetBudgetTrajectory
+                    labels={budget.monthly.labels}
+                    cumulativeNet={budget.monthly.cumulativeNet}
+                    currentIndex={budget.currentMonthIndex}
+                    completedBaseline={budget.completedBaseline}
+                    targetNet={budget.targetNet}
+                    monthsRemaining={budget.monthsRemaining}
+                    onTrack={budget.completedBaseline + budget.monthsRemaining * (budget.income - budget.categories.reduce((s, c) => s + (savedGoals.get(c.categoryId) ?? c.goal), 0)) >= budget.targetNet - 0.5}
+                  />
+                </Card>
+              )}
+            </div>
           )}
 
           {/* 50/30/20 rule + emergency-fund runway, side by side */}
