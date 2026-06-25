@@ -2,6 +2,11 @@
 
 import { formatCurrency, formatCurrencyCompact, formatMonth } from '@/app/lib/format'
 
+// The cumulative net line is colored per-segment:
+// positive (≥ $0) → green, negative (< $0) → red.
+const LINE_GREEN = 'var(--positive)'
+const LINE_RED = 'var(--negative)'
+
 export function NetBudgetTrajectory({
   labels,
   cumulativeNet,
@@ -92,6 +97,28 @@ export function NetBudgetTrajectory({
   const projEndI = zeroI === null ? null : Math.min(zeroI, n - 1)
   const projEndV = last && pace !== null && projEndI !== null ? last.v + (projEndI - last.i) * pace : null
 
+  // Split the actual line into green (positive) and red (negative) segments,
+  // breaking exactly where it crosses $0.
+  const actualSegs: { x1: number; y1: number; x2: number; y2: number; color: string }[] = []
+  for (let k = 0; k < actual.length - 1; k++) {
+    const a = actual[k]
+    const b = actual[k + 1]
+    const ax = x(a.i)
+    const ay = y(a.v)
+    const bx = x(b.i)
+    const by = y(b.v)
+    if ((a.v >= 0) === (b.v >= 0)) {
+      actualSegs.push({ x1: ax, y1: ay, x2: bx, y2: by, color: a.v >= 0 ? LINE_GREEN : LINE_RED })
+    } else {
+      const t = a.v / (a.v - b.v) // fraction along segment where it hits $0
+      const cx = ax + (bx - ax) * t
+      const cy = ay + (by - ay) * t
+      actualSegs.push({ x1: ax, y1: ay, x2: cx, y2: cy, color: a.v >= 0 ? LINE_GREEN : LINE_RED })
+      actualSegs.push({ x1: cx, y1: cy, x2: bx, y2: by, color: b.v >= 0 ? LINE_GREEN : LINE_RED })
+    }
+  }
+  const dotColor = currentNet >= 0 ? LINE_GREEN : LINE_RED
+
   return (
     <div className="flex flex-col gap-3">
       {last && (
@@ -147,11 +174,23 @@ export function NetBudgetTrajectory({
           />
         )}
         {zeroI !== null && zeroI <= n - 1 && (
-          <circle cx={x(zeroI)} cy={y(0)} r={3} fill="none" stroke={netColor} strokeWidth={1.5} />
+          <circle cx={x(zeroI)} cy={y(0)} r={3} fill="none" stroke={dotColor} strokeWidth={1.5} />
         )}
-        <polyline points={toPts(actual)} fill="none" stroke={netColor} strokeWidth={2.5} strokeLinejoin="round" />
+        {/* actual cumulative net line — green (positive), red (negative) */}
+        {actualSegs.map((s, i) => (
+          <line
+            key={i}
+            x1={s.x1}
+            y1={s.y1}
+            x2={s.x2}
+            y2={s.y2}
+            stroke={s.color}
+            strokeWidth={2.5}
+            strokeLinecap="round"
+          />
+        ))}
         {actual.map((p) => (
-          <circle key={p.i} cx={x(p.i)} cy={y(p.v)} r={2.8} fill={netColor}>
+          <circle key={p.i} cx={x(p.i)} cy={y(p.v)} r={2.8} fill={dotColor}>
             <title>{`${formatMonth(labels[p.i])}: ${formatCurrencyCompact(p.v)}`}</title>
           </circle>
         ))}
@@ -163,7 +202,7 @@ export function NetBudgetTrajectory({
       </svg>
       <div className="flex flex-wrap gap-4 text-xs text-[var(--muted)]">
         <span className="flex items-center gap-1.5">
-          <span className="h-2 w-3 rounded-sm" style={{ background: netColor }} />
+          <span className="h-2 w-3 rounded-sm" style={{ background: dotColor }} />
           Actual cumulative net
         </span>
         <span className="flex items-center gap-1.5">
