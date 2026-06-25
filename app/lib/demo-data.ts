@@ -12,6 +12,9 @@
 import type { EnrichedTxn, ImportSource, Flow } from '@/app/lib/analytics'
 import type { ProjectionRule } from '@/app/lib/projection'
 import type { GoalView, PendingReview } from '@/app/actions/goals'
+import type { InvestmentsData, AccountView } from '@/app/actions/investments'
+import { computeTfsaRoom, type RegisteredEntry } from '@/app/lib/tfsa'
+import { computeRespGrant } from '@/app/lib/resp'
 import type { EmergencyFundData } from '@/app/actions/emergency'
 import type { CashflowPlan } from '@/app/actions/cashflow'
 import type { ScheduledEvent } from '@/app/lib/cashflow'
@@ -790,6 +793,10 @@ export function demoPendingReviews(): PendingReview[] {
         { id: 1, name: 'Family Vacation', emoji: '🏖️' },
         { id: 2, name: 'Emergency Fund', emoji: '🛟' },
       ],
+      registeredAccounts: [
+        { id: 1, name: 'My TFSA', kind: 'tfsa', ownerName: 'Me' },
+        { id: 2, name: 'Kids RESP', kind: 'resp', ownerName: 'Me' },
+      ],
     },
   ]
 }
@@ -866,5 +873,84 @@ export function demoProjectDetail(id: number) {
     members,
     byCategory: [...catAgg.values()].sort((a, b) => b.total - a.total),
     byPerson: [...personAgg.entries()].map(([person, total]) => ({ person, total })).sort((a, b) => b.total - a.total),
+  }
+}
+
+// --- Investments (the /investments page) ----------------------------------
+// A synthetic TFSA + RESP so the feature renders for demo visitors. Holdings and
+// contributions are fabricated; the room/grant numbers run through the same pure
+// engines (app/lib/tfsa.ts, app/lib/resp.ts) as the real path.
+export function demoInvestmentsData(): InvestmentsData {
+  const asOf = '2026-06-24'
+  const fx = 1.37
+
+  const tfsaContribs: RegisteredEntry[] = [
+    { kind: 'contribution', amount: 900, occurredAt: '2026-01-12' },
+    { kind: 'contribution', amount: 900, occurredAt: '2026-02-12' },
+    { kind: 'contribution', amount: 900, occurredAt: '2026-03-13' },
+    { kind: 'contribution', amount: 8600, occurredAt: '2026-06-23' },
+  ]
+  const respContribs: RegisteredEntry[] = [
+    { kind: 'contribution', amount: 1500, occurredAt: '2026-02-01' },
+  ]
+
+  const tfsaPositions = [
+    { symbol: 'ZMMK', name: 'BMO Money Market ETF', assetClass: 'Cash Equivalent', currency: 'CAD', qty: 1060, mv: 52904.6, pct: 0.07 },
+    { symbol: 'XEQT', name: 'iShares Core Equity ETF', assetClass: 'Equity', currency: 'CAD', qty: 507, mv: 22754.16, pct: 73.88 },
+    { symbol: 'QQQ', name: 'Invesco QQQ Trust', assetClass: 'Equity', currency: 'USD', qty: 71, mv: 50452.6, pct: 133.06 },
+    { symbol: 'KWEB', name: 'KraneShares CSI China Internet', assetClass: 'Equity', currency: 'USD', qty: 299, mv: 7267.2, pct: -65.76 },
+  ].map((p) => ({
+    symbol: p.symbol, name: p.name, assetClass: p.assetClass, currency: p.currency,
+    quantity: p.qty, marketValue: p.mv,
+    marketValueCad: Math.round(p.mv * (p.currency === 'USD' ? fx : 1) * 100) / 100,
+    changePct: p.pct, changeAmount: 0,
+  }))
+  const respPositions = [
+    { symbol: 'QQC.F', name: 'Invesco NASDAQ 100 Index ETF', assetClass: 'Equity', currency: 'CAD', qty: 55, mv: 12364.55, pct: 246.97 },
+    { symbol: 'VEE', name: 'Vanguard FTSE Emerging Markets', assetClass: 'Equity', currency: 'CAD', qty: 68, mv: 3429.24, pct: 49.13 },
+  ].map((p) => ({
+    symbol: p.symbol, name: p.name, assetClass: p.assetClass, currency: p.currency,
+    quantity: p.qty, marketValue: p.mv, marketValueCad: p.mv, changePct: p.pct, changeAmount: 0,
+  }))
+
+  const tfsaTotal = Math.round(tfsaPositions.reduce((s, p) => s + p.marketValueCad, 0) * 100) / 100
+  const respTotal = Math.round(respPositions.reduce((s, p) => s + p.marketValueCad, 0) * 100) / 100
+
+  const accounts: AccountView[] = [
+    {
+      id: 1, kind: 'tfsa', name: 'My TFSA', owner: 'self', ownerName: 'Me', currency: 'CAD',
+      brokerageAccountNo: '54528607',
+      latest: { occurredAt: asOf, fxUsdCad: fx, totalValueCad: tfsaTotal, bookValueCad: Math.round(tfsaTotal * 0.7) },
+      positions: tfsaPositions,
+      valueSeries: [
+        { ym: '2026-03-31', value: tfsaTotal * 0.92 }, { ym: '2026-05-31', value: tfsaTotal * 0.97 }, { ym: asOf, value: tfsaTotal },
+      ],
+      contributions: tfsaContribs.map((c, i) => ({ id: i + 1, kind: c.kind, amount: c.amount, occurredAt: c.occurredAt, note: 'From transfer', fromTransfer: true })),
+      contributionsTotal: 11300,
+      tfsa: computeTfsaRoom(23756, '2026-01-01', tfsaContribs, asOf),
+      resp: null,
+      roomBaselineAmount: 23756, roomBaselineDate: '2026-01-01',
+      beneficiaryBirthYear: null, grantBaselineReceived: null, contributionBaseline: null, grantCarryForward: null,
+    },
+    {
+      id: 2, kind: 'resp', name: 'Kids RESP', owner: 'self', ownerName: 'Me', currency: 'CAD',
+      brokerageAccountNo: '59201813',
+      latest: { occurredAt: asOf, fxUsdCad: 1, totalValueCad: respTotal, bookValueCad: Math.round(respTotal * 0.4) },
+      positions: respPositions,
+      valueSeries: [{ ym: '2026-03-31', value: respTotal * 0.95 }, { ym: asOf, value: respTotal }],
+      contributions: respContribs.map((c, i) => ({ id: 10 + i, kind: c.kind, amount: c.amount, occurredAt: c.occurredAt, note: 'From transfer', fromTransfer: true })),
+      contributionsTotal: 1500,
+      tfsa: null,
+      resp: computeRespGrant(respContribs, { contributionBaseline: 18000, grantBaselineReceived: 3600, grantCarryForward: 0, beneficiaryBirthYear: 2016 }, asOf),
+      roomBaselineAmount: null, roomBaselineDate: null,
+      beneficiaryBirthYear: 2016, grantBaselineReceived: 3600, contributionBaseline: 18000, grantCarryForward: 0,
+    },
+  ]
+
+  return {
+    accounts,
+    totalValueCad: Math.round((tfsaTotal + respTotal) * 100) / 100,
+    selfName: 'Me',
+    partnerName: 'Partner',
   }
 }

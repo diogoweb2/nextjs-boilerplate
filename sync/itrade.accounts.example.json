@@ -1,0 +1,12 @@
+[
+  {
+    "label": "RESP",
+    "account": "0000000",
+    "url": "https://wealthmanagement.scotiabank.com/wmaccount/overview/REPLACE_WITH_RESP_TOKEN=/?ws=itrade"
+  },
+  {
+    "label": "TFSA",
+    "account": "0000000",
+    "url": "https://wealthmanagement.scotiabank.com/wmaccount/overview/REPLACE_WITH_TFSA_TOKEN=/?ws=itrade"
+  }
+]

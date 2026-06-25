@@ -65,8 +65,12 @@ function ReviewRow({ review }: { review: PendingReview }) {
   }
 
   const [allocations, setAllocations] = useState<ReviewAllocation[]>(() => defaultAllocations(inbound ? 'goal' : 'expense'))
+  const [registeredAccountId, setRegisteredAccountId] = useState<number>(0)
 
   const allocatable = inbound ? treatment === 'goal' : treatment === 'expense' || treatment === 'neutral'
+  // Outbound money going to investments can be tagged to a TFSA/RESP so its room
+  // recalculates. Offered for the two "money still went to investments" options.
+  const taggable = !inbound && (treatment === 'expense' || treatment === 'neutral') && review.registeredAccounts.length > 0
   const allocated = useMemo(() => allocations.filter((a) => a.goalId !== 0).reduce((s, a) => s + (a.amount || 0), 0), [allocations])
   const remainder = Math.round((review.amount - allocated) * 100) / 100
 
@@ -82,6 +86,7 @@ function ReviewRow({ review }: { review: PendingReview }) {
         reviewId: review.id,
         treatment,
         allocations: allocatable ? allocations.filter((a) => a.amount > 0 && a.goalId !== 0) : [],
+        registeredAccountId: taggable && registeredAccountId !== 0 ? registeredAccountId : null,
       })
       router.refresh()
     })
@@ -171,6 +176,25 @@ function ReviewRow({ review }: { review: PendingReview }) {
             </div>
           </div>
         ))}
+
+      {/* Registered account (TFSA/RESP) — recalculates contribution room/grant */}
+      {taggable && (
+        <div className="mb-3 flex items-center gap-2 rounded-lg bg-[var(--surface)] px-2.5 py-2">
+          <span className="text-xs text-[var(--muted)]">Registered account?</span>
+          <select
+            value={registeredAccountId}
+            onChange={(e) => setRegisteredAccountId(Number(e.target.value))}
+            className={`${SELECT_CLASS} min-w-0 flex-1`}
+          >
+            <option value={0}>— none / not registered —</option>
+            {review.registeredAccounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name} ({a.kind.toUpperCase()} · {a.ownerName})
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <div className="flex justify-end">
         <button

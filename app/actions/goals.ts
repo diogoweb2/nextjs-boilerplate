@@ -34,6 +34,7 @@ import {
 } from '@/app/lib/mortgage'
 import { pushConfigured, sendPushToAll } from '@/app/lib/push'
 import { formatCurrency } from '@/app/lib/format'
+import { recordTransferContribution, loadRegisteredAccountOptions } from '@/app/actions/investments'
 
 // Personal figures stay out of committed code (public repo). Configure in
 // .env.local; neutral fallbacks keep the build working without them.
@@ -402,6 +403,8 @@ export type PendingReview = {
   merchant: string
   suggestedGoalId: number | null
   goals: { id: number; name: string; emoji: string }[]
+  /** Registered accounts (TFSA/RESP) an outbound transfer can be tagged to. */
+  registeredAccounts: { id: number; name: string; kind: string; ownerName: string }[]
 }
 
 /** Pending transfer reviews for the dashboard prompt (+ savings-goal options). */
@@ -433,6 +436,8 @@ export async function loadPendingReviews(): Promise<PendingReview[]> {
     .where(and(eq(goals.kind, 'savings'), eq(goals.archived, false)))
     .orderBy(asc(goals.sortOrder), asc(goals.createdAt))
 
+  const accountOpts = await loadRegisteredAccountOptions()
+
   return rows.map((r) => ({
     id: r.id,
     transactionId: r.transactionId,
@@ -443,6 +448,7 @@ export async function loadPendingReviews(): Promise<PendingReview[]> {
     merchant: r.merchant,
     suggestedGoalId: r.suggestedGoalId,
     goals: goalOpts,
+    registeredAccounts: accountOpts,
   }))
 }
 
@@ -848,6 +854,10 @@ export async function resolveTransferReview(input: {
   reviewId: number
   treatment: 'expense' | 'neutral' | 'mortgage' | 'goal' | 'income' | 'ignore' | 'transfer' | 'dismiss'
   allocations?: ReviewAllocation[]
+  /** Outbound only: tag this transfer as a contribution to a TFSA/RESP account so
+   *  its contribution room / grant recalculates. A pure overlay — does not change
+   *  the transaction's flow or category. */
+  registeredAccountId?: number | null
 }): Promise<void> {
   await requireAuth()
   const [review] = await db.select().from(transferReviews).where(eq(transferReviews.id, input.reviewId)).limit(1)
@@ -915,6 +925,17 @@ export async function resolveTransferReview(input: {
     await db.update(transactions).set({ flow: 'expense', categoryId: investId }).where(eq(transactions.id, txn.id))
   }
   await allocateToGoals(input.allocations ?? [], txn, 1, 'From transfer')
+  // Tag the transfer to a registered account (TFSA/RESP) if chosen, so the
+  // contribution room / grant recalculates. Pure overlay — flow/category above
+  // are unchanged. Uses the transfer's absolute amount (outbound is stored +).
+  if (input.registeredAccountId && Number.isInteger(input.registeredAccountId)) {
+    await recordTransferContribution({
+      accountId: input.registeredAccountId,
+      transactionId: txn.id,
+      amount: Math.abs(Number(txn.amount)),
+      occurredAt: txn.txnDate,
+    })
+  }
   await resolve('resolved')
   revalidateGoals()
 }

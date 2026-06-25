@@ -886,3 +886,91 @@ applied these deterministic rules; recorded here so the membership is explainabl
 
 Run after pulling this change: `npm install` (adds `@vercel/blob`) and `npm run db:push` (adds
 `projects`, `project_transactions`).
+
+## 16. Investments (`/investments`)
+
+Tracks the owner's **registered brokerage accounts at iTrade** — a TFSA, a RESP, later a second
+TFSA (the partner's) — answering three questions a single institution never answers together:
+*how much is it worth (in CAD)?*, *how much TFSA room is left right now?*, and *how much free
+government grant is still on the table this year?* It is a **deterministic overlay** on the
+existing transfer/goal machinery — **no live prices, no trading feed, no AI**. Page
+`app/investments/page.tsx`, client UI `app/components/InvestmentsManager.tsx`, server
+actions/loaders `app/actions/investments.ts`, pure math in `app/lib/tfsa.ts`, `app/lib/resp.ts`,
+`app/lib/holdings.ts`, FX in `app/lib/fx.ts`.
+
+### Tables (`db/schema.ts`)
+- **`registered_accounts`** — `kind ∈ {tfsa, resp, rrsp, fhsa, nonreg}`, `name`, `owner ∈
+  {self, partner}` (default `self`, so a future partner account is distinct — display names from
+  `SELF_NAME`/`PARTNER_NAME`, never committed), `brokerageAccountNo` (the iTrade number from the
+  CSV filename), `currency`. TFSA carries a `roomBaselineAmount` + `roomBaselineDate`; RESP carries
+  `beneficiaryBirthYear`, `grantBaselineReceived`, `contributionBaseline`, `grantCarryForward`.
+- **`holding_snapshots`** — one CSV import per account at a point in time: `occurredAt`, the
+  `fxUsdCad` rate **used and stored** (so the CAD total stays reproducible), and a denormalized
+  `totalValueCad` (drives the value-over-time trend). `holding_positions` are its rows (symbol,
+  asset class, currency, quantity, book/market value native **and** in CAD, all-time change %/$).
+- **`registered_contributions`** — the ledger behind room/grant. `kind ∈ {contribution,
+  withdrawal}`, positive `amount`, `occurredAt`, and `transactionId` (**unique**) set when the row
+  came from tagging an imported transfer (idempotent), null for a manual entry.
+
+### Contribution room & grant are DERIVED, never stored
+Tagging a transfer instantly recalculates everything; the number is always at least as current as
+CRA's (which only updates after you file).
+- **TFSA** (`computeTfsaRoom`): `room = CRA baseline + Σ annual limits since the baseline year −
+  Σ contributions on/after the baseline date + withdrawals already returned`. The owner enters the
+  **CRA-confirmed "room as of Jan 1"** as the baseline (e.g. `$23,756 @ 2026-01-01`) so tagged
+  transfers never double-count prior years. Federal annual limits are a constant table
+  (`TFSA_ANNUAL_LIMITS`, 2009–2026; a future year falls back to the latest known and is flagged
+  *estimated*). Two CRA rules are enforced as warnings: **(1)** a withdrawal's room only returns on
+  **Jan 1 of the next year** (same-year withdrawals are surfaced as `withdrawalsPendingReturn`, not
+  added back); **(2)** re-contributing it the same year is an **over-contribution** (1%/month
+  penalty) unless there's other room. `room < 0` → over-contribution warning.
+- **RESP / CESG** (`computeRespGrant`): 20% match, **$500/yr** on the first $2,500 (up to
+  **$1,000/yr** with one year of carry-forward), **$7,200** lifetime grant, **$50,000** lifetime
+  contribution cap, grant paid through the year the child turns **17**. The headline output is the
+  actionable one — *"deposit $X more before Dec 31 to capture $Y in free CESG grant"*
+  (`roomToMaxGrantThisYear` / `freeGrantAvailableThisYear`). `grantBaselineReceived` /
+  `contributionBaseline` are the totals before tracking started (for the lifetime caps).
+
+### Holdings import (FX-normalized, deterministic value)
+Per account, the owner uploads the iTrade **portfolio CSV** (`parseHoldings`, header `Security
+name,Symbol,…,Market value ($)` — distinct from the transaction statements in `app/lib/csv.ts`).
+**USD positions** (e.g. QQQ, KWEB) are converted to CAD with a single **USD→CAD rate**: an explicit
+override wins, else the **live Bank of Canada Valet rate** (`fetchUsdCadRate`, key-less, cached 1h),
+else the previous snapshot's rate, else 1 — and the rate is **stored on the snapshot**. So summing
+a mixed-currency portfolio is always a correct single CAD figure, and historical snapshots never
+drift. An FX fetch failure never blocks an import.
+
+### Contributions come from tagging transfers (the loop-closer)
+The existing dashboard **transfer-review** (§10) already queues every Scotia→iTrade transfer (the
+recurring $900 and lump sums). It now also asks **"which registered account?"** on the outbound
+"counts as investment" treatments; choosing TFSA/RESP writes a `registered_contributions` row via
+`recordTransferContribution` (`resolveTransferReview` `registeredAccountId`). This is a **pure
+overlay** — it never changes the transaction's `flow`/category, so spend analytics, the Goals
+system and the 50/30/20 savings bucket are untouched; it only feeds the room/grant math. Manual
+contributions (for deposits the bank import missed) can be added on the account's Contributions tab.
+
+### Monthly holdings auto-sync (iTrade)
+A **monthly** launchd job (`sync/run-itrade.{ts,sh}`, `com.budget.sync.itrade.plist`, the **25th**
+at 11:30) downloads each account's iTrade portfolio CSV and refreshes its holdings snapshot — the
+holdings analogue of the daily transaction syncs (AUTO_SYNC_PLAN.md). It **reuses the Scotia login**
+(same adapter + Keychain creds + device trust, its own browser profile `itrade`), then for each
+account opens its iTrade overview page, clicks **Download CSV**, and POSTs the export to the
+token-authed **`/api/ingest-holdings?account=<brokerage#>`** → `ingestHoldings` (the same parse/FX/
+snapshot path as the manual upload). The account list — **URLs are account-identifying, so NOT
+committed** — lives in `sync/itrade.accounts.json` (gitignored; template
+`sync/itrade.accounts.example.json`). Failure handling matches the other syncs **at the runner
+level** — a macOS notification, a failure screenshot, and the wrapper's 4× retry — but it is
+deliberately **not** wired into the dashboard's daily-staleness banner (the 3-day threshold would
+false-alarm a once-a-month job). Holdings move slowly, so monthly is enough; re-running adds a fresh
+snapshot (the value-over-time trend), it does not dedup like transactions. **The deployed app must
+have this code + `INGEST_TOKEN` for the sync to ingest in prod (deploy required).**
+
+### Privacy / demo
+`owner` and display names keep real names out of the repo (env only). `*.csv` and
+`sync/itrade.accounts.json` are gitignored, so the brokerage exports and account URLs never land in
+git. `loadInvestmentsData` branches on `isDemoSession()` to `demoInvestmentsData()` (a synthetic
+TFSA + RESP run through the same pure engines); every mutation calls `requireAuth`, so demo is
+read-only.
+
+Run after pulling this change: `npm run db:push` (adds `registered_accounts`, `holding_snapshots`,
+`holding_positions`, `registered_contributions`).

@@ -37,6 +37,9 @@ yarn-error.log*
 *.csv
 *.dump
 
+# iTrade holdings-sync config (contains account-identifying URLs) — never commit
+sync/itrade.accounts.json
+
 # vercel
 .vercel
 

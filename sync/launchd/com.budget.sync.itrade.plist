@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.budget.sync.itrade</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/diogolopes/dev/budget/nextjs-boilerplate/sync/run-itrade.sh</string>
+  </array>
+
+  <!-- Once a MONTH: the 25th at 11:30 (well after the daily chequing syncs at
+       ~10:00–10:17, so the headed browser runs don't fight over the GUI session).
+       Holdings move slowly, so monthly is plenty. If the Mac is OFF on the 25th
+       the run is skipped (no catch-up); if ASLEEP, launchd runs it on next wake. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Day</key><integer>25</integer>
+    <key>Hour</key><integer>11</integer>
+    <key>Minute</key><integer>30</integer>
+  </dict>
+
+  <!-- Don't run on load/login, only on the schedule. -->
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/diogolopes/Library/Application Support/budget-sync/logs/itrade.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/diogolopes/Library/Application Support/budget-sync/logs/itrade.log</string>
+</dict>
+</plist>

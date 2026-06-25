@@ -536,6 +536,128 @@ export const projectTransactions = pgTable(
   ]
 )
 
+/**
+ * Investments feature (the /investments page). Registered brokerage accounts the
+ * owner holds at iTrade — a TFSA, a RESP, later a second TFSA (the partner's).
+ * This is a deterministic OVERLAY on the existing transfer/goal machinery, not a
+ * trading tracker: contribution room & RESP grant are DERIVED from a ledger of
+ * contributions (the Scotia→iTrade transfers the owner tags) plus a CRA baseline;
+ * holdings are periodic CSV snapshots valued in CAD (USD positions converted by a
+ * Bank-of-Canada rate stored on the snapshot). No live prices, no AI. See
+ * BUSINESS_RULES.md §16. `owner` defaults to 'self' so a future partner account
+ * is distinct.
+ */
+export const registeredAccounts = pgTable('registered_accounts', {
+  id: serial('id').primaryKey(),
+  // Plan type — drives which rule engine applies (TFSA room vs RESP grant).
+  kind: text('kind', { enum: ['tfsa', 'resp', 'rrsp', 'fhsa', 'nonreg'] }).notNull(),
+  name: text('name').notNull(),
+  // Whose account it is — 'self' (default) or 'partner', so a second TFSA later
+  // is tracked separately. Never a real name (privacy; display name from env).
+  owner: text('owner', { enum: ['self', 'partner'] }).notNull().default('self'),
+  // The iTrade account number from the holdings-CSV filename, to match an upload
+  // to its account. Null for a manually-created account with no CSV yet.
+  brokerageAccountNo: text('brokerage_account_no'),
+  currency: text('currency').notNull().default('CAD'),
+  // TFSA: the CRA-confirmed contribution room as of roomBaselineDate (a Jan 1).
+  // Room is then DERIVED = baseline + future annual limits − net contributions
+  // since the baseline (see app/lib/tfsa.ts), so tagging a transfer recalcs it.
+  roomBaselineAmount: numeric('room_baseline_amount', { precision: 12, scale: 2 }),
+  roomBaselineDate: date('room_baseline_date'),
+  // RESP: beneficiary birth year (grant deadline = end of year they turn 17),
+  // lifetime CESG grant already received before tracking, lifetime contributions
+  // before tracking (for the $50k cap), and unused CESG carry-forward room now.
+  beneficiaryBirthYear: integer('beneficiary_birth_year'),
+  grantBaselineReceived: numeric('grant_baseline_received', { precision: 10, scale: 2 }),
+  contributionBaseline: numeric('contribution_baseline', { precision: 12, scale: 2 }),
+  grantCarryForward: numeric('grant_carry_forward', { precision: 10, scale: 2 }),
+  sortOrder: integer('sort_order').notNull().default(0),
+  archived: boolean('archived').notNull().default(false),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+
+/**
+ * One holdings snapshot = one CSV import for an account at a point in time. The
+ * positions live in holding_positions; this header stores the FX rate used and a
+ * denormalized CAD total (for the value-over-time trend). fxUsdCad = 1 for an
+ * all-CAD account. The rate is fetched from the Bank of Canada on import and
+ * stored here so the snapshot's CAD total stays reproducible forever.
+ */
+export const holdingSnapshots = pgTable(
+  'holding_snapshots',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => registeredAccounts.id, { onDelete: 'cascade' }),
+    occurredAt: date('occurred_at').notNull(),
+    fxUsdCad: numeric('fx_usd_cad', { precision: 10, scale: 5 }).notNull().default('1'),
+    totalValueCad: numeric('total_value_cad', { precision: 14, scale: 2 }).notNull().default('0'),
+    note: text('note'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => [index('holding_snapshots_account_idx').on(t.accountId)]
+)
+
+/** One position within a holdings snapshot (a row of the iTrade portfolio CSV). */
+export const holdingPositions = pgTable(
+  'holding_positions',
+  {
+    id: serial('id').primaryKey(),
+    snapshotId: integer('snapshot_id')
+      .notNull()
+      .references(() => holdingSnapshots.id, { onDelete: 'cascade' }),
+    symbol: text('symbol').notNull(),
+    name: text('name'),
+    assetClass: text('asset_class'),
+    currency: text('currency').notNull().default('CAD'),
+    quantity: numeric('quantity', { precision: 16, scale: 4 }),
+    avgCost: numeric('avg_cost', { precision: 14, scale: 4 }),
+    marketPrice: numeric('market_price', { precision: 14, scale: 4 }),
+    bookValue: numeric('book_value', { precision: 14, scale: 2 }),
+    // Market value in the position's own currency, and converted to CAD.
+    marketValue: numeric('market_value', { precision: 14, scale: 2 }),
+    marketValueCad: numeric('market_value_cad', { precision: 14, scale: 2 }),
+    changePct: numeric('change_pct', { precision: 10, scale: 2 }),
+    changeAmount: numeric('change_amount', { precision: 14, scale: 2 }),
+  },
+  (t) => [index('holding_positions_snapshot_idx').on(t.snapshotId)]
+)
+
+/**
+ * The contribution ledger behind an account's TFSA room / RESP grant. A
+ * 'contribution' is money in (counts against TFSA room, earns RESP grant); a
+ * 'withdrawal' is money out (TFSA: the room returns on Jan 1 of the NEXT year).
+ * `transactionId` is set when the row came from tagging an imported Scotia→iTrade
+ * transfer (unique, so a transfer is counted once); null for a manual entry.
+ * `amount` is always stored positive; `kind` carries the direction.
+ */
+export const registeredContributions = pgTable(
+  'registered_contributions',
+  {
+    id: serial('id').primaryKey(),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => registeredAccounts.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: ['contribution', 'withdrawal'] })
+      .notNull()
+      .default('contribution'),
+    amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
+    occurredAt: date('occurred_at').notNull(),
+    transactionId: integer('transaction_id').references(() => transactions.id, {
+      onDelete: 'set null',
+    }),
+    note: text('note'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => [
+    index('registered_contributions_account_idx').on(t.accountId),
+    // A given transfer can back at most one contribution row (multiple NULLs are
+    // allowed by Postgres, so manual entries are unconstrained).
+    uniqueIndex('registered_contributions_txn_idx').on(t.transactionId),
+  ]
+)
+
 export const categoriesRelations = relations(categories, ({ many }) => ({
   merchants: many(merchants),
   transactions: many(transactions),
@@ -598,6 +720,33 @@ export const goalEntriesRelations = relations(goalEntries, ({ one }) => ({
   }),
 }))
 
+export const registeredAccountsRelations = relations(registeredAccounts, ({ many }) => ({
+  snapshots: many(holdingSnapshots),
+  contributions: many(registeredContributions),
+}))
+
+export const holdingSnapshotsRelations = relations(holdingSnapshots, ({ one, many }) => ({
+  account: one(registeredAccounts, {
+    fields: [holdingSnapshots.accountId],
+    references: [registeredAccounts.id],
+  }),
+  positions: many(holdingPositions),
+}))
+
+export const holdingPositionsRelations = relations(holdingPositions, ({ one }) => ({
+  snapshot: one(holdingSnapshots, {
+    fields: [holdingPositions.snapshotId],
+    references: [holdingSnapshots.id],
+  }),
+}))
+
+export const registeredContributionsRelations = relations(registeredContributions, ({ one }) => ({
+  account: one(registeredAccounts, {
+    fields: [registeredContributions.accountId],
+    references: [registeredAccounts.id],
+  }),
+}))
+
 export type Category = typeof categories.$inferSelect
 export type Merchant = typeof merchants.$inferSelect
 export type MerchantRule = typeof merchantRules.$inferSelect
@@ -618,3 +767,8 @@ export type RunwaySnapshot = typeof runwaySnapshots.$inferSelect
 export type Project = typeof projects.$inferSelect
 export type ProjectTransaction = typeof projectTransactions.$inferSelect
 export type AutoFill = 'self' | 'partner' | 'both'
+export type RegisteredAccount = typeof registeredAccounts.$inferSelect
+export type HoldingSnapshot = typeof holdingSnapshots.$inferSelect
+export type HoldingPosition = typeof holdingPositions.$inferSelect
+export type RegisteredContribution = typeof registeredContributions.$inferSelect
+export type RegisteredKind = 'tfsa' | 'resp' | 'rrsp' | 'fhsa' | 'nonreg'

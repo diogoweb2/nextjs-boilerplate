@@ -169,6 +169,9 @@ async function isMfaChallenge(page: Page): Promise<boolean> {
  * The route lands on the Transactions page with the "Statements" tab active by
  * default, so we first click the "Download Transactions" tab (rendered as an <a>
  * link, not a button) to reveal the format dropdown.
+ *
+ * We also switch the transaction-range radio from its short recent-window default
+ * to "Get transactions within a date range", which returns more rows per run.
  */
 async function exportCsv(page: Page, _range: DateRange): Promise<string> {
   // Navigate WITHIN the SPA via a hashchange. A hard page.goto() reloads the app,
@@ -209,6 +212,21 @@ async function exportCsv(page: Page, _range: DateRange): Promise<string> {
     const firstAccount = page.getByRole('option').first()
     await firstAccount.waitFor({ state: 'visible', timeout: 10_000 })
     await firstAccount.click()
+  }
+
+  // Transaction range — default is a short recent window; switch to "Get
+  // transactions within a date range", which pulls a wider set (more rows). The
+  // radio's real <input> is visually hidden by Material, so we click the <label>
+  // (linked via `for`) the way a human would, and only when it isn't already on.
+  const rangeRadio = page.locator('#getAllFromDateRange-input')
+  if ((await rangeRadio.isChecked().catch(() => false)) === false) {
+    await page.locator('label[for="getAllFromDateRange-input"]').click()
+    // Confirm the selection registered before moving on, so a silent miss fails
+    // loudly instead of quietly downloading the short default window.
+    await rangeRadio.waitFor({ state: 'attached', timeout: 10_000 })
+    if (!(await rangeRadio.isChecked().catch(() => false))) {
+      throw new Error('Could not select the "date range" transaction option on the Tangerine download form.')
+    }
   }
 
   // Download format — choose CSV if not already set.

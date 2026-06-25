@@ -63,6 +63,7 @@ export function TransactionsTable({
   const [hideSpecial, setHideSpecial] = useState(false)
   const [recurringOnly, setRecurringOnly] = useState(false)
   const [personFilter, setPersonFilter] = useState<string>('')
+  const [sourceFilter, setSourceFilter] = useState<string>('')
   const [sortBy, setSortBy] = useState<'date' | 'amount'>(
     initialCategoryFilter === 'uncategorized' ? 'amount' : 'date'
   )
@@ -96,6 +97,11 @@ export function TransactionsTable({
     [transactions]
   )
 
+  const sources = useMemo(
+    () => [...new Set(transactions.map((t) => t.source))].sort(),
+    [transactions]
+  )
+
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase()
     return transactions
@@ -104,6 +110,7 @@ export function TransactionsTable({
         if (hideSpecial && t.isSpecial) return false
         if (recurringOnly && !t.isRecurring) return false
         if (personFilter && t.person !== personFilter) return false
+        if (sourceFilter && t.source !== sourceFilter) return false
         if (categoryFilter === 'uncategorized') {
           if (t.categoryId !== null) return false
         } else if (categoryFilter && String(t.categoryId ?? '') !== categoryFilter) {
@@ -118,7 +125,7 @@ export function TransactionsTable({
           ? Math.abs(b.amount) - Math.abs(a.amount)
           : a.txnDate < b.txnDate ? 1 : -1
       )
-  }, [transactions, query, categoryFilter, hidePayments, hideSpecial, recurringOnly, personFilter, sortBy])
+  }, [transactions, query, categoryFilter, hidePayments, hideSpecial, recurringOnly, personFilter, sourceFilter, sortBy])
 
   const total = rows.filter((r) => !r.isPayment).reduce((s, r) => s + r.amount, 0)
 
@@ -150,6 +157,20 @@ export function TransactionsTable({
               </option>
             ))}
           </select>
+          {sources.length > 1 && (
+            <select
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value)}
+              className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm capitalize"
+            >
+              <option value="">All banks/cards</option>
+              {sources.map((s) => (
+                <option key={s} value={s} className="capitalize">
+                  {s}
+                </option>
+              ))}
+            </select>
+          )}
           <FilterChip active={hidePayments} onClick={() => setHidePayments((v) => !v)}>
             Hide payments
           </FilterChip>
