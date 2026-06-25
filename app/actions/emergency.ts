@@ -109,6 +109,8 @@ async function loadTfsaFundSnapshots(): Promise<{
     .select({
       occurredAt: holdingSnapshots.occurredAt,
       createdAt: holdingSnapshots.createdAt,
+      snapshotId: holdingSnapshots.id,
+      accountId: holdingSnapshots.accountId,
       assetClass: holdingPositions.assetClass,
       mvCad: holdingPositions.marketValueCad,
     })
@@ -118,8 +120,21 @@ async function loadTfsaFundSnapshots(): Promise<{
     .where(and(eq(registeredAccounts.kind, 'tfsa'), eq(registeredAccounts.archived, false)))
     .orderBy(asc(holdingSnapshots.occurredAt))
 
+  // Re-importing the same file creates a new snapshot row each time. Pick the latest
+  // snapshot per account per date so duplicate imports don't double-count positions.
+  const latestSnapPerAccountDate = new Map<string, { snapshotId: number; createdAt: Date }>()
+  for (const r of rows) {
+    const key = `${r.accountId}:${r.occurredAt}`
+    const cur = latestSnapPerAccountDate.get(key)
+    if (!cur || r.createdAt > cur.createdAt) {
+      latestSnapPerAccountDate.set(key, { snapshotId: r.snapshotId, createdAt: r.createdAt })
+    }
+  }
+  const latestSnapIds = new Set([...latestSnapPerAccountDate.values()].map((v) => v.snapshotId))
+
   const byDate = new Map<string, { whole: number; cash: number; createdAt: string }>()
   for (const r of rows) {
+    if (!latestSnapIds.has(r.snapshotId)) continue
     const iso = r.createdAt.toISOString()
     const cur = byDate.get(r.occurredAt) ?? { whole: 0, cash: 0, createdAt: iso }
     const v = Number(r.mvCad ?? 0)
