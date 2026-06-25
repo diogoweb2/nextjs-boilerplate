@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { asc, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq } from 'drizzle-orm'
 import { db } from '@/db'
 import {
   registeredAccounts,
@@ -234,6 +234,58 @@ export async function loadRegisteredAccountOptions(): Promise<
     kind: a.kind,
     ownerName: a.owner === 'partner' ? PARTNER_NAME : SELF_NAME,
   }))
+}
+
+export type TfsaRoomSummary = {
+  hasTfsa: boolean
+  roomLeft: number
+  contributedThisYear: number
+  overContributed: boolean
+}
+
+/** Aggregate TFSA contribution room across all TFSA accounts — for the Budget
+ *  page nudge. Sums room/this-year contributions; over if any account is over. */
+export async function loadTfsaRoomSummary(): Promise<TfsaRoomSummary> {
+  const empty: TfsaRoomSummary = { hasTfsa: false, roomLeft: 0, contributedThisYear: 0, overContributed: false }
+  if (await isDemoSession()) {
+    const { demoInvestmentsData } = await import('@/app/lib/demo-data')
+    const tfsas = demoInvestmentsData().accounts.filter((a) => a.tfsa)
+    if (tfsas.length === 0) return empty
+    return {
+      hasTfsa: true,
+      roomLeft: round2(tfsas.reduce((s, a) => s + (a.tfsa?.room ?? 0), 0)),
+      contributedThisYear: round2(tfsas.reduce((s, a) => s + (a.tfsa?.contributionsThisYear ?? 0), 0)),
+      overContributed: tfsas.some((a) => a.tfsa?.overContributed),
+    }
+  }
+
+  const accounts = await db
+    .select()
+    .from(registeredAccounts)
+    .where(and(eq(registeredAccounts.kind, 'tfsa'), eq(registeredAccounts.archived, false)))
+  const withBaseline = accounts.filter((a) => a.roomBaselineAmount != null && a.roomBaselineDate)
+  if (withBaseline.length === 0) return empty
+
+  const asOf = todayIso()
+  let roomLeft = 0
+  let contributedThisYear = 0
+  let overContributed = false
+  for (const a of withBaseline) {
+    const contribRows = await db
+      .select()
+      .from(registeredContributions)
+      .where(eq(registeredContributions.accountId, a.id))
+    const entries: RegisteredEntry[] = contribRows.map((c) => ({
+      kind: c.kind,
+      amount: Number(c.amount),
+      occurredAt: c.occurredAt,
+    }))
+    const room = computeTfsaRoom(Number(a.roomBaselineAmount), a.roomBaselineDate!, entries, asOf)
+    roomLeft += room.room
+    contributedThisYear += room.contributionsThisYear
+    if (room.overContributed) overContributed = true
+  }
+  return { hasTfsa: true, roomLeft: round2(roomLeft), contributedThisYear: round2(contributedThisYear), overContributed }
 }
 
 // ---------------------------------------------------------------------------

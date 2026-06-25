@@ -6,6 +6,8 @@ import { loadAllFlows } from '@/app/lib/analytics'
 import { computeBudget, type CategoryMeta } from '@/app/lib/budget'
 import { getBudgetSettings } from '@/app/actions/budget'
 import { loadProjectionRules } from '@/app/actions/projection'
+import { loadTfsaRoomSummary } from '@/app/actions/investments'
+import { formatCurrency } from '@/app/lib/format'
 import { isDemoSession } from '@/app/lib/demo'
 
 export const dynamic = 'force-dynamic'
@@ -25,6 +27,8 @@ export default async function BudgetPage() {
         loadProjectionRules(),
       ])
 
+  const tfsa = await loadTfsaRoomSummary()
+
   const meta: CategoryMeta[] = catRows.map((c) => ({ id: c.id, name: c.name, color: c.color, kind: c.kind }))
   const savedGoals = new Map(goalRows.map((g) => [g.categoryId, Number(g.goalAmount)]))
   const data = computeBudget(all, meta, {
@@ -43,6 +47,26 @@ export default async function BudgetPage() {
           How much can I spend this month — excluding unavoidable bills — to finish the year net 0?
         </p>
       </div>
+
+      {tfsa.hasTfsa && (
+        <a
+          href="/investments"
+          className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3 transition-colors hover:border-[var(--accent)]"
+        >
+          <div>
+            <p className="text-xs text-[var(--muted)]">
+              {tfsa.overContributed ? '⚠️ TFSA over-contributed' : 'TFSA room left to invest'}
+            </p>
+            <p className={`text-lg font-bold tabular-nums ${tfsa.overContributed ? 'text-[var(--negative)]' : ''}`}>
+              {formatCurrency(tfsa.roomLeft)}
+            </p>
+          </div>
+          <span className="text-right text-xs text-[var(--muted)]">
+            {formatCurrency(tfsa.contributedThisYear)} contributed this year
+            <span className="ml-1 text-[var(--accent)]">→</span>
+          </span>
+        </a>
+      )}
 
       {!data.hasData ? (
         <Card>

@@ -658,6 +658,23 @@ export const registeredContributions = pgTable(
   ]
 )
 
+/**
+ * Singleton config for the Emergency Fund's TFSA line (§12/§16). `tfsaMode`
+ * chooses how much of the TFSA counts as emergency-accessible cash:
+ *  - 'cash_equivalent' (default) — only the cash-equivalent holdings (money-market
+ *    ETFs), a stable reserve that doesn't swing with the equity markets.
+ *  - 'whole' — the full TFSA market value.
+ * When the TFSA holds NO cash-equivalent position, the toggle is force-disabled in
+ * the UI (there's no stable sleeve to isolate) and the whole TFSA is used.
+ */
+export const emergencyConfig = pgTable('emergency_config', {
+  id: serial('id').primaryKey(),
+  tfsaMode: text('tfsa_mode', { enum: ['cash_equivalent', 'whole'] })
+    .notNull()
+    .default('cash_equivalent'),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+})
+
 export const categoriesRelations = relations(categories, ({ many }) => ({
   merchants: many(merchants),
   transactions: many(transactions),
@@ -772,3 +789,5 @@ export type HoldingSnapshot = typeof holdingSnapshots.$inferSelect
 export type HoldingPosition = typeof holdingPositions.$inferSelect
 export type RegisteredContribution = typeof registeredContributions.$inferSelect
 export type RegisteredKind = 'tfsa' | 'resp' | 'rrsp' | 'fhsa' | 'nonreg'
+export type EmergencyConfig = typeof emergencyConfig.$inferSelect
+export type TfsaEmergencyMode = 'cash_equivalent' | 'whole'

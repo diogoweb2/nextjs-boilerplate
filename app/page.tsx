@@ -32,6 +32,9 @@ import {
   recordAndLoadRunwayHistory,
 } from '@/app/actions/emergency'
 import { loadCashflowPlan } from '@/app/actions/cashflow'
+import { loadNetWorth } from '@/app/actions/networth'
+import { LineChart } from '@/app/components/charts/LineChart'
+import { addMonths, monthsBetween } from '@/app/lib/mortgage'
 import { computeMonthBurndown, computePeriodBurndown, type BurndownData } from '@/app/lib/projection'
 import { getBudgetSettings } from '@/app/actions/budget'
 import { loadProjectionRules } from '@/app/actions/projection'
@@ -53,9 +56,10 @@ export default async function Home({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const rawParams = await searchParams
-  const { months: parsedMonths, excludeSpecial, month, current: currentParam } = parsePeriodParams(rawParams)
+  const { months: parsedMonths, excludeSpecial, month, current: currentParam, all: allParam } = parsePeriodParams(rawParams)
   const rawPeriod = Array.isArray(rawParams.period) ? rawParams.period[0] : rawParams.period
   const ytd = rawPeriod === 'year'
+  const allTime = allParam
   // Default to "Current" (the in-progress month) when nothing is chosen.
   const current = currentParam || (!rawParams.period && !rawParams.month && !rawParams.months)
 
@@ -129,13 +133,36 @@ export default async function Home({
   const all = allFlows.filter((t) => t.flow === 'expense')
 
   const anchor = anchorMonth(all)
-  // YTD = January of the anchor year through the anchor month (inclusive).
-  const months = ytd && anchor ? Number(anchor.slice(5, 7)) : parsedMonths
+  const months_available = availableMonths(all)
+  const earliestYm = months_available[0] ?? null
+  // "All" = every month of history; YTD = Jan of the anchor year → anchor.
+  const months =
+    allTime && anchor && earliestYm
+      ? monthsBetween(earliestYm, anchor) + 1
+      : ytd && anchor
+        ? Number(anchor.slice(5, 7))
+        : parsedMonths
   // "Current" scopes the page to the anchor month (like picking that exact month).
   const exactMonth = month ?? (current ? anchor : null)
   const ov = buildOverview(all, months, excludeSpecial, exactMonth)
   if (ytd) ov.periodLabel = 'Year to date'
-  const months_available = availableMonths(all)
+  if (allTime) ov.periodLabel = 'All time'
+
+  // Months (ascending) for the net-worth trend — respects the selected period.
+  const ymRange = (start: string, end: string): string[] => {
+    const out: string[] = []
+    for (let ym = start; monthsBetween(ym, end) >= 0; ym = addMonths(ym, 1)) out.push(ym)
+    return out
+  }
+  const netWorthMonths =
+    !anchor
+      ? []
+      : exactMonth
+        ? [exactMonth]
+        : current
+          ? [anchor]
+          : ymRange(addMonths(anchor, -(months - 1)), anchor)
+  const netWorth = await loadNetWorth(netWorthMonths)
   const insights = buildInsights(all, months, excludeSpecial, exactMonth)
 
   // Spending direction subtext for the Total-spend tile (same-period compare).
@@ -266,6 +293,7 @@ export default async function Home({
             showCurrent
             availableMonths={months_available}
             leadingExtraOptions={[{ label: 'YTD', period: 'year' }]}
+            extraOptions={[{ label: 'All', period: 'all' }]}
           />
         </div>
       </div>
@@ -318,6 +346,37 @@ export default async function Home({
         </Card>
       ) : (
         <div className="flex flex-col gap-5">
+          {/* Net worth — chequing + investments (TFSA/RESP) − mortgage owed */}
+          {netWorth.hasData && (
+            <Card
+              title="Net worth"
+              action={
+                <a href="/investments" className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]">
+                  investments →
+                </a>
+              }
+            >
+              <div className="flex flex-wrap items-end justify-between gap-2">
+                <div>
+                  <p className="text-3xl font-bold tabular-nums">{formatCurrency(netWorth.netWorth)}</p>
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    Chequing {formatCurrencyCompact(netWorth.assets.chequing)} + Investments{' '}
+                    {formatCurrencyCompact(netWorth.assets.investments)} − Mortgage{' '}
+                    {formatCurrencyCompact(netWorth.liabilities.mortgage)}
+                  </p>
+                </div>
+              </div>
+              {netWorth.series.length > 1 && (
+                <div className="mt-4">
+                  <LineChart
+                    labels={netWorth.series.map((p) => p.ym)}
+                    series={[{ color: '#10b981', values: netWorth.series.map((p) => p.value), name: 'Net worth' }]}
+                  />
+                </div>
+              )}
+            </Card>
+          )}
+
           {/* Total spend + per-category quick tiles — tap to see that category's transactions */}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatCard

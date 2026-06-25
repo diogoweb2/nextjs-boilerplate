@@ -13,6 +13,7 @@ import type { EnrichedTxn, ImportSource, Flow } from '@/app/lib/analytics'
 import type { ProjectionRule } from '@/app/lib/projection'
 import type { GoalView, PendingReview } from '@/app/actions/goals'
 import type { InvestmentsData, AccountView } from '@/app/actions/investments'
+import type { NetWorthData } from '@/app/actions/networth'
 import { computeTfsaRoom, type RegisteredEntry } from '@/app/lib/tfsa'
 import { computeRespGrant } from '@/app/lib/resp'
 import type { EmergencyFundData } from '@/app/actions/emergency'
@@ -768,10 +769,34 @@ export function demoEmergencyFund(): EmergencyFundData {
     accounts: [
       { source: 'tangerine', label: 'Tangerine', balance: chequing - scotia, since },
       { source: 'scotia', label: 'Scotia', balance: scotia, since },
-      { source: 'investment', label: 'Low-risk investment', balance: investment, since },
+      { source: 'investment', label: 'TFSA (iTrade)', balance: investment, since },
     ],
     series: seriesWithInv,
     asOfYm: ANCHOR_YM,
+    tfsaMode: 'cash_equivalent' as const,
+    effectiveTfsaMode: 'cash_equivalent' as const,
+    tfsaModeDisabled: false,
+    tfsaModeReason: null,
+  }
+}
+
+export function demoNetWorth(months: string[]): NetWorthData {
+  const investments = demoInvestmentsData().totalValueCad
+  const chequing = 24000
+  const mortgage = 150000
+  const netWorth = Math.round((chequing + investments - mortgage) * 100) / 100
+  const n = Math.max(1, months.length)
+  // A gently rising trend (mortgage paid down, investments grow).
+  const series = months.map((ym, i) => ({
+    ym,
+    value: Math.round(netWorth * (0.82 + (0.18 * (i + 1)) / n)),
+  }))
+  return {
+    hasData: true,
+    netWorth,
+    assets: { chequing, investments },
+    liabilities: { mortgage },
+    series,
   }
 }
 

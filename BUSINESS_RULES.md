@@ -694,10 +694,22 @@ mortgage uses. Sources are listed in `ACCOUNT_SOURCES` with an `autoTracked` fla
   correction you type *after* a transfer is already imported does **not** double-subtract it. Both
   `transactions` and `account_snapshots` carry `createdAt`; ties on the same day pick the latest-
   recorded snapshot as the base.
-- **Manual `investment` source:** a low-risk holding the system can't see in any CSV
-  (`autoTracked: false`). It has **no bank flows**, so `balanceAsOf` naturally returns just its last
-  snapshot — the owner updates it manually when it changes (same "update balance" control, tagged
-  *manual* in the UI). No special-casing in the math; `loadBankFlows` only queries the two banks.
+- **`investment` source — now DERIVED from the TFSA holdings (§16):** the line is no longer a manual
+  number. `loadEmergencyFund` synthesizes `investment` balance snapshots from the TFSA
+  `holding_snapshots` (one per snapshot date, summed across TFSA accounts via
+  `loadTfsaInvestmentSnapshots`), so it equals the **total TFSA** market value and auto-updates with
+  each monthly holdings sync. It's flagged `derived: true` (no manual "update balance" control), and
+  `recordBalance` rejects manual `investment` writes. The **RESP is excluded** (locked for
+  education). `loadBankFlows` still only queries the two chequing banks, so the TFSA line has no
+  flows — just its latest derived snapshot. (Historically this was a manual "low-risk investment"
+  number, but that was double-tracking the TFSA money-market holding.)
+  - **Cash-equivalent vs whole-TFSA toggle** (`emergency_config.tfsaMode`, default
+    **`cash_equivalent`**): the line can count either only the **cash-equivalent** holdings (asset
+    class matching `/cash/i`, e.g. the ZMMK money-market — a stable reserve that doesn't swing with
+    the equity markets) or the **whole** TFSA. Set via `setEmergencyTfsaMode`. If the TFSA holds
+    **no** cash-equivalent position, the toggle is **force-disabled** (there's no stable sleeve to
+    isolate) and the whole TFSA is used, with an in-card explanation (`tfsaModeDisabled` /
+    `tfsaModeReason`).
 - **Manual correction:** "Update balance" just inserts a newer absolute snapshot, which re-anchors
   and absorbs any drift (like `updateMortgageBalance`). No relevant interest is modelled (these are
   chequing accounts).
@@ -964,6 +976,23 @@ deliberately **not** wired into the dashboard's daily-staleness banner (the 3-da
 false-alarm a once-a-month job). Holdings move slowly, so monthly is enough; re-running adds a fresh
 snapshot (the value-over-time trend), it does not dedup like transactions. **The deployed app must
 have this code + `INGEST_TOKEN` for the sync to ingest in prod (deploy required).**
+
+### Cross-feature hooks (where Investments shows up elsewhere)
+The tab is a standalone lens, but it surfaces in two other places (both read-only derivations — no
+double-counting, since the underlying transfers are already an `Investment` expense via §10):
+- **Budget page nudge** — a "TFSA room left" banner linking to `/investments`
+  (`loadTfsaRoomSummary`, summed across TFSA accounts), so the planner shows how much registered
+  room is still open.
+- **Emergency Fund `investment` line (§12) is now DERIVED from the TFSA holdings** — the old manual
+  "low-risk investment" snapshot is gone; the line auto-tracks the TFSA (cash-equivalent reserve by
+  default, or whole — see §12 toggle) and refreshes with each monthly sync. The **RESP is excluded**
+  (locked for education). This flows into the dashboard runway (§13).
+- **Dashboard "Net worth" card** (`loadNetWorth`, `app/actions/networth.ts`) — chequing (Tangerine +
+  Scotia) + investments (full TFSA + RESP market value) − the mortgage balance still owed
+  (`loadMortgageProjection`). A read-only assembly (no double-counting); credit-card balances are
+  excluded (a within-month timing item). It has a small history line chart that **respects the
+  dashboard period** (the selector also gains an **"All"** option = `?period=all`, every month of
+  history → anchor; parsed in `app/lib/params.ts`).
 
 ### Privacy / demo
 `owner` and display names keep real names out of the repo (env only). `*.csv` and

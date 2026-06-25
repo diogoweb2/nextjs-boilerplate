@@ -18,13 +18,16 @@
  */
 
 /** Emergency-fund account sources. `tangerine`/`scotia` auto-track from imported
- *  bank flows; `investment` is manual-only (no CSV → no flows). */
+ *  bank flows (and accept manual corrections). `investment` is now DERIVED from
+ *  the TFSA holdings snapshots (a TFSA is fully withdrawable, so it's emergency-
+ *  accessible cash) — `derived` sources have no manual control. The RESP is
+ *  intentionally excluded (locked for the kids' education). See BUSINESS_RULES §12. */
 export type FundSource = 'tangerine' | 'scotia' | 'investment'
 
-export const ACCOUNT_SOURCES: { source: FundSource; label: string; autoTracked: boolean }[] = [
+export const ACCOUNT_SOURCES: { source: FundSource; label: string; autoTracked: boolean; derived?: boolean }[] = [
   { source: 'tangerine', label: 'Tangerine', autoTracked: true },
   { source: 'scotia', label: 'Scotia', autoTracked: true },
-  { source: 'investment', label: 'Low-risk investment', autoTracked: false },
+  { source: 'investment', label: 'TFSA (iTrade)', autoTracked: true, derived: true },
 ]
 
 // occurredAt is the balance date (YYYY-MM-DD); createdAt is the row's insert

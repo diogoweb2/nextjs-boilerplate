@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, EmptyHint } from '@/app/components/AppShell'
 import { LineChart } from '@/app/components/charts/LineChart'
-import { recordBalance, type EmergencyFundData } from '@/app/actions/emergency'
+import { recordBalance, setEmergencyTfsaMode, type EmergencyFundData } from '@/app/actions/emergency'
 import { ACCOUNT_SOURCES, type FundSource } from '@/app/lib/emergency'
 import { formatCurrency } from '@/app/lib/format'
 
@@ -25,6 +25,12 @@ export function EmergencyFund({ data }: { data: EmergencyFundData }) {
       router.refresh()
     })
 
+  const setMode = (mode: 'cash_equivalent' | 'whole') =>
+    startTransition(async () => {
+      await setEmergencyTfsaMode(mode)
+      router.refresh()
+    })
+
   const bySource = new Map(data.accounts.map((a) => [a.source, a]))
 
   return (
@@ -33,8 +39,8 @@ export function EmergencyFund({ data }: { data: EmergencyFundData }) {
         {!data.hasData && (
           <EmptyHint>
             Enter the current balance of each account below to start tracking your emergency fund.
-            The chequing accounts then update themselves from imported bank statements; the low-risk
-            investment is manual — update it whenever it changes.
+            The chequing accounts then update themselves from imported bank statements; the TFSA line
+            is tracked automatically from your iTrade holdings.
           </EmptyHint>
         )}
 
@@ -46,9 +52,9 @@ export function EmergencyFund({ data }: { data: EmergencyFundData }) {
         )}
 
         <div className="flex flex-col divide-y divide-[var(--border)]">
-          {ACCOUNT_SOURCES.map(({ source, label, autoTracked }) => {
+          {ACCOUNT_SOURCES.map(({ source, label, autoTracked, derived }) => {
             const acct = bySource.get(source)
-            const isEditing = editing === source || !acct
+            const isEditing = !derived && (editing === source || !acct)
             return (
               <div key={source} className="flex flex-wrap items-center justify-between gap-2 py-3">
                 <div className="min-w-0">
@@ -61,7 +67,9 @@ export function EmergencyFund({ data }: { data: EmergencyFundData }) {
                   {acct ? (
                     <span className="ml-2 tabular-nums">{formatCurrency(acct.balance)}</span>
                   ) : (
-                    <span className="ml-2 text-xs text-[var(--muted)]">not set up</span>
+                    <span className="ml-2 text-xs text-[var(--muted)]">
+                      {derived ? 'no TFSA holdings yet' : 'not set up'}
+                    </span>
                   )}
                   {acct && (
                     <span className="ml-2 text-xs text-[var(--muted)]">
@@ -69,7 +77,28 @@ export function EmergencyFund({ data }: { data: EmergencyFundData }) {
                     </span>
                   )}
                 </div>
-                {isEditing ? (
+                {derived ? (
+                  <div className="flex items-center gap-1" title={data.tfsaModeReason ?? undefined}>
+                    {(['cash_equivalent', 'whole'] as const).map((m) => {
+                      const active = data.effectiveTfsaMode === m
+                      return (
+                        <button
+                          key={m}
+                          disabled={data.tfsaModeDisabled || pending}
+                          onClick={() => setMode(m)}
+                          className={`rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
+                            active
+                              ? 'bg-[var(--accent)] text-[var(--accent-fg)]'
+                              : 'text-[var(--muted)] hover:text-[var(--foreground)]'
+                          } ${data.tfsaModeDisabled ? 'cursor-not-allowed opacity-60' : ''}`}
+                        >
+                          {data.tfsaModeDisabled && active ? '🔒 ' : ''}
+                          {m === 'cash_equivalent' ? 'Cash reserve' : 'Whole TFSA'}
+                        </button>
+                      )
+                    })}
+                  </div>
+                ) : isEditing ? (
                   <BalanceEditor
                     source={source}
                     onSave={save}
@@ -88,6 +117,12 @@ export function EmergencyFund({ data }: { data: EmergencyFundData }) {
             )
           })}
         </div>
+
+        {data.tfsaModeDisabled && data.tfsaModeReason && (
+          <p className="mt-2 rounded-lg bg-[var(--surface-2)] px-2.5 py-1.5 text-[11px] text-[var(--muted)]">
+            🔒 {data.tfsaModeReason}
+          </p>
+        )}
 
         {data.series.length > 1 && (
           <div className="mt-5 border-t border-[var(--border)] pt-4">

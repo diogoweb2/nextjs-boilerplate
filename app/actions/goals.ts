@@ -145,6 +145,33 @@ async function ensureMortgageGoal(): Promise<void> {
   }
 }
 
+/**
+ * Lean mortgage projection for the dashboard net-worth card (reuses the same
+ * inputs as loadGoalsData's mortgage goal). Returns null when no balance has been
+ * recorded yet. Not demo-guarded — the net-worth loader handles demo itself.
+ */
+export async function loadMortgageProjection(): Promise<MortgageProjection | null> {
+  await ensureMortgageGoal()
+  const [goal] = await db.select().from(goals).where(eq(goals.kind, 'mortgage')).limit(1)
+  if (!goal) return null
+  const entries = await db.select().from(goalEntries).where(eq(goalEntries.goalId, goal.id))
+  const snaps = entries
+    .filter((e) => e.kind === 'balance')
+    .map((e) => ({ ym: e.occurredAt.slice(0, 7), balance: Number(e.amount) }))
+    .sort((a, b) => (a.ym < b.ym ? -1 : 1))
+  if (snaps.length === 0) return null
+  const flows = await loadAllFlows()
+  const asOfYm = anchorMonth(flows.filter((t) => t.flow === 'expense')) ?? todayIso().slice(0, 7)
+  return projectMortgage({
+    birthDate: OWNER_BIRTHDATE,
+    payoffAge: PAYOFF_AGE,
+    annualRate: goal.annualRate === null ? DEFAULT_RATE : Number(goal.annualRate),
+    snapshots: snaps,
+    payments: mortgagePayments(flows),
+    asOfYm,
+  })
+}
+
 export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: string; suggestNetZero: boolean; monthStats: { thisMonth: number; lastMonth: number } }> {
   if (await isDemoSession()) {
     const { demoGoalsData } = await import('@/app/lib/demo-data')

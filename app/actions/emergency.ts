@@ -3,7 +3,16 @@
 import { revalidatePath } from 'next/cache'
 import { and, asc, eq, inArray, notLike } from 'drizzle-orm'
 import { db } from '@/db'
-import { accountSnapshots, runwaySnapshots, transactions } from '@/db/schema'
+import {
+  accountSnapshots,
+  runwaySnapshots,
+  transactions,
+  holdingSnapshots,
+  holdingPositions,
+  registeredAccounts,
+  emergencyConfig,
+  type TfsaEmergencyMode,
+} from '@/db/schema'
 import { requireAuth } from '@/app/lib/auth-guard'
 import { isDemoSession } from '@/app/lib/demo'
 import {
@@ -57,6 +66,9 @@ export async function loadBankFlows(): Promise<BankFlow[]> {
 }
 
 async function loadSnapshots(): Promise<BalanceSnapshot[]> {
+  // Only the chequing accounts come from manual snapshots now; the `investment`
+  // line is DERIVED from TFSA holdings (loadTfsaInvestmentSnapshots), so any old
+  // manual `investment` rows are ignored here.
   const rows = await db
     .select({
       source: accountSnapshots.source,
@@ -65,6 +77,7 @@ async function loadSnapshots(): Promise<BalanceSnapshot[]> {
       createdAt: accountSnapshots.createdAt,
     })
     .from(accountSnapshots)
+    .where(inArray(accountSnapshots.source, ['tangerine', 'scotia']))
     .orderBy(asc(accountSnapshots.occurredAt))
   return rows.map((r) => ({
     source: r.source as FundSource,
@@ -72,6 +85,77 @@ async function loadSnapshots(): Promise<BalanceSnapshot[]> {
     occurredAt: r.occurredAt,
     createdAt: r.createdAt.toISOString(),
   }))
+}
+
+/** A holding counts as a stable "cash-equivalent" reserve (money-market ETF, HISA
+ *  ETF, etc.) when its asset class mentions cash. */
+function isCashEquivalent(assetClass: string | null): boolean {
+  return /cash/i.test(assetClass ?? '')
+}
+
+/**
+ * TFSA holdings, summed per snapshot date across all TFSA accounts, split into the
+ * WHOLE value and the CASH-EQUIVALENT-only value. A TFSA is fully withdrawable, so
+ * it's emergency-accessible; the RESP is excluded (locked for education). The
+ * `investment` fund line is derived from one of these (per the chosen mode), and
+ * `hasCashNow` tells the UI whether a stable cash sleeve exists at all.
+ */
+async function loadTfsaFundSnapshots(): Promise<{
+  whole: BalanceSnapshot[]
+  cash: BalanceSnapshot[]
+  hasCashNow: boolean
+}> {
+  const rows = await db
+    .select({
+      occurredAt: holdingSnapshots.occurredAt,
+      createdAt: holdingSnapshots.createdAt,
+      assetClass: holdingPositions.assetClass,
+      mvCad: holdingPositions.marketValueCad,
+    })
+    .from(holdingPositions)
+    .innerJoin(holdingSnapshots, eq(holdingPositions.snapshotId, holdingSnapshots.id))
+    .innerJoin(registeredAccounts, eq(holdingSnapshots.accountId, registeredAccounts.id))
+    .where(and(eq(registeredAccounts.kind, 'tfsa'), eq(registeredAccounts.archived, false)))
+    .orderBy(asc(holdingSnapshots.occurredAt))
+
+  const byDate = new Map<string, { whole: number; cash: number; createdAt: string }>()
+  for (const r of rows) {
+    const iso = r.createdAt.toISOString()
+    const cur = byDate.get(r.occurredAt) ?? { whole: 0, cash: 0, createdAt: iso }
+    const v = Number(r.mvCad ?? 0)
+    cur.whole += v
+    if (isCashEquivalent(r.assetClass)) cur.cash += v
+    if (iso > cur.createdAt) cur.createdAt = iso
+    byDate.set(r.occurredAt, cur)
+  }
+  const dates = [...byDate.keys()].sort()
+  const latest = dates.at(-1)
+  const hasCashNow = latest ? (byDate.get(latest)!.cash > 0.005) : false
+
+  const toSnaps = (pick: (v: { whole: number; cash: number }) => number): BalanceSnapshot[] =>
+    [...byDate.entries()].map(([occurredAt, v]) => ({
+      source: 'investment' as FundSource,
+      balance: Math.round(pick(v) * 100) / 100,
+      occurredAt,
+      createdAt: v.createdAt,
+    }))
+  return { whole: toSnaps((v) => v.whole), cash: toSnaps((v) => v.cash), hasCashNow }
+}
+
+/** Read (or lazily create) the singleton emergency config. */
+export async function getEmergencyConfig(): Promise<{ tfsaMode: TfsaEmergencyMode }> {
+  const [row] = await db.select().from(emergencyConfig).limit(1)
+  return { tfsaMode: (row?.tfsaMode as TfsaEmergencyMode) ?? 'cash_equivalent' }
+}
+
+/** Switch the TFSA emergency-fund mode (cash-equivalent reserve vs whole TFSA). */
+export async function setEmergencyTfsaMode(mode: TfsaEmergencyMode): Promise<void> {
+  await requireAuth()
+  if (mode !== 'cash_equivalent' && mode !== 'whole') return
+  const [row] = await db.select({ id: emergencyConfig.id }).from(emergencyConfig).limit(1)
+  if (row) await db.update(emergencyConfig).set({ tfsaMode: mode, updatedAt: new Date() }).where(eq(emergencyConfig.id, row.id))
+  else await db.insert(emergencyConfig).values({ tfsaMode: mode })
+  revalidate()
 }
 
 /**
@@ -125,6 +209,14 @@ export type EmergencyFundData = {
   accounts: AccountBalance[]
   series: { ym: string; total: number }[]
   asOfYm: string
+  /** The owner's chosen TFSA mode (may be overridden by `tfsaModeDisabled`). */
+  tfsaMode: TfsaEmergencyMode
+  /** The mode actually applied (forced to 'whole' when no cash sleeve exists). */
+  effectiveTfsaMode: TfsaEmergencyMode
+  /** True when the toggle is locked (the TFSA has no cash-equivalent holding). */
+  tfsaModeDisabled: boolean
+  /** Why the toggle is locked (null when enabled). */
+  tfsaModeReason: string | null
 }
 
 export async function loadEmergencyFund(): Promise<EmergencyFundData> {
@@ -132,7 +224,17 @@ export async function loadEmergencyFund(): Promise<EmergencyFundData> {
     const { demoEmergencyFund } = await import('@/app/lib/demo-data')
     return demoEmergencyFund()
   }
-  const [snaps, flows] = await Promise.all([loadSnapshots(), loadBankFlows()])
+  const [bankSnaps, tfsa, flows, config] = await Promise.all([
+    loadSnapshots(),
+    loadTfsaFundSnapshots(),
+    loadBankFlows(),
+    getEmergencyConfig(),
+  ])
+  // No cash-equivalent holding → the stable-reserve option is meaningless, so
+  // lock the toggle and fall back to the whole TFSA.
+  const effectiveTfsaMode: TfsaEmergencyMode = tfsa.hasCashNow ? config.tfsaMode : 'whole'
+  const tfsaSnaps = effectiveTfsaMode === 'cash_equivalent' ? tfsa.cash : tfsa.whole
+  const snaps = [...bankSnaps, ...tfsaSnaps]
   const dates = [...flows.map((f) => f.txnDate), ...snaps.map((s) => s.occurredAt), todayIso()]
   const asOfYm = dates.reduce((max, d) => (d > max ? d : max), dates[0]).slice(0, 7)
   return {
@@ -141,6 +243,12 @@ export async function loadEmergencyFund(): Promise<EmergencyFundData> {
     accounts: accountBalances(snaps, flows),
     series: historySeries(snaps, flows, asOfYm),
     asOfYm,
+    tfsaMode: config.tfsaMode,
+    effectiveTfsaMode,
+    tfsaModeDisabled: !tfsa.hasCashNow,
+    tfsaModeReason: !tfsa.hasCashNow
+      ? 'Your TFSA has no cash-equivalent holding (e.g. a money-market ETF) right now, so there’s no stable reserve to isolate — showing the whole TFSA. Buy a cash/money-market ETF to track a stable reserve again.'
+      : null,
   }
 }
 
@@ -191,6 +299,8 @@ export async function recordBalance(input: {
 }): Promise<void> {
   await requireAuth()
   if (!SOURCES.includes(input.source)) return
+  // The `investment` line is derived from TFSA holdings now — not manually set.
+  if (input.source === 'investment') return
   const balance = Math.round(input.balance * 100) / 100
   if (!Number.isFinite(balance) || balance < 0) return
   await db.insert(accountSnapshots).values({
