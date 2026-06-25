@@ -16,7 +16,7 @@ import { importBatches, transactions, merchants, categories, budgetGoals, syncRu
 import { loadAllFlows, anchorMonth, type EnrichedTxn } from '@/app/lib/analytics'
 import { buildInsights } from '@/app/lib/insights'
 import { computeBudget, FIXED_CATEGORIES, type CategoryMeta } from '@/app/lib/budget'
-import { computeMonthBurndown, daysInMonth, pacePercent, type PaceLevel } from '@/app/lib/projection'
+import { computeMonthBurndown, daysInMonth, pacePercent, unavoidableMerchantIds, type PaceLevel } from '@/app/lib/projection'
 import { getBudgetSettings } from '@/app/actions/budget'
 import { loadProjectionRules } from '@/app/actions/projection'
 import { formatCurrency } from '@/app/lib/format'
@@ -25,6 +25,7 @@ import { SYNC_SOURCES, syncStale, mostRecentIso } from '@/app/lib/sync'
 const DAY_MS = 24 * 60 * 60 * 1000
 
 export type DigestSync = { source: string; label: string; lastSync: string | null; stale: boolean }
+export type DigestCharge = { merchant: string; amount: number; date: string }
 export type DigestSpend = {
   total: number
   count: number
@@ -54,6 +55,67 @@ export type Digest = {
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100
+}
+
+/**
+ * Discretionary charges to exclude from "new spend": the same fixed categories
+ * (Home) and projected-bill merchants the burndown curve skips, so "$X new"
+ * means new *discretionary* spend and lines up with the trajectory cards.
+ */
+export type SpendExclusion = { merchantIds: Set<number>; fixedCats: Set<string> }
+
+/**
+ * New charges since the last digest: the ~24h of freshly-imported expense rows
+ * (by `createdAt`, not transaction date) that the daily notification reports as
+ * "$X new". Unavoidable spend (`exclude`) is dropped so this matches the
+ * discretionary curve. Shared so the dashboard lists the exact same charges,
+ * sorted largest-first.
+ */
+export async function recentCharges(
+  now: number = Date.now(),
+  exclude?: SpendExclusion
+): Promise<DigestCharge[]> {
+  const since = new Date(now - DAY_MS)
+  const recent = await db
+    .select({
+      amount: transactions.amount,
+      merchant: merchants.name,
+      merchantId: transactions.merchantId,
+      category: categories.name,
+      date: transactions.txnDate,
+    })
+    .from(transactions)
+    .innerJoin(merchants, eq(transactions.merchantId, merchants.id))
+    .leftJoin(categories, eq(transactions.categoryId, categories.id))
+    .where(
+      and(
+        gte(transactions.createdAt, since),
+        eq(transactions.flow, 'expense'),
+        eq(transactions.isPayment, false)
+      )
+    )
+  return recent
+    .filter((r) => Number(r.amount) > 0)
+    .filter(
+      (r) =>
+        !exclude || (!exclude.merchantIds.has(r.merchantId) && !exclude.fixedCats.has(r.category ?? ''))
+    )
+    .map((r) => ({ merchant: r.merchant, amount: Number(r.amount), date: r.date }))
+    .sort((a, b) => b.amount - a.amount)
+}
+
+/** Roll a charge list up into the glanceable `$X new · N charges` summary. */
+export function summarizeSpend(charges: DigestCharge[]): DigestSpend {
+  return {
+    total: round2(charges.reduce((s, c) => s + c.amount, 0)),
+    count: charges.length,
+    biggest: charges.length ? charges.reduce((m, c) => (c.amount > m.amount ? c : m)) : null,
+  }
+}
+
+/** The digest's "$X new" summary — same window/exclusion as {@link recentCharges}. */
+export async function recentSpend(now: number = Date.now(), exclude?: SpendExclusion): Promise<DigestSpend> {
+  return summarizeSpend(await recentCharges(now, exclude))
 }
 
 export async function buildDigest(now: number = Date.now(), failedSources: string[] = []): Promise<Digest> {
@@ -89,27 +151,9 @@ export async function buildDigest(now: number = Date.now(), failedSources: strin
     })
   )
 
-  // 2. New charges since the last digest (~24h of freshly-imported expense rows).
-  const since = new Date(now - DAY_MS)
-  const recent = await db
-    .select({ amount: transactions.amount, merchant: merchants.name })
-    .from(transactions)
-    .innerJoin(merchants, eq(transactions.merchantId, merchants.id))
-    .where(
-      and(
-        gte(transactions.createdAt, since),
-        eq(transactions.flow, 'expense'),
-        eq(transactions.isPayment, false)
-      )
-    )
-  const charges = recent
-    .map((r) => ({ merchant: r.merchant, amount: Number(r.amount) }))
-    .filter((c) => c.amount > 0)
-  const newSpend: DigestSpend = {
-    total: round2(charges.reduce((s, c) => s + c.amount, 0)),
-    count: charges.length,
-    biggest: charges.length ? charges.reduce((m, c) => (c.amount > m.amount ? c : m)) : null,
-  }
+  // 2. New discretionary charges since the last digest (~24h of freshly-imported
+  //    expense rows), excluding the unavoidable spend the curve also ignores.
+  const newSpend = await recentSpend(now, unavoidableMerchantIds(allFlows, rules, FIXED_CATEGORIES))
 
   // 3. Month pace — discretionary burn-down on the current (anchor) month.
   const expenses = allFlows.filter((t: EnrichedTxn) => t.flow === 'expense')

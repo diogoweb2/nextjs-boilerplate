@@ -33,9 +33,10 @@ import {
 } from '@/app/actions/emergency'
 import { loadCashflowPlan } from '@/app/actions/cashflow'
 import { monthsBetween } from '@/app/lib/mortgage'
-import { computeMonthBurndown, computePeriodBurndown, type BurndownData } from '@/app/lib/projection'
+import { computeMonthBurndown, computePeriodBurndown, unavoidableMerchantIds, type BurndownData } from '@/app/lib/projection'
 import { getBudgetSettings } from '@/app/actions/budget'
 import { loadProjectionRules } from '@/app/actions/projection'
+import { recentCharges } from '@/app/lib/digest'
 import { loadPendingReviews, loadManualSavingsContributions } from '@/app/actions/goals'
 import { isDemoSession } from '@/app/lib/demo'
 import { TransferReview } from '@/app/components/TransferReview'
@@ -222,6 +223,12 @@ export default async function Home({
       burndown = computePeriodBurndown(allFlows, rules, start, end, monthBudget, FIXED_CATEGORIES)
     }
   }
+  // The same newly-imported expenses (last ~24h) the daily digest reports as
+  // "$X new" — listed on the burndown card when it renders. Excludes the
+  // unavoidable spend (Home + projected bills) the discretionary curve ignores.
+  const newCharges = burndown
+    ? await recentCharges(Date.now(), unavoidableMerchantIds(allFlows, rules, FIXED_CATEGORIES))
+    : []
 
   // 50/30/20 rule for the selected period (same window as the Overview above).
   const manualContributions = await loadManualSavingsContributions()
@@ -361,19 +368,24 @@ export default async function Home({
             <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
               {burndown && (
                 <Card
-                  title="Net trajectory"
+                  title="Net trajectory (Month)"
                   action={
                     <a href="/budget" className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]">
                       goal from budget →
                     </a>
                   }
                 >
-                  <BurndownTrajectory data={burndown} periodLabel={ov.periodLabel} />
+                  <BurndownTrajectory
+                    data={burndown}
+                    periodLabel={ov.periodLabel}
+                    newCharges={newCharges}
+                    unavoidableTotal={budget.unavoidable.total}
+                  />
                 </Card>
               )}
               {budget.hasData && (
                 <Card
-                  title="Net trajectory"
+                  title="Net trajectory (Year)"
                   action={
                     <span className="text-xs text-[var(--muted)]">cumulative net → Dec 31 target</span>
                   }

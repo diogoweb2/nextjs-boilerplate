@@ -30,11 +30,15 @@ export function ProjectionSettings({
   suggestions,
   unavoidable,
   addableMerchants,
+  onMutated,
 }: {
   active: ActiveRule[]
   suggestions: SuggestedRule[]
   unavoidable: Unavoidable
   addableMerchants: { id: number; name: string }[]
+  /** Called after each edit (in addition to refreshing the page) so an embedding
+   *  modal can re-fetch its own copy of the panel. */
+  onMutated?: () => void
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -44,6 +48,7 @@ export function ProjectionSettings({
     startTransition(async () => {
       await fn()
       router.refresh()
+      onMutated?.()
     })
 
   return (

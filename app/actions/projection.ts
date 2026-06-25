@@ -6,6 +6,13 @@ import { db } from '@/db'
 import { projectionRules, merchants } from '@/db/schema'
 import { requireAuth } from '@/app/lib/auth-guard'
 import { isDemoSession } from '@/app/lib/demo'
+import { loadAllFlows, anchorMonth } from '@/app/lib/analytics'
+import { FIXED_CATEGORIES } from '@/app/lib/budget'
+import {
+  suggestProjectionRules,
+  projectedAmountForMonth,
+  monthlyUnavoidable,
+} from '@/app/lib/projection'
 import type { ProjectionRule, Cadence, AmountMode } from '@/app/lib/projection'
 
 const CADENCES: Cadence[] = ['monthly', 'quarterly', 'annual', 'periodic']
@@ -40,6 +47,39 @@ export async function loadProjectionRules(): Promise<ProjectionRule[]> {
       amountMode: r.amountMode as AmountMode,
       fixedAmount: r.fixedAmount === null ? null : Number(r.fixedAmount),
     }))
+}
+
+/**
+ * Everything the projection editor needs: this month's unavoidable breakdown,
+ * the active bills (with current projected/actual amount), auto-detected
+ * suggestions, and merchants you can still add. Shared by the Settings page and
+ * the dashboard's "unavoidable" modal so both stay in lockstep.
+ */
+export async function loadProjectionPanel() {
+  // Read-only loader — no requireAuth (it would block demo reads); proxy.ts gates
+  // navigation and the mutating rule actions below each guard writes themselves.
+  const [all, rules, merchantRows] = (await isDemoSession())
+    ? await (async () => {
+        const d = await import('@/app/lib/demo-data')
+        return [d.demoAllFlows(), d.demoProjectionRules(), d.demoMerchantRows()] as const
+      })()
+    : await Promise.all([loadAllFlows(), loadProjectionRules(), db.select().from(merchants)])
+  const anchor = anchorMonth(all)
+
+  const existing = new Set(rules.map((r) => r.merchantId))
+  const dismissed = new Set(merchantRows.filter((m) => m.projectionDismissed).map((m) => m.id))
+  const suggestions = suggestProjectionRules(all, existing, dismissed, FIXED_CATEGORIES)
+  const active = rules.map((r) => {
+    const { amount, actual } = anchor ? projectedAmountForMonth(r, all, anchor) : { amount: 0, actual: false }
+    return { ...r, currentAmount: amount, actual }
+  })
+  const unavoidable = anchor ? monthlyUnavoidable(all, rules, anchor, FIXED_CATEGORIES) : { total: 0, lines: [] }
+  const addableMerchants = merchantRows
+    .filter((m) => !existing.has(m.id))
+    .map((m) => ({ id: m.id, name: m.name }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+
+  return { hasData: all.length > 0, active, suggestions, unavoidable, addableMerchants }
 }
 
 type RuleInput = {
