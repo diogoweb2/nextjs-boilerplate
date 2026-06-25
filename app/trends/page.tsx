@@ -4,7 +4,8 @@ import { PeriodSelector } from '@/app/components/PeriodSelector'
 import { LineChart } from '@/app/components/charts/LineChart'
 import { loadEnriched, buildTrends, anchorMonth, availableMonths } from '@/app/lib/analytics'
 import { parsePeriodParams } from '@/app/lib/params'
-import { formatCurrency, formatMonth } from '@/app/lib/format'
+import { formatCurrency, formatCurrencyCompact, formatMonth } from '@/app/lib/format'
+import { loadNetWorth } from '@/app/actions/networth'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,6 +35,7 @@ export default async function TrendsPage({
   }
 
   const trends = buildTrends(all, months, excludeSpecial)
+  const netWorth = await loadNetWorth(trends.months_labels)
 
   const totalValues = trends.total.map((t) => t.amount)
   const avg = totalValues.length ? totalValues.reduce((a, b) => a + b, 0) / totalValues.length : 0
@@ -69,6 +71,36 @@ export default async function TrendsPage({
         </Card>
       ) : (
         <div className="flex flex-col gap-5">
+          {netWorth.hasData && (
+            <Card
+              title="Net worth"
+              action={
+                <a href="/investments" className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]">
+                  investments →
+                </a>
+              }
+            >
+              <div className="flex flex-wrap items-end justify-between gap-2">
+                <div>
+                  <p className="text-3xl font-bold tabular-nums">{formatCurrency(netWorth.netWorth)}</p>
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    Chequing {formatCurrencyCompact(netWorth.assets.chequing)} + Investments{' '}
+                    {formatCurrencyCompact(netWorth.assets.investments)} − Mortgage{' '}
+                    {formatCurrencyCompact(netWorth.liabilities.mortgage)}
+                  </p>
+                </div>
+              </div>
+              {netWorth.series.length > 1 && (
+                <div className="mt-4">
+                  <LineChart
+                    labels={netWorth.series.map((p) => p.ym)}
+                    series={[{ color: '#10b981', values: netWorth.series.map((p) => p.value), name: 'Net worth' }]}
+                  />
+                </div>
+              )}
+            </Card>
+          )}
+
           <Card
             title="Monthly spend"
             action={<span className="text-xs text-[var(--muted)]">avg {formatCurrency(avg)}/mo</span>}

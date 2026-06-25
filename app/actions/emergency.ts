@@ -143,18 +143,32 @@ async function loadTfsaFundSnapshots(): Promise<{
 }
 
 /** Read (or lazily create) the singleton emergency config. */
-export async function getEmergencyConfig(): Promise<{ tfsaMode: TfsaEmergencyMode }> {
+export async function getEmergencyConfig(): Promise<{ tfsaMode: TfsaEmergencyMode; haircutPct: number }> {
   const [row] = await db.select().from(emergencyConfig).limit(1)
-  return { tfsaMode: (row?.tfsaMode as TfsaEmergencyMode) ?? 'cash_equivalent' }
+  return {
+    tfsaMode: (row?.tfsaMode as TfsaEmergencyMode) ?? 'crash_adjusted',
+    haircutPct: row?.tfsaHaircutPct ?? 30,
+  }
 }
 
-/** Switch the TFSA emergency-fund mode (cash-equivalent reserve vs whole TFSA). */
+/** Switch the TFSA emergency-fund mode (crash-adjusted / cash reserve / whole). */
 export async function setEmergencyTfsaMode(mode: TfsaEmergencyMode): Promise<void> {
   await requireAuth()
-  if (mode !== 'cash_equivalent' && mode !== 'whole') return
+  if (mode !== 'cash_equivalent' && mode !== 'whole' && mode !== 'crash_adjusted') return
   const [row] = await db.select({ id: emergencyConfig.id }).from(emergencyConfig).limit(1)
   if (row) await db.update(emergencyConfig).set({ tfsaMode: mode, updatedAt: new Date() }).where(eq(emergencyConfig.id, row.id))
   else await db.insert(emergencyConfig).values({ tfsaMode: mode })
+  revalidate()
+}
+
+/** Set the assumed crash drawdown (%) used by 'crash_adjusted' mode. Clamped 0–90. */
+export async function setEmergencyTfsaHaircut(pct: number): Promise<void> {
+  await requireAuth()
+  if (!Number.isFinite(pct)) return
+  const clamped = Math.round(Math.max(0, Math.min(90, pct)))
+  const [row] = await db.select({ id: emergencyConfig.id }).from(emergencyConfig).limit(1)
+  if (row) await db.update(emergencyConfig).set({ tfsaHaircutPct: clamped, updatedAt: new Date() }).where(eq(emergencyConfig.id, row.id))
+  else await db.insert(emergencyConfig).values({ tfsaHaircutPct: clamped })
   revalidate()
 }
 
@@ -209,13 +223,16 @@ export type EmergencyFundData = {
   accounts: AccountBalance[]
   series: { ym: string; total: number }[]
   asOfYm: string
-  /** The owner's chosen TFSA mode (may be overridden by `tfsaModeDisabled`). */
+  /** The owner's chosen TFSA mode (may be overridden when its sleeve is missing). */
   tfsaMode: TfsaEmergencyMode
-  /** The mode actually applied (forced to 'whole' when no cash sleeve exists). */
+  /** The mode actually applied (cash reserve falls back to crash-adjusted when no
+   *  cash sleeve exists). */
   effectiveTfsaMode: TfsaEmergencyMode
-  /** True when the toggle is locked (the TFSA has no cash-equivalent holding). */
-  tfsaModeDisabled: boolean
-  /** Why the toggle is locked (null when enabled). */
+  /** Assumed crash drawdown (%) applied in crash-adjusted mode. */
+  tfsaHaircutPct: number
+  /** True when a cash-equivalent holding exists, so the "Cash reserve" option works. */
+  cashReserveAvailable: boolean
+  /** Why the chosen mode was overridden (null when the choice was honoured). */
   tfsaModeReason: string | null
 }
 
@@ -230,10 +247,17 @@ export async function loadEmergencyFund(): Promise<EmergencyFundData> {
     loadBankFlows(),
     getEmergencyConfig(),
   ])
-  // No cash-equivalent holding → the stable-reserve option is meaningless, so
-  // lock the toggle and fall back to the whole TFSA.
-  const effectiveTfsaMode: TfsaEmergencyMode = tfsa.hasCashNow ? config.tfsaMode : 'whole'
-  const tfsaSnaps = effectiveTfsaMode === 'cash_equivalent' ? tfsa.cash : tfsa.whole
+  // "Cash reserve" needs an actual cash-equivalent holding; if chosen but none
+  // exists, fall back to the crash-adjusted whole TFSA (the safe default).
+  const effectiveTfsaMode: TfsaEmergencyMode =
+    config.tfsaMode === 'cash_equivalent' && !tfsa.hasCashNow ? 'crash_adjusted' : config.tfsaMode
+  const factor = Math.max(0, 1 - config.haircutPct / 100)
+  const tfsaSnaps =
+    effectiveTfsaMode === 'cash_equivalent'
+      ? tfsa.cash
+      : effectiveTfsaMode === 'crash_adjusted'
+        ? tfsa.whole.map((s) => ({ ...s, balance: Math.round(s.balance * factor * 100) / 100 }))
+        : tfsa.whole
   const snaps = [...bankSnaps, ...tfsaSnaps]
   const dates = [...flows.map((f) => f.txnDate), ...snaps.map((s) => s.occurredAt), todayIso()]
   const asOfYm = dates.reduce((max, d) => (d > max ? d : max), dates[0]).slice(0, 7)
@@ -245,10 +269,12 @@ export async function loadEmergencyFund(): Promise<EmergencyFundData> {
     asOfYm,
     tfsaMode: config.tfsaMode,
     effectiveTfsaMode,
-    tfsaModeDisabled: !tfsa.hasCashNow,
-    tfsaModeReason: !tfsa.hasCashNow
-      ? 'Your TFSA has no cash-equivalent holding (e.g. a money-market ETF) right now, so there’s no stable reserve to isolate — showing the whole TFSA. Buy a cash/money-market ETF to track a stable reserve again.'
-      : null,
+    tfsaHaircutPct: config.haircutPct,
+    cashReserveAvailable: tfsa.hasCashNow,
+    tfsaModeReason:
+      config.tfsaMode === 'cash_equivalent' && !tfsa.hasCashNow
+        ? 'Your TFSA holds no cash-equivalent position (e.g. a money-market ETF) right now, so there’s no stable reserve to isolate — using the crash-adjusted whole TFSA instead.'
+        : null,
   }
 }
 

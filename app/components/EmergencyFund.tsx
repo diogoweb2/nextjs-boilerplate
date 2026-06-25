@@ -4,9 +4,21 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, EmptyHint } from '@/app/components/AppShell'
 import { LineChart } from '@/app/components/charts/LineChart'
-import { recordBalance, setEmergencyTfsaMode, type EmergencyFundData } from '@/app/actions/emergency'
+import {
+  recordBalance,
+  setEmergencyTfsaMode,
+  setEmergencyTfsaHaircut,
+  type EmergencyFundData,
+} from '@/app/actions/emergency'
 import { ACCOUNT_SOURCES, type FundSource } from '@/app/lib/emergency'
+import type { TfsaEmergencyMode } from '@/db/schema'
 import { formatCurrency } from '@/app/lib/format'
+
+const TFSA_MODE_LABELS: Record<TfsaEmergencyMode, string> = {
+  crash_adjusted: 'Crash-adj.',
+  cash_equivalent: 'Cash reserve',
+  whole: 'Whole',
+}
 
 /**
  * Emergency Fund card on the Goals page: total cash across Tangerine + Scotia,
@@ -25,9 +37,15 @@ export function EmergencyFund({ data }: { data: EmergencyFundData }) {
       router.refresh()
     })
 
-  const setMode = (mode: 'cash_equivalent' | 'whole') =>
+  const setMode = (mode: TfsaEmergencyMode) =>
     startTransition(async () => {
       await setEmergencyTfsaMode(mode)
+      router.refresh()
+    })
+
+  const setHaircut = (pct: number) =>
+    startTransition(async () => {
+      await setEmergencyTfsaHaircut(pct)
       router.refresh()
     })
 
@@ -78,22 +96,24 @@ export function EmergencyFund({ data }: { data: EmergencyFundData }) {
                   )}
                 </div>
                 {derived ? (
-                  <div className="flex items-center gap-1" title={data.tfsaModeReason ?? undefined}>
-                    {(['cash_equivalent', 'whole'] as const).map((m) => {
+                  <div className="flex items-center gap-1">
+                    {(['crash_adjusted', 'cash_equivalent', 'whole'] as const).map((m) => {
                       const active = data.effectiveTfsaMode === m
+                      const locked = m === 'cash_equivalent' && !data.cashReserveAvailable
                       return (
                         <button
                           key={m}
-                          disabled={data.tfsaModeDisabled || pending}
+                          disabled={locked || pending}
+                          title={locked ? data.tfsaModeReason ?? undefined : undefined}
                           onClick={() => setMode(m)}
                           className={`rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
                             active
                               ? 'bg-[var(--accent)] text-[var(--accent-fg)]'
                               : 'text-[var(--muted)] hover:text-[var(--foreground)]'
-                          } ${data.tfsaModeDisabled ? 'cursor-not-allowed opacity-60' : ''}`}
+                          } ${locked ? 'cursor-not-allowed opacity-50' : ''}`}
                         >
-                          {data.tfsaModeDisabled && active ? '🔒 ' : ''}
-                          {m === 'cash_equivalent' ? 'Cash reserve' : 'Whole TFSA'}
+                          {locked ? '🔒 ' : ''}
+                          {TFSA_MODE_LABELS[m]}
                         </button>
                       )
                     })}
@@ -118,7 +138,11 @@ export function EmergencyFund({ data }: { data: EmergencyFundData }) {
           })}
         </div>
 
-        {data.tfsaModeDisabled && data.tfsaModeReason && (
+        {data.effectiveTfsaMode === 'crash_adjusted' && (
+          <HaircutEditor key={data.tfsaHaircutPct} pct={data.tfsaHaircutPct} pending={pending} onSave={setHaircut} />
+        )}
+
+        {data.tfsaModeReason && (
           <p className="mt-2 rounded-lg bg-[var(--surface-2)] px-2.5 py-1.5 text-[11px] text-[var(--muted)]">
             🔒 {data.tfsaModeReason}
           </p>
@@ -140,6 +164,46 @@ export function EmergencyFund({ data }: { data: EmergencyFundData }) {
         )}
       </div>
     </Card>
+  )
+}
+
+/** Inline editor for the crash haircut %, shown when crash-adjusted mode is active.
+ *  Seeded from the saved value (the parent keys it by pct so it resets on save). */
+function HaircutEditor({
+  pct,
+  pending,
+  onSave,
+}: {
+  pct: number
+  pending: boolean
+  onSave: (pct: number) => void
+}) {
+  const [value, setValue] = useState(String(pct))
+  const submit = () => {
+    const n = Number(value)
+    if (Number.isFinite(n) && n !== pct) onSave(n)
+  }
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-[var(--surface-2)] px-2.5 py-1.5 text-[11px] text-[var(--muted)]">
+      <span>Crash haircut</span>
+      <span className="inline-flex items-center">
+        <input
+          type="number"
+          inputMode="numeric"
+          value={value}
+          disabled={pending}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && submit()}
+          onBlur={submit}
+          className="w-12 rounded border border-[var(--border)] bg-[var(--surface)] px-1.5 py-0.5 text-right tabular-nums outline-none focus:border-[var(--accent)]"
+        />
+        <span className="ml-0.5">%</span>
+      </span>
+      <span>
+        — counts {Math.max(0, 100 - pct)}% of your TFSA, the assumed value left after a market crash
+        (≈30% for an 80/20 ETF like XGRO).
+      </span>
+    </div>
   )
 }
 

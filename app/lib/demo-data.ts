@@ -773,9 +773,10 @@ export function demoEmergencyFund(): EmergencyFundData {
     ],
     series: seriesWithInv,
     asOfYm: ANCHOR_YM,
-    tfsaMode: 'cash_equivalent' as const,
-    effectiveTfsaMode: 'cash_equivalent' as const,
-    tfsaModeDisabled: false,
+    tfsaMode: 'crash_adjusted' as const,
+    effectiveTfsaMode: 'crash_adjusted' as const,
+    tfsaHaircutPct: 30,
+    cashReserveAvailable: true,
     tfsaModeReason: null,
   }
 }

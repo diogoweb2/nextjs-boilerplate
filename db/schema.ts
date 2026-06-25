@@ -661,17 +661,22 @@ export const registeredContributions = pgTable(
 /**
  * Singleton config for the Emergency Fund's TFSA line (§12/§16). `tfsaMode`
  * chooses how much of the TFSA counts as emergency-accessible cash:
- *  - 'cash_equivalent' (default) — only the cash-equivalent holdings (money-market
- *    ETFs), a stable reserve that doesn't swing with the equity markets.
- *  - 'whole' — the full TFSA market value.
- * When the TFSA holds NO cash-equivalent position, the toggle is force-disabled in
- * the UI (there's no stable sleeve to isolate) and the whole TFSA is used.
+ *  - 'crash_adjusted' (default) — the whole TFSA discounted by `tfsaHaircutPct`,
+ *    so the emergency figure reflects what it'd realistically be worth mid-crash
+ *    (lets the TFSA hold pure growth ETFs and still be a sane emergency backstop).
+ *  - 'cash_equivalent' — only the cash-equivalent holdings (money-market ETFs), a
+ *    stable reserve that doesn't swing with the equity markets. Requires such a
+ *    holding to exist; the option is disabled in the UI when none does.
+ *  - 'whole' — the full TFSA market value, undiscounted.
+ * `tfsaHaircutPct` is the assumed crash drawdown for 'crash_adjusted' mode (counted
+ * value = whole × (1 − pct/100)); 30 ≈ an 80/20 ETF's worst realistic drawdown.
  */
 export const emergencyConfig = pgTable('emergency_config', {
   id: serial('id').primaryKey(),
-  tfsaMode: text('tfsa_mode', { enum: ['cash_equivalent', 'whole'] })
+  tfsaMode: text('tfsa_mode', { enum: ['cash_equivalent', 'whole', 'crash_adjusted'] })
     .notNull()
-    .default('cash_equivalent'),
+    .default('crash_adjusted'),
+  tfsaHaircutPct: integer('tfsa_haircut_pct').notNull().default(30),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 })
 
@@ -790,4 +795,4 @@ export type HoldingPosition = typeof holdingPositions.$inferSelect
 export type RegisteredContribution = typeof registeredContributions.$inferSelect
 export type RegisteredKind = 'tfsa' | 'resp' | 'rrsp' | 'fhsa' | 'nonreg'
 export type EmergencyConfig = typeof emergencyConfig.$inferSelect
-export type TfsaEmergencyMode = 'cash_equivalent' | 'whole'
+export type TfsaEmergencyMode = 'cash_equivalent' | 'whole' | 'crash_adjusted'

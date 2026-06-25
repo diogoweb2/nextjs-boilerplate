@@ -703,13 +703,20 @@ mortgage uses. Sources are listed in `ACCOUNT_SOURCES` with an `autoTracked` fla
   education). `loadBankFlows` still only queries the two chequing banks, so the TFSA line has no
   flows — just its latest derived snapshot. (Historically this was a manual "low-risk investment"
   number, but that was double-tracking the TFSA money-market holding.)
-  - **Cash-equivalent vs whole-TFSA toggle** (`emergency_config.tfsaMode`, default
-    **`cash_equivalent`**): the line can count either only the **cash-equivalent** holdings (asset
-    class matching `/cash/i`, e.g. the ZMMK money-market — a stable reserve that doesn't swing with
-    the equity markets) or the **whole** TFSA. Set via `setEmergencyTfsaMode`. If the TFSA holds
-    **no** cash-equivalent position, the toggle is **force-disabled** (there's no stable sleeve to
-    isolate) and the whole TFSA is used, with an in-card explanation (`tfsaModeDisabled` /
-    `tfsaModeReason`).
+  - **TFSA mode toggle** (`emergency_config.tfsaMode`, default **`crash_adjusted`**): how much of the
+    TFSA counts as emergency-accessible cash. Three modes, set via `setEmergencyTfsaMode`:
+    - **`crash_adjusted`** (default) — the **whole** TFSA discounted by a configurable haircut
+      (`emergency_config.tfsaHaircutPct`, default **30**, set via `setEmergencyTfsaHaircut`, clamped
+      0–90): counted value = `whole × (1 − pct/100)`. This lets the TFSA hold pure growth ETFs (e.g.
+      XGRO) while the emergency figure reflects what it'd realistically be worth mid-crash. 30 ≈ an
+      80/20 ETF's worst realistic drawdown; ~45 for 100% equity. The haircut is applied to every
+      derived snapshot, so the history line is discounted too.
+    - **`cash_equivalent`** — only the **cash-equivalent** holdings (asset class matching `/cash/i`,
+      e.g. the ZMMK money-market — a stable reserve that doesn't swing with the equity markets).
+      Requires such a holding to exist: when the TFSA holds **none**, this option is **disabled** in
+      the UI and the chosen mode falls back to `crash_adjusted` (`effectiveTfsaMode`), with an in-card
+      explanation (`cashReserveAvailable` / `tfsaModeReason`).
+    - **`whole`** — the full TFSA market value, undiscounted.
 - **Manual correction:** "Update balance" just inserts a newer absolute snapshot, which re-anchors
   and absorbs any drift (like `updateMortgageBalance`). No relevant interest is modelled (these are
   chequing accounts).
