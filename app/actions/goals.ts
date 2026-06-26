@@ -15,7 +15,7 @@ import {
 } from '@/db/schema'
 import { requireAuth } from '@/app/lib/auth-guard'
 import { isDemoSession } from '@/app/lib/demo'
-import { loadAllFlows, anchorMonth } from '@/app/lib/analytics'
+import { loadAllFlows, anchorMonth, netOverRange } from '@/app/lib/analytics'
 import {
   savingsValue,
   totalContributed,
@@ -87,6 +87,7 @@ export type GoalView = {
   annualRate: number | null
   value: number
   contributed: number
+  contributedThisMonth: number
   progressPct: number | null
   projectedCompletionYm: string | null
   milestone: string
@@ -227,6 +228,7 @@ export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: stri
         ...baseView(g),
         value: proj?.currentBalance ?? 0,
         contributed: 0,
+        contributedThisMonth: 0,
         progressPct: null,
         projectedCompletionYm: null,
         milestone: mortgageMessage(proj),
@@ -242,6 +244,7 @@ export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: stri
         ...baseView(g),
         value: nz.value,
         contributed: 0,
+        contributedThisMonth: 0,
         progressPct: null,
         projectedCompletionYm: null,
         milestone: netZeroMessage(nz),
@@ -257,6 +260,7 @@ export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: stri
       ...baseView(g),
       value,
       contributed: totalContributed(list),
+      contributedThisMonth: 0,
       progressPct: pct,
       projectedCompletionYm: projectedCompletionYm(list, target, asOfYm),
       milestone: milestoneMessage(pct),
@@ -270,37 +274,25 @@ export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: stri
   const currentYearNet = netOverRange(flows, `${curYear}-01`, asOfYm)
   const suggestNetZero = !goalRows.some((g) => g.kind === 'netzero') && currentYearNet < -0.005
 
-  const savingsGoalIds = new Set(goalRows.filter((g) => g.kind === 'savings').map((g) => g.id))
+  const savingsGoalIds = new Set(goalRows.filter((g) => g.kind === 'savings' || g.kind === 'mortgage').map((g) => g.id))
   const prevYm = prevMonth(asOfYm)
   let thisMonth = 0
   let lastMonth = 0
+  const thisMonthByGoal = new Map<number, number>()
   for (const e of entries) {
     if (!savingsGoalIds.has(e.goalId) || e.kind !== 'contribution' || Number(e.amount) <= 0) continue
     const ym = e.occurredAt.slice(0, 7)
-    if (ym === asOfYm) thisMonth += Number(e.amount)
-    else if (ym === prevYm) lastMonth += Number(e.amount)
+    if (ym === asOfYm) {
+      thisMonth += Number(e.amount)
+      thisMonthByGoal.set(e.goalId, (thisMonthByGoal.get(e.goalId) ?? 0) + Number(e.amount))
+    } else if (ym === prevYm) {
+      lastMonth += Number(e.amount)
+    }
   }
 
-  return { goals: views, asOfYm, suggestNetZero, monthStats: { thisMonth: Math.round(thisMonth * 100) / 100, lastMonth: Math.round(lastMonth * 100) / 100 } }
-}
+  const viewsWithMonth = views.map((v) => ({ ...v, contributedThisMonth: thisMonthByGoal.get(v.id) ?? 0 }))
 
-/** Net (income − spend) over the inclusive month range, matching the Income /
- *  Budget `ytdNet` definition (income flow summed, positive expenses summed,
- *  refunds/payments/transfers excluded). */
-function netOverRange(
-  flows: Awaited<ReturnType<typeof loadAllFlows>>,
-  startYm: string,
-  endYm: string,
-): number {
-  let income = 0
-  let spend = 0
-  for (const t of flows) {
-    const ym = t.txnDate.slice(0, 7)
-    if (ym < startYm || ym > endYm) continue
-    if (t.flow === 'income') income += -t.amount
-    else if (t.flow === 'expense' && t.amount > 0) spend += t.amount
-  }
-  return Math.round((income - spend) * 100) / 100
+  return { goals: viewsWithMonth, asOfYm, suggestNetZero, monthStats: { thisMonth: Math.round(thisMonth * 100) / 100, lastMonth: Math.round(lastMonth * 100) / 100 } }
 }
 
 function netZeroStartYear(g: Goal): number {

@@ -11,6 +11,7 @@ export function StatCard({
   href,
   accent,
   budget,
+  reportHref,
 }: {
   label: string
   value: string
@@ -28,6 +29,12 @@ export function StatCard({
    * progress bar + "Budget" usage label render at the bottom of the tile.
    */
   budget?: number
+  /**
+   * When set, shows a small bar-chart icon in the label row linking to a history
+   * report. Uses a full-coverage invisible link for `href` so the two anchors
+   * never nest (valid HTML, no event handlers needed).
+   */
+  reportHref?: string
 }) {
   const delta =
     current !== undefined && previous !== undefined
@@ -46,6 +53,94 @@ export function StatCard({
   const showBudget = budget !== undefined && budget > 0 && current !== undefined
   const ratio = showBudget ? current / budget : 0
   const barColor = ratio >= 1 ? 'var(--negative)' : ratio >= 0.85 ? 'var(--warning)' : 'var(--positive)'
+
+  const chartIcon = (
+    <svg width="13" height="13" viewBox="0 0 13 13" fill="currentColor" aria-hidden="true">
+      <rect x="1" y="8" width="3" height="4" rx="0.5" />
+      <rect x="5" y="5" width="3" height="7" rx="0.5" />
+      <rect x="9" y="2" width="3" height="10" rx="0.5" />
+    </svg>
+  )
+
+  // When reportHref is set: outer is a <div> so we can place two independent
+  // <a> tags — a full-coverage invisible one for the tile action and a visible
+  // icon link for the report — without ever nesting anchors.
+  if (reportHref) {
+    return (
+      <div className="card flex flex-col gap-1 p-4 relative transition-colors hover:border-[var(--accent)]">
+        {/* Full-coverage link: makes the whole card clickable for `href` */}
+        {href && (
+          <a
+            href={href}
+            className="absolute inset-0 z-0 rounded-[inherit]"
+            aria-label={`${label} transactions`}
+          />
+        )}
+        {/* Label row — sits above the full-coverage link */}
+        <span className="relative z-10 flex items-center justify-between gap-1.5 text-xs font-medium uppercase tracking-wide text-[var(--muted)]">
+          <span className="flex items-center gap-1.5 pointer-events-none">
+            {accent && (
+              <span
+                className="inline-block h-2 w-2 shrink-0 rounded-full"
+                style={{ backgroundColor: accent }}
+              />
+            )}
+            {label}
+          </span>
+          <a
+            href={reportHref}
+            title={`${label} history`}
+            className="rounded p-0.5 hover:bg-[var(--surface-2)] hover:text-[var(--foreground)]"
+          >
+            {chartIcon}
+          </a>
+        </span>
+        {/* Rest of content — pointer-events-none so clicks pass through to the full-coverage link */}
+        <div className="relative z-10 flex flex-col gap-1 pointer-events-none">
+          <div className="flex items-end justify-between gap-2">
+            <span className="text-2xl font-bold tabular-nums tracking-tight">{value}</span>
+            {delta && (
+              <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${badgeClass}`}>
+                {delta.direction === 'up' ? '↑' : delta.direction === 'down' ? '↓' : ''} {delta.text}
+              </span>
+            )}
+          </div>
+          {delta && (
+            <span className="text-[10px] text-[var(--muted)]">
+              vs previous period – {formatCurrency(previous!)}
+            </span>
+          )}
+          {hint && <span className="text-xs text-[var(--muted)]">{hint}</span>}
+          {showBudget && (
+            <div className="mt-2 flex flex-col gap-1.5">
+              <div className="flex items-baseline justify-between">
+                <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted)]">
+                  Budget
+                </span>
+                <span className="text-[10px] font-semibold tabular-nums" style={{ color: barColor }}>
+                  {Math.round(ratio * 100)}%
+                </span>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--surface-2)]">
+                <div
+                  className="h-full rounded-full transition-all"
+                  style={{ width: `${Math.min(100, ratio * 100)}%`, backgroundColor: barColor }}
+                />
+              </div>
+              <div className="flex items-baseline justify-between text-[10px] tabular-nums text-[var(--muted)]">
+                <span>of {formatCurrency(budget)}</span>
+                {ratio < 1 ? (
+                  <span style={{ color: barColor }}>{formatCurrency(budget - current!)} left</span>
+                ) : (
+                  <span style={{ color: barColor }}>{formatCurrency(current! - budget)} over</span>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   const inner = (
     <>

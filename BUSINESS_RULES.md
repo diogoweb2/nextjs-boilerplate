@@ -1010,3 +1010,56 @@ read-only.
 
 Run after pulling this change: `npm run db:push` (adds `registered_accounts`, `holding_snapshots`,
 `holding_positions`, `registered_contributions`).
+
+## 15. Monthly report — the "80s recap" (`/report`)
+
+A standalone, synthwave-themed recap of one month, meant to be **fun and glanceable** for a
+low-patience second user (Alice). It grades the month on **effort vs. the month before** and shows a
+handful of headlines, then gets out of the way. Fully deterministic (no AI). Engine:
+`app/lib/monthReport.ts` (`buildMonthReport`), page `app/report/page.tsx` + `ReportClient.tsx`,
+theme `app/report/report-theme.css`. Every number reuses existing analytics so it ties out with the
+dashboard/budget.
+
+### What it shows (for target month `M`, default = previous completed month)
+- **Grade F→A+** — see rubric below.
+- **Moved to goals** — savings-goal `contribution` entries in `M` (links to `/goals`), with the
+  change vs `M-1`.
+- **Net income (incl. mortgage)** — `netOverRange(flows, M, M)` (income − positive expenses, mortgage
+  included; refunds/payments/transfers excluded) + % / $ change vs `M-1`. `netOverRange` is the shared
+  helper in `app/lib/analytics.ts` (also used by Goals net-zero).
+- **Saved toward net-0 (year lens)** — the same month net framed as a year contribution, plus the
+  year-to-date cumulative net `netOverRange(flows, \`${year}-01\`, M)`.
+- **Best / worst category vs last month** — from `buildOverview(M)` vs `buildOverview(M-1)`,
+  best = biggest $ drop, worst = biggest $ rise. **Discretionary only**: `Home`/fixed, `CC Payment`,
+  `Cash`, `Bank Fees`, `Investment` (a savings transfer, not a budget overrun) and `Uncategorized` are
+  excluded (`DISCRETIONARY_EXCLUDE`).
+- **Net-$0 trajectory shift** — `projectNetZeroDate` (`app/lib/budget.ts`, extracted from
+  `NetBudgetTrajectory`) projects the year's net-$0 crossing as of `M` and `M-1` using the latest
+  month's net as pace; the difference is reported as **days earlier (good) / later (bad)**. Only
+  computed when both months are negative-but-reachable; if `M` is already in the black it shows "in
+  the black" instead.
+- **Extras** — no-spend days, net-positive-month streak, top merchant, deterministic quote of the
+  month (`app/lib/reportQuotes.ts`, `quoteForMonth` indexes the list by `year*12+month`; owner supplies
+  the 100), and a "share with Alice" one-liner.
+
+### Grade rubric (`gradeMonth`, effort-weighted, all knobs are named consts)
+Five 0–1 signals × weights, summed to 0–100 → letter (`A+ ≥95 … D ≥38, F <38`):
+- **Net improvement MoM** (30) — `net − prevNet` scaled by `NET_SWING_SCALE` ($1500 = full mark).
+- **Net-$0 pulled earlier** (25) — days the crossing moved (or 1.0 if in the black), `ZERO_SHIFT_SCALE`
+  (30 days = full mark).
+- **Money moved to goals** (20) — 0.2 none / 0.7 some / 0.9 ≥ last / 1.0 more than last.
+- **Discretionary spend down** (15) — relative drop vs last month.
+- **In the black** (10) — full mark when `net ≥ 0`, else scaled by `NET_LEVEL_SCALE`.
+
+Thresholds/weights are intentionally easy to retune after a few real months.
+
+### Day-1 push (no cloud cron — piggybacks the daily digest)
+`POST /api/digest` (the existing daily launchd job) checks `new Date().getDate() === 1`; on the 1st it
+builds the recap for the **previous calendar month**, sends `buildReportNotification(...)` (a fun
+graded payload, `url: /report?month=YYYY-MM`) via `sendPushToAll`, and **returns early — the normal
+daily digest push is skipped that day**. Idempotency: it inserts-if-absent into `month_report_pushes`
+(`ym` PK) before pushing, so a second run on the 1st can't double-send; if already sent (or no data /
+push unconfigured) it falls through to the normal daily digest. `GET /api/digest?month=YYYY-MM` returns
+the recap JSON for previewing without pushing.
+
+Run after pulling this change: `npm run db:push` (adds `month_report_pushes`).

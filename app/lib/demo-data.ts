@@ -621,6 +621,7 @@ export function demoGoalsData(): {
       annualRate: null,
       value: 3850,
       contributed: 3850,
+      contributedThisMonth: 500,
       progressPct: 3850 / 6000,
       projectedCompletionYm: '2026-11',
       milestone: 'Over halfway there — keep it up! 🎯',
@@ -642,6 +643,7 @@ export function demoGoalsData(): {
       annualRate: null,
       value: 12400,
       contributed: 12400,
+      contributedThisMonth: 300,
       progressPct: 12400 / 20000,
       projectedCompletionYm: '2027-08',
       milestone: 'Solid cushion building. 💪',
@@ -663,6 +665,7 @@ export function demoGoalsData(): {
       annualRate: 0.052,
       value: demoMortgageProjection().currentBalance,
       contributed: 0,
+      contributedThisMonth: 0,
       progressPct: null,
       projectedCompletionYm: null,
       milestone: 'Behind pace — add $730/mo extra to catch up. 🔴',
@@ -788,10 +791,10 @@ export function demoNetWorth(months: string[]): NetWorthData {
   const netWorth = Math.round((chequing + investments - mortgage) * 100) / 100
   const n = Math.max(1, months.length)
   // A gently rising trend (mortgage paid down, investments grow).
-  const series = months.map((ym, i) => ({
-    ym,
-    value: Math.round(netWorth * (0.82 + (0.18 * (i + 1)) / n)),
-  }))
+  const series = months.map((ym, i) => {
+    const value = Math.round(netWorth * (0.82 + (0.18 * (i + 1)) / n))
+    return { ym, value, chequing, investments, mortgage }
+  })
   return {
     hasData: true,
     netWorth,

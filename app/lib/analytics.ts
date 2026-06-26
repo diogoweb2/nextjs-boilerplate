@@ -121,6 +121,24 @@ export function anchorMonth(txns: EnrichedTxn[]): string | null {
   return txns.reduce((max, t) => (t.txnDate > max ? t.txnDate : max), txns[0].txnDate).slice(0, 7)
 }
 
+/**
+ * Net (income − spend) over the inclusive [startYm, endYm] month range, matching
+ * the Income / Budget `ytdNet` definition: income flow summed (stored negative,
+ * so negated), positive expenses summed (mortgage included), refunds / payments /
+ * transfers excluded. Shared by Goals (net-zero) and the monthly report.
+ */
+export function netOverRange(txns: EnrichedTxn[], startYm: string, endYm: string): number {
+  let income = 0
+  let spend = 0
+  for (const t of txns) {
+    const ym = t.txnDate.slice(0, 7)
+    if (ym < startYm || ym > endYm) continue
+    if (t.flow === 'income') income += -t.amount
+    else if (t.flow === 'expense' && t.amount > 0) spend += t.amount
+  }
+  return Math.round((income - spend) * 100) / 100
+}
+
 /** Inclusive [start, end] month window for the current period of `months` length. */
 export function periodWindow(anchor: string, months: number) {
   const end = anchor
@@ -143,16 +161,6 @@ function dayOfMonth(dateIso: string): number {
   return Number(dateIso.slice(8, 10))
 }
 
-/** Quick-glance category tiles on the dashboard (label → category name + color). */
-const CATEGORY_CARDS: { label: string; category: string; color: string }[] = [
-  { label: 'Groceries', category: 'Groceries', color: '#16a34a' },
-  { label: 'Car', category: 'Cars', color: '#eab308' },
-  { label: 'Shopping', category: 'Shopping', color: '#8b5cf6' },
-  { label: 'Dining', category: 'Dining', color: '#f97316' },
-  { label: 'Kids', category: 'Kids', color: '#ec4899' },
-  { label: 'Health', category: 'Health', color: '#ef4444' },
-  { label: 'Uncategorized', category: 'Uncategorized', color: '#94a3b8' },
-]
 
 /**
  * Categories whose fixed bills shouldn't headline the "biggest purchase" tiles
@@ -253,14 +261,26 @@ export function buildOverview(
   const prevCount = prevPurchases.length
   const prevAvg = prevCount ? prevGross / prevCount : 0
 
-  // Per-category quick tiles, current vs the same previous period.
-  const categoryCards = CATEGORY_CARDS.map((c) => ({
-    label: c.label,
-    name: c.category,
-    color: c.color,
-    amount: sum(purchases.filter((t) => t.categoryName === c.category).map((t) => t.amount)),
-    prevAmount: sum(prevPurchases.filter((t) => t.categoryName === c.category).map((t) => t.amount)),
-  }))
+  // Per-category quick tiles: top 7 by current spend + always Uncategorized if non-zero.
+  const prevCatMap = new Map<string, number>()
+  for (const t of prevPurchases) prevCatMap.set(t.categoryName, (prevCatMap.get(t.categoryName) ?? 0) + t.amount)
+  const curCatMap = new Map<string, { color: string; amount: number }>()
+  for (const t of purchases) {
+    const e = curCatMap.get(t.categoryName) ?? { color: t.categoryColor, amount: 0 }
+    e.amount += t.amount
+    curCatMap.set(t.categoryName, e)
+  }
+  const uncatEntry = curCatMap.get('Uncategorized')
+  const categoryCards = [
+    ...[...curCatMap.entries()]
+      .filter(([name]) => name !== 'Uncategorized')
+      .sort((a, b) => b[1].amount - a[1].amount)
+      .slice(0, 7)
+      .map(([name, v]) => ({ label: name, name, color: v.color, amount: v.amount, prevAmount: prevCatMap.get(name) ?? 0 })),
+    ...(uncatEntry && uncatEntry.amount > 0
+      ? [{ label: 'Uncategorized', name: 'Uncategorized', color: '#94a3b8', amount: uncatEntry.amount, prevAmount: prevCatMap.get('Uncategorized') ?? 0 }]
+      : []),
+  ]
 
   // Category breakdown (gross purchases only).
   const catTotals = new Map<string, { color: string; amount: number }>()
@@ -447,13 +467,7 @@ function emptyOverview(months: number): Overview {
     prevCount: 0,
     prevAvg: 0,
     largest: null,
-    categoryCards: CATEGORY_CARDS.map((c) => ({
-      label: c.label,
-      name: c.category,
-      color: c.color,
-      amount: 0,
-      prevAmount: 0,
-    })),
+    categoryCards: [],
     byCategory: [],
     topMerchants: [],
     topTransactions: [],

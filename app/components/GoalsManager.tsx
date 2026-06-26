@@ -143,19 +143,35 @@ export function GoalsManager({
       {/* Motivational hero */}
       <div className="card animate-in bg-gradient-to-br from-[var(--surface)] to-[var(--surface-2)] p-5">
         <div className="flex items-center justify-between gap-3">
-          <div>
+          <div className="min-w-0 flex-1">
             <h1 className="text-xl font-bold tracking-tight">Your Goals 🎯</h1>
             {savings.length > 0 ? (
-              <div className="mt-1 flex items-baseline gap-2">
-                <span className="text-2xl font-bold tabular-nums">{formatCurrency(monthStats.thisMonth)}</span>
-                <span className="text-sm text-[var(--muted)]">invested this month</span>
-                {monthStats.lastMonth > 0 && (
-                  <span className={`text-sm font-medium ${monthStats.thisMonth >= monthStats.lastMonth ? 'text-[var(--positive)]' : 'text-[var(--negative)]'}`}>
-                    {monthStats.thisMonth >= monthStats.lastMonth ? '↑' : '↓'}{' '}
-                    {formatCurrency(Math.abs(monthStats.thisMonth - monthStats.lastMonth))} vs last month
-                  </span>
+              <>
+                <div className="mt-1 flex items-baseline gap-2">
+                  <span className="text-2xl font-bold tabular-nums">{formatCurrency(monthStats.thisMonth)}</span>
+                  <span className="text-sm text-[var(--muted)]">invested this month</span>
+                  {monthStats.lastMonth > 0 && (
+                    <span className={`text-sm font-medium ${monthStats.thisMonth >= monthStats.lastMonth ? 'text-[var(--positive)]' : 'text-[var(--negative)]'}`}>
+                      {monthStats.thisMonth >= monthStats.lastMonth ? '↑' : '↓'}{' '}
+                      {formatCurrency(Math.abs(monthStats.thisMonth - monthStats.lastMonth))} vs last month
+                    </span>
+                  )}
+                </div>
+                {monthStats.thisMonth > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
+                    {active.filter((g) => g.contributedThisMonth > 0).map((g) => (
+                      <div key={g.id} className="flex items-center gap-1.5 text-sm">
+                        <span>{g.emoji}</span>
+                        <span className="text-[var(--muted)]">{g.name}</span>
+                        <span className="font-medium tabular-nums">{formatCurrency(g.contributedThisMonth)}</span>
+                        <span className="text-xs text-[var(--muted)]">
+                          ({Math.round((g.contributedThisMonth / monthStats.thisMonth) * 100)}%)
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 )}
-              </div>
+              </>
             ) : (
               <p className="mt-1 text-sm text-[var(--muted)]">Set your first goal and watch it grow.</p>
             )}

@@ -457,6 +457,16 @@ export const pushSubscriptions = pgTable('push_subscriptions', {
 })
 
 /**
+ * Idempotency guard for the day-1 monthly-report push. One row per reported month
+ * (YYYY-MM); the digest endpoint inserts-if-absent before pushing so the daily job
+ * firing more than once on the 1st can't double-send the recap notification.
+ */
+export const monthReportPushes = pgTable('month_report_pushes', {
+  ym: text('ym').primaryKey(),
+  sentAt: timestamp('sent_at').defaultNow().notNull(),
+})
+
+/**
  * Brute-force throttle for the single shared login password. One row per client
  * IP: `failures` counts wrong passwords within a rolling window (windowStart),
  * and once the threshold is crossed `lockedUntil` blocks further attempts until

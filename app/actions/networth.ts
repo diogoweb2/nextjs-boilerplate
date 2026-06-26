@@ -22,7 +22,7 @@ export type NetWorthData = {
   assets: { chequing: number; investments: number }
   liabilities: { mortgage: number }
   /** Net worth at each month-end across the requested window (for the trend). */
-  series: { ym: string; value: number }[]
+  series: { ym: string; value: number; chequing: number; investments: number; mortgage: number }[]
 }
 
 /**
@@ -98,11 +98,14 @@ export async function loadNetWorth(months: string[]): Promise<NetWorthData> {
 
   const series = months.map((ym) => {
     const eom = lastDayOfMonth(ym)
-    const chequing =
+    const chequing = round2(
       (balanceAsOf('tangerine', chequingSnaps, flows, eom) ?? 0) +
       (balanceAsOf('scotia', chequingSnaps, flows, eom) ?? 0)
-    const value = chequing + investmentsAsOf(eom) - mortgageAsOf(ym)
-    return { ym, value: round2(value) }
+    )
+    const investments = round2(investmentsAsOf(eom))
+    const mortgage = round2(mortgageAsOf(ym))
+    const value = round2(chequing + investments - mortgage)
+    return { ym, value, chequing, investments, mortgage }
   })
 
   // Headline = "now": current balances minus the current mortgage balance.

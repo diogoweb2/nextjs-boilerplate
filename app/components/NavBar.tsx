@@ -11,6 +11,7 @@ const LINKS = [
   { href: '/transactions', label: 'Activity', icon: '≣' },
   { href: '/accounts', label: 'Accounts', icon: '◔' },
   { href: '/reports', label: 'Reports', icon: '↗' },
+  { href: '/report', label: 'Recap', icon: '★' },
   { href: '/manage', label: 'Manage', icon: '⚙' },
 ]
 

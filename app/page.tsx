@@ -262,9 +262,7 @@ export default async function Home({
               invertColors
               hint={totalSpendHint}
             />
-            {ov.categoryCards
-              .filter((c) => c.name !== 'Uncategorized' || c.amount !== 0)
-              .map((c) => (
+            {ov.categoryCards.map((c) => (
               <StatCard
                 key={c.name}
                 label={c.label}
@@ -275,8 +273,9 @@ export default async function Home({
                 accent={c.color}
                 budget={(goalByName.get(c.name) ?? 0) * 1}
                 href={`/transactions?category=${encodeURIComponent(c.name)}${month ? `&month=${month}` : ''}`}
+                reportHref={`/category?name=${encodeURIComponent(c.name)}`}
               />
-              ))}
+            ))}
           </div>
 
           {/* Net trajectory — burndown + year trajectory side by side */}

@@ -180,6 +180,67 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100
 }
 
+export type NetZeroProjection = {
+  /** Cumulative net (income − spend) for the year through `asOfYm`. */
+  currentNet: number
+  /** Already at/above $0 for the year. */
+  reached: boolean
+  /**
+   * Absolute month-index float (`year*12 + (month-1)`, fractional) where the
+   * running net is projected to hit $0 at the latest month's pace; null when it's
+   * unreachable (flat or worsening while still negative). Comparing this across
+   * two as-of months yields "how many days earlier / later" the crossing moved.
+   */
+  crossingIndexFloat: number | null
+  /** ISO date (YYYY-MM-DD) of the projected crossing, or null. */
+  crossingDate: string | null
+}
+
+/**
+ * Project when the year's cumulative net crosses $0, as of the end of `asOfYm`.
+ * Mirrors the "At this pace → net $0 by …" math in NetBudgetTrajectory: pace is
+ * the latest month's net (the last month-over-month step of the cumulative line).
+ * Pure (db-free) so the monthly report can run it for two consecutive as-of
+ * months and diff the result.
+ */
+export function projectNetZeroDate(all: EnrichedTxn[], asOfYm: string): NetZeroProjection {
+  const year = asOfYm.slice(0, 4)
+  const anchorMonthNum = Number(asOfYm.slice(5, 7))
+  const asOfIndex = Number(year) * 12 + (anchorMonthNum - 1)
+
+  let currentNet = 0
+  for (let m = 1; m <= anchorMonthNum; m++) {
+    const ym = `${year}-${String(m).padStart(2, '0')}`
+    currentNet += incomeOver(all, new Set([ym]), () => true) - spendOver(all, new Set([ym]))
+  }
+  currentNet = round2(currentNet)
+  // Pace = the last month's net (the final step of the cumulative line).
+  const pace = round2(incomeOver(all, new Set([asOfYm]), () => true) - spendOver(all, new Set([asOfYm])))
+
+  if (currentNet >= -0.005) {
+    return { currentNet, reached: true, crossingIndexFloat: asOfIndex, crossingDate: isoFromMonthFloat(asOfIndex) }
+  }
+  if (pace > 0) {
+    const monthsToZero = -currentNet / pace
+    if (monthsToZero <= 600) {
+      const idx = asOfIndex + monthsToZero
+      return { currentNet, reached: false, crossingIndexFloat: idx, crossingDate: isoFromMonthFloat(idx) }
+    }
+  }
+  return { currentNet, reached: false, crossingIndexFloat: null, crossingDate: null }
+}
+
+/** Absolute month-index float → an ISO date (the fractional part places the day). */
+function isoFromMonthFloat(idx: number): string {
+  const whole = Math.floor(idx)
+  const frac = idx - whole
+  const cy = Math.floor(whole / 12)
+  const cm = (whole % 12) + 1 // 1-based
+  const dim = new Date(cy, cm, 0).getDate()
+  const day = Math.min(dim, Math.max(1, Math.round(frac * dim) || 1))
+  return `${cy}-${String(cm).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
 export type NetTrajectoryPoint = { date: string; net: number }
 
 export type NetTrajectory = {
