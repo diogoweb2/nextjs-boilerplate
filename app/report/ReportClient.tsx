@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { formatCurrency } from '@/app/lib/format'
 import type { CategoryDelta, Grade, MonthReport } from '@/app/lib/monthReport'
@@ -19,12 +19,94 @@ const GRADE_BLURB: Record<string, string> = {
   F: 'Tape jammed. Reset and bounce back. 💾',
 }
 
+const FIREWORK_COLORS = ['#ff0', '#f0f', '#0ff', '#f80', '#0f8', '#fff', '#f44']
+const PARTICLE_COUNT = 120
+const BURST_COUNT = 8
+
+function Fireworks() {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [visible, setVisible] = useState(true)
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    canvas.width = window.innerWidth
+    canvas.height = window.innerHeight
+
+    type Particle = {
+      x: number; y: number; vx: number; vy: number
+      alpha: number; color: string; size: number
+    }
+
+    const particles: Particle[] = []
+
+    for (let b = 0; b < BURST_COUNT; b++) {
+      const bx = Math.random() * canvas.width
+      const by = Math.random() * canvas.height * 0.6 + canvas.height * 0.05
+      const color = FIREWORK_COLORS[Math.floor(Math.random() * FIREWORK_COLORS.length)]
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const angle = (Math.PI * 2 * i) / PARTICLE_COUNT
+        const speed = Math.random() * 6 + 2
+        particles.push({
+          x: bx, y: by,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed - Math.random() * 2,
+          alpha: 1,
+          color,
+          size: Math.random() * 3 + 1,
+        })
+      }
+    }
+
+    let raf: number
+    const tick = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      let alive = false
+      for (const p of particles) {
+        p.x += p.vx
+        p.y += p.vy
+        p.vy += 0.12
+        p.alpha -= 0.018
+        if (p.alpha <= 0) continue
+        alive = true
+        ctx.globalAlpha = p.alpha
+        ctx.fillStyle = p.color
+        ctx.beginPath()
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2)
+        ctx.fill()
+      }
+      if (alive) raf = requestAnimationFrame(tick)
+      else setVisible(false)
+    }
+    raf = requestAnimationFrame(tick)
+    const timer = setTimeout(() => setVisible(false), 2000)
+
+    return () => { cancelAnimationFrame(raf); clearTimeout(timer) }
+  }, [])
+
+  if (!visible) return null
+  return (
+    <canvas
+      ref={canvasRef}
+      className="pointer-events-none fixed inset-0 z-50"
+      style={{ width: '100vw', height: '100vh' }}
+    />
+  )
+}
+
 export function ReportClient({ report, months }: { report: MonthReport; months: string[] }) {
   const idx = months.indexOf(report.month)
   const older = idx >= 0 && idx < months.length - 1 ? months[idx + 1] : null
   const newer = idx > 0 ? months[idx - 1] : null
 
+  const isAOrBetter = ['A+', 'A', 'A-'].includes(report.grade.letter)
+
   return (
+    <>
+      {isAOrBetter && <Fireworks />}
     <div className="report-80s px-4 py-6 sm:px-6">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
         {/* Header / month nav */}
@@ -113,6 +195,7 @@ export function ReportClient({ report, months }: { report: MonthReport; months: 
         <p className="text-center text-xs text-[var(--ink-dim)]">{report.shareLine}</p>
       </div>
     </div>
+    </>
   )
 }
 
