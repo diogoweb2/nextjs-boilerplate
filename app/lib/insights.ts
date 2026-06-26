@@ -9,7 +9,7 @@ import {
 import { formatCurrency } from '@/app/lib/format'
 
 export type InsightTone = 'good' | 'warn' | 'up' | 'down' | 'neutral'
-export type InsightCard = { title: string; detail: string; tone: InsightTone }
+export type InsightCard = { title: string; detail: string; tone: InsightTone; href?: string }
 
 export type Insights = {
   cards: InsightCard[]
@@ -58,6 +58,9 @@ export function buildInsights(
 
   const cards: InsightCard[] = []
 
+  const txnHref = (extra = '') =>
+    `/transactions${start ? `?month=${start}${extra}` : extra ? `?${extra.slice(1)}` : ''}`
+
   // Overall spending direction now lives as subtext on the Total-spend KPI tile
   // (see the dashboard), so it's intentionally omitted from the insight cards.
 
@@ -74,6 +77,7 @@ export function buildInsights(
       title: `${topCat[0]} led your spending`,
       detail: `${formatCurrency(topCat[1].amount)} (${Math.round((topCat[1].amount / curTotal) * 100)}% of total) went to ${topCat[0]}.`,
       tone: 'neutral',
+      href: txnHref(`&category=${encodeURIComponent(topCat[0])}`),
     })
   }
 
@@ -101,6 +105,7 @@ export function buildInsights(
           ? `Up ${formatCurrency(m.delta)} vs the previous period.`
           : `Down ${formatCurrency(Math.abs(m.delta))} vs the previous period.`,
       tone: m.delta > 0 ? 'up' : 'good',
+      href: txnHref(`&category=${encodeURIComponent(m.name)}`),
     })
   }
 
@@ -123,6 +128,7 @@ export function buildInsights(
         .map((m) => m.name)
         .join(', ')}${newMerchants.length > 3 ? '…' : ''}.`,
       tone: 'neutral',
+      href: txnHref(),
     })
   }
 
@@ -142,6 +148,7 @@ export function buildInsights(
         .map(([name, amount]) => `${name} (${formatCurrency(amount)})`)
         .join(', ')} dominate your spending this period.`,
       tone: 'warn',
+      href: txnHref(),
     })
   }
 
@@ -167,6 +174,7 @@ export function buildInsights(
       title: 'Unusual purchase spotted',
       detail: `${formatCurrency(outliers[0].amount)} at ${outliers[0].merchant} is well above its usual ${formatCurrency(outliers[0].typical)}.`,
       tone: 'warn',
+      href: txnHref(),
     })
   }
 
@@ -189,6 +197,7 @@ export function buildInsights(
         .map((s) => s.name)
         .join(', ')} didn't appear this period — confirm they're still active or were cancelled.`,
       tone: 'neutral',
+      href: '/budget/bills',
     })
   }
 

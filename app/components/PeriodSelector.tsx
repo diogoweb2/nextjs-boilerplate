@@ -28,6 +28,7 @@ export function PeriodSelector({
   showSpecialToggle = true,
   showCurrent = false,
   currentMonthDefault = false,
+  monthDropdownOnly = false,
   availableMonths,
   periodOptions,
   extraOptions,
@@ -37,6 +38,8 @@ export function PeriodSelector({
   showCurrent?: boolean
   /** When true, no selection means "the current (latest) month"; adds an explicit "All months". */
   currentMonthDefault?: boolean
+  /** When true: render only the month dropdown (no Current button, no pills, no All option). */
+  monthDropdownOnly?: boolean
   availableMonths?: string[]
   periodOptions?: number[]
   /** Additional pill buttons that set ?period=X instead of ?months=N. */
@@ -75,7 +78,7 @@ export function PeriodSelector({
 
   return (
     <div className={`flex flex-wrap items-center gap-2 ${pending ? 'opacity-70' : ''}`}>
-      {showCurrent && (
+      {!monthDropdownOnly && showCurrent && (
         <button
           onClick={() => update({ period: 'current', months: null, month: null })}
           className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
@@ -105,59 +108,61 @@ export function PeriodSelector({
               {formatMonthLabel(ym)}
             </option>
           ))}
-          {currentMonthDefault && <option value="all">All months</option>}
+          {!monthDropdownOnly && currentMonthDefault && <option value="all">All months</option>}
         </select>
       )}
 
-      <div
-        className={`inline-flex rounded-lg border border-[var(--border)] bg-[var(--surface)] p-0.5 transition-opacity ${
-          hasExactMonth ? 'opacity-40' : ''
-        }`}
-      >
-        {leadingExtraOptions?.map((o) => (
-          <button
-            key={o.period}
-            onClick={() => update({ period: o.period, months: null, month: null })}
-            className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${
-              !hasExactMonth && currentPeriod === o.period
-                ? 'bg-[var(--accent)] text-[var(--accent-fg)]'
-                : 'text-[var(--muted)] hover:text-[var(--foreground)]'
-            }`}
-          >
-            {o.label}
-          </button>
-        ))}
-        {buildOptions(periodOptions).map((o) => (
-          <button
-            key={o.months}
-            onClick={() => update({ months: String(o.months), month: null, period: null })}
-            className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${
-              !hasExactMonth &&
-              !isCurrent &&
-              !isExtraPeriod &&
-              months === o.months &&
-              (!currentMonthDefault || hasMonthsParam)
-                ? 'bg-[var(--accent)] text-[var(--accent-fg)]'
-                : 'text-[var(--muted)] hover:text-[var(--foreground)]'
-            }`}
-          >
-            {o.label}
-          </button>
-        ))}
-        {extraOptions?.map((o) => (
-          <button
-            key={o.period}
-            onClick={() => update({ period: o.period, months: null, month: null })}
-            className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${
-              !hasExactMonth && currentPeriod === o.period
-                ? 'bg-[var(--accent)] text-[var(--accent-fg)]'
-                : 'text-[var(--muted)] hover:text-[var(--foreground)]'
-            }`}
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
+      {!monthDropdownOnly && (
+        <div
+          className={`inline-flex rounded-lg border border-[var(--border)] bg-[var(--surface)] p-0.5 transition-opacity ${
+            hasExactMonth ? 'opacity-40' : ''
+          }`}
+        >
+          {leadingExtraOptions?.map((o) => (
+            <button
+              key={o.period}
+              onClick={() => update({ period: o.period, months: null, month: null })}
+              className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${
+                !hasExactMonth && currentPeriod === o.period
+                  ? 'bg-[var(--accent)] text-[var(--accent-fg)]'
+                  : 'text-[var(--muted)] hover:text-[var(--foreground)]'
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+          {buildOptions(periodOptions).map((o) => (
+            <button
+              key={o.months}
+              onClick={() => update({ months: String(o.months), month: null, period: null })}
+              className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${
+                !hasExactMonth &&
+                !isCurrent &&
+                !isExtraPeriod &&
+                months === o.months &&
+                (!currentMonthDefault || hasMonthsParam)
+                  ? 'bg-[var(--accent)] text-[var(--accent-fg)]'
+                  : 'text-[var(--muted)] hover:text-[var(--foreground)]'
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+          {extraOptions?.map((o) => (
+            <button
+              key={o.period}
+              onClick={() => update({ period: o.period, months: null, month: null })}
+              className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${
+                !hasExactMonth && currentPeriod === o.period
+                  ? 'bg-[var(--accent)] text-[var(--accent-fg)]'
+                  : 'text-[var(--muted)] hover:text-[var(--foreground)]'
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {showSpecialToggle && (
         <button

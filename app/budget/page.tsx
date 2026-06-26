@@ -2,11 +2,14 @@ import { db } from '@/db'
 import { categories, budgetGoals } from '@/db/schema'
 import { Card, EmptyHint } from '@/app/components/AppShell'
 import { BudgetPlanner } from '@/app/components/BudgetPlanner'
-import { loadAllFlows } from '@/app/lib/analytics'
+import { BudgetRuleChart } from '@/app/components/charts/BudgetRuleChart'
+import { loadAllFlows, anchorMonth } from '@/app/lib/analytics'
 import { computeBudget, type CategoryMeta } from '@/app/lib/budget'
+import { computeBudgetRule } from '@/app/lib/fifty-thirty-twenty'
 import { getBudgetSettings } from '@/app/actions/budget'
 import { loadProjectionRules } from '@/app/actions/projection'
 import { loadTfsaRoomSummary } from '@/app/actions/investments'
+import { loadManualSavingsContributions } from '@/app/actions/goals'
 import { formatCurrency } from '@/app/lib/format'
 import { isDemoSession } from '@/app/lib/demo'
 
@@ -28,6 +31,9 @@ export default async function BudgetPage() {
       ])
 
   const tfsa = await loadTfsaRoomSummary()
+  const manualContributions = demo
+    ? (await import('@/app/lib/demo-data')).demoManualSavingsContributions()
+    : await loadManualSavingsContributions()
 
   const meta: CategoryMeta[] = catRows.map((c) => ({ id: c.id, name: c.name, color: c.color, kind: c.kind }))
   const savedGoals = new Map(goalRows.map((g) => [g.categoryId, Number(g.goalAmount)]))
@@ -38,6 +44,16 @@ export default async function BudgetPage() {
     rules,
     budgetedMonth: settings.budgetedMonth,
   })
+
+  const anchor = anchorMonth(all.filter((t) => t.flow === 'expense'))
+  const bucketMeta = catRows.map((c) => ({ name: c.name, kind: c.kind, bucket: c.bucket }))
+  const budgetRule = anchor
+    ? computeBudgetRule(all, bucketMeta, {
+        start: anchor,
+        end: anchor,
+        manualContributions,
+      })
+    : null
 
   return (
     <>
@@ -66,7 +82,24 @@ export default async function BudgetPage() {
           <EmptyHint>No data yet. Import a statement from the Overview page.</EmptyHint>
         </Card>
       ) : (
-        <BudgetPlanner data={data} autoPropose={!demo} />
+        <>
+          <BudgetPlanner data={data} autoPropose={!demo} />
+
+          {budgetRule?.hasData && (
+            <div className="mt-5">
+              <Card
+                title="50/30/20 rule"
+                action={
+                  <a href="/manage" className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]">
+                    edit buckets →
+                  </a>
+                }
+              >
+                <BudgetRuleChart data={budgetRule} />
+              </Card>
+            </div>
+          )}
+        </>
       )}
     </>
   )

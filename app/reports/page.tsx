@@ -2,9 +2,13 @@ import Link from 'next/link'
 import { Card, EmptyHint } from '@/app/components/AppShell'
 import { PeriodSelector } from '@/app/components/PeriodSelector'
 import { LineChart } from '@/app/components/charts/LineChart'
-import { loadEnriched, buildTrends, anchorMonth, availableMonths } from '@/app/lib/analytics'
+import { Donut } from '@/app/components/charts/Donut'
+import { BarList } from '@/app/components/charts/BarList'
+import { WeekdayChart } from '@/app/components/charts/WeekdayChart'
+import { loadEnriched, buildTrends, buildOverview, anchorMonth, availableMonths } from '@/app/lib/analytics'
+import { buildInsights } from '@/app/lib/insights'
 import { parsePeriodParams } from '@/app/lib/params'
-import { formatCurrency, formatCurrencyCompact, formatMonth } from '@/app/lib/format'
+import { formatCurrency, formatCurrencyCompact, formatMonth, formatShortDate } from '@/app/lib/format'
 import { loadNetWorth } from '@/app/actions/networth'
 
 export const dynamic = 'force-dynamic'
@@ -34,6 +38,8 @@ export default async function ReportsTrendsPage({
 
   const trends = buildTrends(all, months, excludeSpecial)
   const netWorth = await loadNetWorth(trends.months_labels)
+  const ov = buildOverview(all, months, excludeSpecial)
+  const insights = buildInsights(all, months, excludeSpecial)
 
   const totalValues = trends.total.map((t) => t.amount)
   const avg = totalValues.length ? totalValues.reduce((a, b) => a + b, 0) / totalValues.length : 0
@@ -175,6 +181,94 @@ export default async function ReportsTrendsPage({
               </ul>
             </Card>
           </div>
+
+          {/* Where it went + top merchants */}
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+            <Card title="Where it went">
+              {ov.byCategory.length ? (
+                <Donut
+                  total={ov.gross}
+                  segments={ov.byCategory.map((c) => ({
+                    name: c.name,
+                    color: c.color,
+                    amount: c.amount,
+                    pct: c.pct,
+                  }))}
+                />
+              ) : (
+                <EmptyHint>No categorized spend in this period.</EmptyHint>
+              )}
+            </Card>
+
+            <Card title="Top merchants">
+              {ov.topMerchants.length ? (
+                <BarList
+                  items={ov.topMerchants.map((m) => ({
+                    label: m.name,
+                    amount: m.amount,
+                    sublabel: `${m.count} txn`,
+                  }))}
+                />
+              ) : (
+                <EmptyHint>No merchants in this period.</EmptyHint>
+              )}
+            </Card>
+          </div>
+
+          {/* Spending by weekday */}
+          <Card title="Spending by weekday">
+            <WeekdayChart data={ov.byWeekday} />
+            <p className="mt-3 text-xs text-[var(--muted)]">
+              {Math.round(ov.weekendShare * 100)}% of spending happens on weekends.
+            </p>
+          </Card>
+
+          {/* New & unusual */}
+          <Card title="New & unusual">
+            <div className="flex flex-col gap-3">
+              <div>
+                <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                  New merchants
+                </h3>
+                {insights.newMerchants.length ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {insights.newMerchants.map((m) => (
+                      <span
+                        key={m.name}
+                        className="rounded-full bg-[var(--surface-2)] px-2.5 py-1 text-xs"
+                      >
+                        {m.name} · {formatCurrencyCompact(m.amount)}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-[var(--muted)]">None this period.</p>
+                )}
+              </div>
+              <div>
+                <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                  Larger than usual
+                </h3>
+                {insights.outliers.length ? (
+                  <ul className="flex flex-col gap-1">
+                    {insights.outliers.map((o, i) => (
+                      <li key={i} className="flex justify-between gap-2 text-xs">
+                        <span className="truncate">
+                          {o.merchant}{' '}
+                          <span className="text-[var(--muted)]">({formatShortDate(o.date)})</span>
+                        </span>
+                        <span className="shrink-0 tabular-nums font-medium">
+                          {formatCurrency(o.amount)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-[var(--muted)]">Nothing unusual.</p>
+                )}
+              </div>
+            </div>
+          </Card>
         </div>
       )}
     </>
