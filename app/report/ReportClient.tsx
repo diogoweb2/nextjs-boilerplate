@@ -100,11 +100,6 @@ export function ReportClient({ report, months }: { report: MonthReport; months: 
             <div className="report-neon-cyan text-3xl font-extrabold tabular-nums">
               {formatCurrency(report.netWorth)}
             </div>
-            {report.netWorthBreakdown && (
-              <div className="mt-1 text-xs text-[var(--ink-dim)]">
-                Chequing {formatCurrency(report.netWorthBreakdown.chequing)} + Investments {formatCurrency(report.netWorthBreakdown.investments)} − Mortgage {formatCurrency(report.netWorthBreakdown.mortgage)}
-              </div>
-            )}
             {report.netWorthDeltaPct && (
               <Delta
                 good={report.netWorthDeltaPct.direction !== 'down'}
