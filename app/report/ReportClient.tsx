@@ -68,8 +68,8 @@ function Fireworks() {
       for (const p of particles) {
         p.x += p.vx
         p.y += p.vy
-        p.vy += 0.12
-        p.alpha -= 0.018
+        p.vy += 0.07
+        p.alpha -= 0.008
         if (p.alpha <= 0) continue
         alive = true
         ctx.globalAlpha = p.alpha
@@ -82,7 +82,7 @@ function Fireworks() {
       else setVisible(false)
     }
     raf = requestAnimationFrame(tick)
-    const timer = setTimeout(() => setVisible(false), 2000)
+    const timer = setTimeout(() => setVisible(false), 5000)
 
     return () => { cancelAnimationFrame(raf); clearTimeout(timer) }
   }, [])
