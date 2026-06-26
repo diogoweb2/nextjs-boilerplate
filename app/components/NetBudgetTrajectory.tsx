@@ -190,7 +190,7 @@ export function NetBudgetTrajectory({
           />
         ))}
         {actual.map((p) => (
-          <circle key={p.i} cx={x(p.i)} cy={y(p.v)} r={2.8} fill={dotColor}>
+          <circle key={p.i} cx={x(p.i)} cy={y(p.v)} r={2.8} fill={p.v >= 0 ? LINE_GREEN : LINE_RED}>
             <title>{`${formatMonth(labels[p.i])}: ${formatCurrencyCompact(p.v)}`}</title>
           </circle>
         ))}

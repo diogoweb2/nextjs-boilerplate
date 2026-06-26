@@ -83,7 +83,7 @@ export function ProjectDetailView({
   return (
     <div className={`flex flex-col gap-4 ${pending ? 'opacity-70 transition-opacity' : ''}`}>
       <div className="flex items-center justify-between">
-        <Link href="/projects" className="text-sm text-[var(--muted)] hover:text-[var(--foreground)]">
+        <Link href="/manage/projects" className="text-sm text-[var(--muted)] hover:text-[var(--foreground)]">
           ← Projects
         </Link>
         <div className="flex items-center gap-2">

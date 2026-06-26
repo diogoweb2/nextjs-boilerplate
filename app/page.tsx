@@ -411,7 +411,7 @@ export default async function Home({
                 <Card
                   title="50/30/20 rule"
                   action={
-                    <a href="/categories" className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]">
+                    <a href="/manage" className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]">
                       edit buckets →
                     </a>
                   }
@@ -423,7 +423,7 @@ export default async function Home({
               <Card
                 title="Emergency runway"
                 action={
-                  <a href="/goals" className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]">
+                  <a href="/accounts/emergency" className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]">
                     fund →
                   </a>
                 }

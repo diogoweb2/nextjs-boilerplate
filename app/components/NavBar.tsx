@@ -7,16 +7,11 @@ import { logout } from '@/app/actions/auth'
 
 const LINKS = [
   { href: '/', label: 'Overview', icon: '◎' },
-  { href: '/goals', label: 'Goals', icon: '◔' },
-  { href: '/investments', label: 'Investments', icon: '▲' },
-  { href: '/income', label: 'Income', icon: '＄' },
   { href: '/budget', label: 'Budget', icon: '◇' },
-  { href: '/trends', label: 'Trends', icon: '↗' },
-  { href: '/custom', label: 'Custom', icon: '⊕' },
-  { href: '/merchants', label: 'Merchants', icon: '◆' },
   { href: '/transactions', label: 'Activity', icon: '≣' },
-  { href: '/projects', label: 'Projects', icon: '▦' },
-  { href: '/settings', label: 'Settings', icon: '⚙' },
+  { href: '/accounts', label: 'Accounts', icon: '◔' },
+  { href: '/reports', label: 'Reports', icon: '↗' },
+  { href: '/manage', label: 'Manage', icon: '⚙' },
 ]
 
 // On mobile only the first few links live in the bottom bar; the rest collapse
@@ -47,8 +42,8 @@ export function NavBar() {
     const month = searchParams.get('month')
     const months = searchParams.get('months')
     const special = searchParams.get('special')
-    if (href === '/trends') {
-      // month has no meaning in trends; default to 2M (skip 1M, it's not useful for trends)
+    if (href === '/reports') {
+      // month has no meaning in reports/trends; default to 2M (skip 1M, it's not useful)
       const trendsMonths = months && months !== '1' ? months : '2'
       preserved.push(`months=${trendsMonths}`)
     } else {

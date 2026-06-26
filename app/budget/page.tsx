@@ -1,6 +1,6 @@
 import { db } from '@/db'
 import { categories, budgetGoals } from '@/db/schema'
-import { AppShell, Card, EmptyHint } from '@/app/components/AppShell'
+import { Card, EmptyHint } from '@/app/components/AppShell'
 import { BudgetPlanner } from '@/app/components/BudgetPlanner'
 import { loadAllFlows } from '@/app/lib/analytics'
 import { computeBudget, type CategoryMeta } from '@/app/lib/budget'
@@ -40,17 +40,10 @@ export default async function BudgetPage() {
   })
 
   return (
-    <AppShell>
-      <div className="mb-5">
-        <h1 className="text-xl font-bold tracking-tight">Budget</h1>
-        <p className="text-sm text-[var(--muted)]">
-          How much can I spend this month — excluding unavoidable bills — to finish the year net 0?
-        </p>
-      </div>
-
+    <>
       {tfsa.hasTfsa && (
         <a
-          href="/investments"
+          href="/accounts/investments"
           className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3 transition-colors hover:border-[var(--accent)]"
         >
           <div>
@@ -75,6 +68,6 @@ export default async function BudgetPage() {
       ) : (
         <BudgetPlanner data={data} autoPropose={!demo} />
       )}
-    </AppShell>
+    </>
   )
 }

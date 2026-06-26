@@ -599,8 +599,8 @@ export function BudgetPlanner({ data, autoPropose = true }: { data: BudgetData; 
       <Card
         title="Unavoidable this month"
         action={
-          <Link href="/settings" className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]">
-            manage in Settings →
+          <Link href="/budget/bills" className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]">
+            manage bills →
           </Link>
         }
       >
