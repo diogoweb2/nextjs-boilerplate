@@ -56,10 +56,7 @@ function GoalRow({ goal }: { goal: GoalView }) {
         {goal.emoji}
       </span>
       <div className="min-w-0 flex-1">
-        <div className="flex items-baseline justify-between gap-2">
-          <span className="truncate text-sm font-medium">{goal.name}</span>
-          <span className="shrink-0 text-sm font-semibold tabular-nums">{formatCurrency(value)}</span>
-        </div>
+        <span className="block truncate text-sm font-medium">{goal.name}</span>
         {!isMortgage && !isNetZero && goal.targetAmount && pct !== null ? (
           <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--surface-2)]">
             <div className="h-full rounded-full" style={{ width: `${pct}%`, background: goal.color }} />
@@ -68,7 +65,10 @@ function GoalRow({ goal }: { goal: GoalView }) {
           <p className="mt-0.5 truncate text-xs text-[var(--muted)]">{goal.milestone}</p>
         )}
       </div>
-      <div className="shrink-0">{status}</div>
+      <div className="flex shrink-0 flex-col items-end gap-1 text-right">
+        <span className="text-sm font-semibold tabular-nums">{formatCurrency(value)}</span>
+        {status}
+      </div>
     </li>
   )
 }
