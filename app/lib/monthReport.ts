@@ -20,6 +20,7 @@ import {
   monthKey,
   netOverRange,
   buildOverview,
+  categoryCredits,
   type EnrichedTxn,
 } from '@/app/lib/analytics'
 import { projectNetZeroDate, FIXED_CATEGORIES } from '@/app/lib/budget'
@@ -315,8 +316,9 @@ export async function buildMonthReport(targetYm?: string | null): Promise<Report
   const movedToGoals = goalMap.get(month) ?? 0
   const movedToGoalsPrev = goalMap.get(prevMonth) ?? 0
 
-  const curOv = buildOverview(flows, 1, false, month)
-  const prevOv = buildOverview(flows, 1, false, prevMonth)
+  const credits = categoryCredits(flows)
+  const curOv = buildOverview(flows, 1, false, month, credits)
+  const prevOv = buildOverview(flows, 1, false, prevMonth, credits)
   const { best, worst } = categoryDeltas(curOv.byCategory, prevOv.byCategory)
   const curDisc = discretionaryTotal(curOv.byCategory)
   const prevDisc = discretionaryTotal(prevOv.byCategory)

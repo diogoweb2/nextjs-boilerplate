@@ -19,6 +19,7 @@ export type EnrichedTxn = {
   categoryId: number | null
   categoryName: string
   categoryColor: string
+  categoryKind: 'expense' | 'income' | 'neutral' | null
   isRecurring: boolean
   isSpecial: boolean
   batchId: number | null
@@ -78,6 +79,7 @@ export async function loadAllFlows(): Promise<EnrichedTxn[]> {
         categoryId: effectiveCatId,
         categoryName: cat?.name ?? NO_CATEGORY.name,
         categoryColor: cat?.color ?? NO_CATEGORY.color,
+        categoryKind: cat?.kind ?? null,
         isRecurring: r.txnRecurring ?? r.merchantRecurring,
         isSpecial: r.txnSpecial ?? r.merchantSpecial,
         batchId: r.batchId,
@@ -94,6 +96,47 @@ export async function loadAllFlows(): Promise<EnrichedTxn[]> {
 export async function loadEnriched(): Promise<EnrichedTxn[]> {
   const all = await loadAllFlows()
   return all.filter((t) => t.flow === 'expense')
+}
+
+/**
+ * "Category credits" — income filed under an *expense* category. Per BUSINESS_RULES
+ * these are reimbursements that net against the category (e.g. dental insurance
+ * under Dental), and a goal-spend "applied to a category" (pulling from a
+ * kitchen-reno goal into Home to cover that purchase) is recorded the same way.
+ * Ordinary income lives in income/neutral categories, so it's never picked up here.
+ * The spend aggregations (`buildOverview`, `buildTrends`) subtract these per
+ * category so the covered/reimbursed spend drops out of that category's tile /
+ * report — matching the 50/30/20 rule's per-category net. Income stored negative,
+ * so the caller negates to get a positive offset.
+ */
+export function categoryCredits(flows: EnrichedTxn[]): EnrichedTxn[] {
+  return flows.filter((t) => t.flow === 'income' && t.categoryId !== null && t.categoryKind === 'expense')
+}
+
+/** Convenience for pages that only load the expense set via `loadEnriched`: the
+ *  category credits to pass alongside into `buildOverview`/`buildTrends`. */
+export async function loadCategoryCredits(): Promise<EnrichedTxn[]> {
+  return categoryCredits(await loadAllFlows())
+}
+
+/** Sum credits (as positive offsets) per category name over the rows the
+ *  predicate keeps. Shared by the overview/trends netting. */
+function creditByCategory(credits: EnrichedTxn[], inRange: (t: EnrichedTxn) => boolean): Map<string, number> {
+  const m = new Map<string, number>()
+  for (const t of credits) {
+    if (!inRange(t)) continue
+    m.set(t.categoryName, (m.get(t.categoryName) ?? 0) + -t.amount)
+  }
+  return m
+}
+
+/** Apply a credit map to a category-total map in place, clamped at 0. */
+function applyCredits(catMap: Map<string, number>, credits: Map<string, number>): void {
+  for (const [name, credit] of credits) {
+    const cur = catMap.get(name)
+    if (cur === undefined) continue
+    catMap.set(name, Math.max(0, cur - credit))
+  }
 }
 
 // ---------- period helpers ----------
@@ -214,7 +257,8 @@ export function buildOverview(
   all: EnrichedTxn[],
   months: number,
   excludeSpecial: boolean,
-  exactMonth?: string | null
+  exactMonth?: string | null,
+  credits: EnrichedTxn[] = []
 ): Overview {
   const anchor = anchorMonth(all)
   if (!anchor) {
@@ -242,13 +286,19 @@ export function buildOverview(
 
   const prevEnd = addMonths(start, -1)
   const prevStart = exactMonth ? prevEnd : addMonths(prevEnd, -(months - 1))
-  const prev = filtered.filter((t) => {
+  const inPrevWindow = (t: EnrichedTxn) => {
     const ym = monthKey(t.txnDate)
     if (ym < prevStart || ym > prevEnd) return false
     // Clamp the month aligned with the partial anchor month to the same days.
     if (includesAnchor && ym === prevEnd && dayOfMonth(t.txnDate) > anchorDay) return false
     return true
-  })
+  }
+  const prev = filtered.filter(inPrevWindow)
+
+  // Goal-spend credits "applied to a category" reduce that category's spend.
+  const creditPool = excludeSpecial ? credits.filter((t) => !t.isSpecial) : credits
+  const curCredit = creditByCategory(creditPool, (t) => inWindow(t, start, end))
+  const prevCredit = creditByCategory(creditPool, inPrevWindow)
 
   const purchases = cur.filter((t) => t.amount > 0)
   const gross = sum(purchases.map((t) => t.amount))
@@ -264,11 +314,16 @@ export function buildOverview(
   // Per-category quick tiles: top 7 by current spend + always Uncategorized if non-zero.
   const prevCatMap = new Map<string, number>()
   for (const t of prevPurchases) prevCatMap.set(t.categoryName, (prevCatMap.get(t.categoryName) ?? 0) + t.amount)
+  applyCredits(prevCatMap, prevCredit)
   const curCatMap = new Map<string, { color: string; amount: number }>()
   for (const t of purchases) {
     const e = curCatMap.get(t.categoryName) ?? { color: t.categoryColor, amount: 0 }
     e.amount += t.amount
     curCatMap.set(t.categoryName, e)
+  }
+  for (const [name, credit] of curCredit) {
+    const e = curCatMap.get(name)
+    if (e) e.amount = Math.max(0, e.amount - credit)
   }
   const uncatEntry = curCatMap.get('Uncategorized')
   const categoryCards = [
@@ -282,12 +337,16 @@ export function buildOverview(
       : []),
   ]
 
-  // Category breakdown (gross purchases only).
+  // Category breakdown (gross purchases, net of any goal-spend credits).
   const catTotals = new Map<string, { color: string; amount: number }>()
   for (const t of purchases) {
     const e = catTotals.get(t.categoryName) ?? { color: t.categoryColor, amount: 0 }
     e.amount += t.amount
     catTotals.set(t.categoryName, e)
+  }
+  for (const [name, credit] of curCredit) {
+    const e = catTotals.get(name)
+    if (e) e.amount = Math.max(0, e.amount - credit)
   }
   const byCategory = [...catTotals.entries()]
     .map(([name, v]) => ({ name, color: v.color, amount: v.amount, pct: gross ? v.amount / gross : 0 }))
@@ -411,11 +470,22 @@ export function buildTrends(
   all: EnrichedTxn[],
   months: number,
   excludeSpecial: boolean,
-  exactMonth?: string | null
+  exactMonth?: string | null,
+  credits: EnrichedTxn[] = []
 ): Trends {
   const anchor = anchorMonth(all)
   if (!anchor) return { hasData: false, anchor: null, months, total: [], categories: [], months_labels: [] }
   const filtered = excludeSpecial ? all.filter((t) => !t.isSpecial) : all
+
+  // Goal-spend credits applied to a category, summed per category + month, so each
+  // category's monthly series drops by the spend the goal covered. Income stored
+  // negative → negate for a positive offset.
+  const creditPool = excludeSpecial ? credits.filter((t) => !t.isSpecial) : credits
+  const creditByCatYm = new Map<string, number>()
+  for (const t of creditPool) {
+    const key = `${t.categoryName}|${monthKey(t.txnDate)}`
+    creditByCatYm.set(key, (creditByCatYm.get(key) ?? 0) + -t.amount)
+  }
 
   const labels: string[] = []
   if (exactMonth) {
@@ -437,13 +507,14 @@ export function buildTrends(
 
   const categories = [...catMeta.entries()]
     .map(([name, meta]) => {
-      const series = labels.map((ym) =>
-        sum(
+      const series = labels.map((ym) => {
+        const gross = sum(
           filtered
             .filter((t) => t.amount > 0 && t.categoryName === name && monthKey(t.txnDate) === ym)
             .map((t) => t.amount)
         )
-      )
+        return Math.max(0, gross - (creditByCatYm.get(`${name}|${ym}`) ?? 0))
+      })
       return { name, color: meta.color, categoryId: meta.id, series, total: sum(series) }
     })
     .filter((c) => c.total > 0)

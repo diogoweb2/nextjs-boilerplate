@@ -72,7 +72,11 @@ function incomeSourceOf(t: EnrichedTxn, self: string, partner: string): { key: s
   if (t.categoryName === 'Family Support') return { key: 'family', name: 'Family', color: SOURCE_COLORS.family }
   if (t.categoryName === 'Insurance') return { key: 'insurance', name: 'Insurance', color: SOURCE_COLORS.insurance }
   if (t.categoryName === 'Benefits') return { key: 'benefits', name: 'Benefits', color: SOURCE_COLORS.benefits }
-  if (t.categoryName === 'Goal Spend') return { key: 'goal', name: 'Goal Spend', color: SOURCE_COLORS.goal }
+  // A goal-spend offset — the plain "Goal Spend" bucket, or one "applied to" an
+  // expense category (e.g. Home) to cover that purchase. Either way it's a wash,
+  // not real income, so it stays in the hidden goal bucket rather than "Other".
+  if (t.categoryName === 'Goal Spend' || t.categoryKind === 'expense')
+    return { key: 'goal', name: 'Goal Spend', color: SOURCE_COLORS.goal }
   return { key: 'other', name: 'Other', color: SOURCE_COLORS.other }
 }
 

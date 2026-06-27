@@ -13,7 +13,7 @@ import { StatCard } from '@/app/components/charts/StatCard'
 import { InsightCard } from '@/app/components/InsightCard'
 import { BurndownTrajectory } from '@/app/components/BurndownTrajectory'
 import { NetBudgetTrajectory } from '@/app/components/NetBudgetTrajectory'
-import { loadAllFlows, buildOverview, availableMonths, anchorMonth } from '@/app/lib/analytics'
+import { loadAllFlows, buildOverview, availableMonths, anchorMonth, categoryCredits } from '@/app/lib/analytics'
 import { buildInsights, type InsightCard as InsightCardData } from '@/app/lib/insights'
 import { parsePeriodParams } from '@/app/lib/params'
 import { computeBudget, FIXED_CATEGORIES, type CategoryMeta } from '@/app/lib/budget'
@@ -21,10 +21,13 @@ import { computeMonthBurndown, unavoidableMerchantIds, type BurndownData } from 
 import { getBudgetSettings } from '@/app/actions/budget'
 import { loadProjectionRules } from '@/app/actions/projection'
 import { recentCharges } from '@/app/lib/digest'
-import { loadPendingReviews } from '@/app/actions/goals'
+import { loadPendingReviews, loadGoalsData } from '@/app/actions/goals'
+import { loadSurplusPrompts } from '@/app/actions/surplus'
 import { loadEmergencyFund } from '@/app/actions/emergency'
 import { isDemoSession } from '@/app/lib/demo'
 import { TransferReview } from '@/app/components/TransferReview'
+import { SurplusAllocation } from '@/app/components/SurplusAllocation'
+import { GoalsSummary } from '@/app/components/GoalsSummary'
 import { buildBudgetInsights } from '@/app/lib/dashboard-insights'
 import {
   formatCurrency,
@@ -60,7 +63,7 @@ export default async function Home({
       .then((rows) => rows[0]?.lastSuccessAt?.toISOString() ?? null)
 
   const demo = await isDemoSession()
-  const [allFlows, catRows, goalRows, settings, rules, syncTimes, syncRunRows, pendingReviews, backupLastSuccess] = demo
+  const [allFlows, catRows, goalRows, settings, rules, syncTimes, syncRunRows, pendingReviews, backupLastSuccess, surplusPrompts] = demo
     ? await (async () => {
         const d = await import('@/app/lib/demo-data')
         return [
@@ -73,6 +76,7 @@ export default async function Home({
           [] as (typeof syncRuns.$inferSelect)[],
           d.demoPendingReviews(),
           null as string | null,
+          d.demoSurplusPrompts(),
         ] as const
       })()
     : await Promise.all([
@@ -85,6 +89,7 @@ export default async function Home({
         db.select().from(syncRuns),
         loadPendingReviews(),
         lastBackupQuery(),
+        loadSurplusPrompts(),
       ])
 
   const syncFailures: SyncFailure[] = SYNC_SOURCES.flatMap((s) => {
@@ -110,7 +115,7 @@ export default async function Home({
   const months_available = availableMonths(all)
   // Dashboard always shows a single month; default to the current (anchor) month.
   const exactMonth = month ?? anchor
-  const ov = buildOverview(all, 1, excludeSpecial, exactMonth)
+  const ov = buildOverview(all, 1, excludeSpecial, exactMonth, categoryCredits(allFlows))
 
   const insights = buildInsights(all, 1, excludeSpecial, exactMonth)
 
@@ -181,6 +186,7 @@ export default async function Home({
     : []
 
   const emergency = await loadEmergencyFund()
+  const goalsSummary = await loadGoalsData()
 
   const budgetInsights = buildBudgetInsights(budget, burndown)
   const allInsightCards = ov.hasData ? [...budgetInsights, ...statInsights, ...insights.cards] : []
@@ -219,6 +225,12 @@ export default async function Home({
       {pendingReviews.length > 0 && (
         <div className="mb-5">
           <TransferReview reviews={pendingReviews} />
+        </div>
+      )}
+
+      {surplusPrompts.length > 0 && (
+        <div className="mb-5">
+          <SurplusAllocation prompts={surplusPrompts} />
         </div>
       )}
 
@@ -318,6 +330,9 @@ export default async function Home({
               )}
             </div>
           )}
+
+          {/* Goals summary — read-only mini view of /accounts */}
+          <GoalsSummary goals={goalsSummary.goals} />
 
           {/* Quick insights */}
           {allInsightCards.length > 0 && (

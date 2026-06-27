@@ -126,11 +126,13 @@ export function GoalsManager({
   asOfYm,
   suggestNetZero,
   monthStats,
+  spendCategories,
 }: {
   goals: GoalView[]
   asOfYm: string
   suggestNetZero: boolean
   monthStats: { thisMonth: number; lastMonth: number }
+  spendCategories: { id: number; name: string }[]
 }) {
   const active = goals.filter((g) => !g.archived)
   const archived = goals.filter((g) => g.archived)
@@ -193,6 +195,7 @@ export function GoalsManager({
               key={g.id}
               goal={g}
               asOfYm={asOfYm}
+              spendCategories={spendCategories}
               drag={active.length > 1 ? orderedActive.dragPropsFor(g.id) : undefined}
             />
           ))}
@@ -209,7 +212,7 @@ export function GoalsManager({
           {showArchived && (
             <div className="mt-3 grid grid-cols-1 gap-5 lg:grid-cols-2">
               {archived.map((g) => (
-                <GoalCard key={g.id} goal={g} asOfYm={asOfYm} />
+                <GoalCard key={g.id} goal={g} asOfYm={asOfYm} spendCategories={spendCategories} />
               ))}
             </div>
           )}
@@ -221,7 +224,17 @@ export function GoalsManager({
 
 type Panel = 'none' | 'add' | 'spend' | 'adjust' | 'balance' | 'edit'
 
-function GoalCard({ goal, asOfYm, drag }: { goal: GoalView; asOfYm: string; drag?: DragProps }) {
+function GoalCard({
+  goal,
+  asOfYm,
+  spendCategories,
+  drag,
+}: {
+  goal: GoalView
+  asOfYm: string
+  spendCategories: { id: number; name: string }[]
+  drag?: DragProps
+}) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [panel, setPanel] = useState<Panel>('none')
@@ -323,7 +336,10 @@ function GoalCard({ goal, asOfYm, drag }: { goal: GoalView; asOfYm: string; drag
       {panel === 'spend' && (
         <SpendMoneyPanel
           max={goal.value}
-          onSubmit={(amount, asIncome, note) => run(() => spendFromGoal({ goalId: goal.id, amount, asIncome, note }))}
+          categories={spendCategories}
+          onSubmit={(amount, asIncome, note, categoryId) =>
+            run(() => spendFromGoal({ goalId: goal.id, amount, asIncome, note, categoryId }))
+          }
         />
       )}
       {panel === 'adjust' && (
@@ -533,10 +549,19 @@ function AddMoneyPanel({ onSubmit }: { onSubmit: (amount: number, asExpense: boo
   )
 }
 
-function SpendMoneyPanel({ max, onSubmit }: { max: number; onSubmit: (amount: number, asIncome: boolean, note: string) => void }) {
+function SpendMoneyPanel({
+  max,
+  categories,
+  onSubmit,
+}: {
+  max: number
+  categories: { id: number; name: string }[]
+  onSubmit: (amount: number, asIncome: boolean, note: string, categoryId: number | null) => void
+}) {
   const [amount, setAmount] = useState('')
   const [asIncome, setAsIncome] = useState(true)
   const [note, setNote] = useState('')
+  const [categoryId, setCategoryId] = useState('')
   const n = Number(amount)
   const tooMuch = n > max + 0.005
   return (
@@ -548,12 +573,29 @@ function SpendMoneyPanel({ max, onSubmit }: { max: number; onSubmit: (amount: nu
         </button>
         <input type="text" placeholder="What for? (optional)" value={note} onChange={(e) => setNote(e.target.value)} className={`${INPUT_CLASS} min-w-0 flex-1`} />
       </div>
-      <label className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
+      <label className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--muted)]">
         <input type="checkbox" checked={asIncome} onChange={(e) => setAsIncome(e.target.checked)} />
         count as income (offsets the purchase in your budget)
       </label>
+      {asIncome && (
+        <label className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
+          Apply to category
+          <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className={INPUT_CLASS}>
+            <option value="">Goal Spend (default)</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <div className="flex items-center gap-2">
-        <button disabled={!n || tooMuch} onClick={() => onSubmit(n, asIncome, note)} className={PRIMARY_BTN}>
+        <button
+          disabled={!n || tooMuch}
+          onClick={() => onSubmit(n, asIncome, note, asIncome && categoryId ? Number(categoryId) : null)}
+          className={PRIMARY_BTN}
+        >
           Spend
         </button>
         {tooMuch && <span className="text-xs text-[var(--negative)]">More than this goal holds.</span>}

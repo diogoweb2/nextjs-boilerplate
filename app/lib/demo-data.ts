@@ -12,6 +12,7 @@
 import type { EnrichedTxn, ImportSource, Flow } from '@/app/lib/analytics'
 import type { ProjectionRule } from '@/app/lib/projection'
 import type { GoalView, PendingReview } from '@/app/actions/goals'
+import type { SurplusPrompt } from '@/app/actions/surplus'
 import type { InvestmentsData, AccountView } from '@/app/actions/investments'
 import type { NetWorthData } from '@/app/actions/networth'
 import { computeTfsaRoom, type RegisteredEntry } from '@/app/lib/tfsa'
@@ -404,6 +405,7 @@ export function demoAllFlows(): EnrichedTxn[] {
       categoryId: effectiveCatId,
       categoryName: cat?.name ?? NO_CATEGORY.name,
       categoryColor: cat?.color ?? NO_CATEGORY.color,
+      categoryKind: cat?.kind ?? null,
       isRecurring: r.txnRecurring ?? m.defaultRecurring,
       isSpecial: r.txnSpecial ?? m.defaultSpecial,
       batchId: r.batchId,
@@ -680,6 +682,23 @@ export function demoGoalsData(): {
     suggestNetZero: false,
     monthStats: { thisMonth: 350, lastMonth: 500 },
   }
+}
+
+/** Surplus-allocation prompt for the dashboard "give every dollar a job" box. */
+export function demoSurplusPrompts(): SurplusPrompt[] {
+  return [
+    {
+      month: addMonths(ANCHOR_YM, -1),
+      net: 1840,
+      hasNetZero: false,
+      netZeroLabel: null,
+      goals: [
+        { id: 1, name: 'Family Vacation', emoji: '🏖️', color: '#06b6d4' },
+        { id: 2, name: 'Emergency Fund', emoji: '🛟', color: '#16a34a' },
+      ],
+      preselect: { '1': 60, '2': 40 },
+    },
+  ]
 }
 
 /** Manual savings-goal deposits with no backing transaction (for 50/30/20). */

@@ -500,12 +500,39 @@ export async function loadManualSavingsContributions(): Promise<{ occurredAt: st
     .filter((r) => r.amount > 0)
 }
 
+/**
+ * Expense categories offered when spending from a goal, so the offsetting income
+ * can be attributed to where the money actually went (e.g. a reno → Home).
+ * Income/neutral buckets are excluded — they aren't real spend destinations.
+ */
+export async function loadSpendCategories(): Promise<{ id: number; name: string }[]> {
+  if (await isDemoSession()) {
+    const { demoCategoryRows } = await import('@/app/lib/demo-data')
+    return demoCategoryRows()
+      .filter((c) => c.kind === 'expense')
+      .map((c) => ({ id: c.id, name: c.name }))
+  }
+  return db
+    .select({ id: categories.id, name: categories.name })
+    .from(categories)
+    .where(eq(categories.kind, 'expense'))
+    .orderBy(asc(categories.name))
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
 async function categoryIdByName(name: string): Promise<number | null> {
   const [c] = await db.select({ id: categories.id }).from(categories).where(eq(categories.name, name)).limit(1)
+  return c?.id ?? null
+}
+
+/** Return the id only if it's a real category, so a stale/forged select value
+ *  can't write a dangling reference; null means "use the default bucket". */
+async function validCategoryId(id: number | null | undefined): Promise<number | null> {
+  if (id == null || !Number.isInteger(id)) return null
+  const [c] = await db.select({ id: categories.id }).from(categories).where(eq(categories.id, id)).limit(1)
   return c?.id ?? null
 }
 
@@ -708,6 +735,10 @@ export async function spendFromGoal(input: {
   occurredAt?: string
   note?: string
   asIncome?: boolean
+  /** Category for the offsetting income — e.g. spend from a kitchen-reno goal
+   *  into "Home" so it lands in the right category. Falls back to the generic
+   *  "Goal Spend" bucket when omitted. Only used when `asIncome` is not false. */
+  categoryId?: number | null
 }): Promise<void> {
   await requireAuth()
   const requested = Math.round(input.amount * 100) / 100
@@ -722,7 +753,7 @@ export async function spendFromGoal(input: {
 
   let transactionId: number | null = null
   if (input.asIncome !== false) {
-    const categoryId = await categoryIdByName('Goal Spend')
+    const categoryId = (await validCategoryId(input.categoryId)) ?? (await categoryIdByName('Goal Spend'))
     const merchantId = await merchantIdByName('Goal Withdrawal', 'Goal Spend')
     const [txn] = await db
       .insert(transactions)

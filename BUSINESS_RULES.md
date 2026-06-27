@@ -270,6 +270,16 @@ as a per-row badge plus a person filter.
 Payments are always excluded. Aggregations are computed in JS over the loaded rows.
 - **Gross spend** = Σ positive amounts. **Refunds** = Σ negative (non-payment). **Net** = gross+refunds.
 - **Count / Avg** are over purchases (amount > 0).
+- **Category credits** (`categoryCredits`): income filed under an **expense-kind** category — a
+  reimbursement (e.g. dental insurance under Dental) or a **goal-spend "applied to" a category**
+  (Goals page → Spend → choose a category, e.g. pulling from a kitchen-reno goal into Home to
+  cover that purchase; recorded as income in that category by `spendFromGoal`). `buildOverview`
+  and `buildTrends` take these as an extra arg and **subtract them per category** (clamped at 0),
+  so the covered/reimbursed spend drops out of that category's **tile, breakdown, and report** —
+  matching the 50/30/20 rule's per-category net (§8). **Gross/Total spend, count, avg and Net are
+  unchanged** (they stay gross-purchase figures); only the per-category numbers net. The headline
+  total can therefore exceed the sum of the (netted) category tiles. Pass the credits via
+  `loadCategoryCredits()` (pages that only load the expense set) or `categoryCredits(flows)`.
 - **Category & merchant breakdowns**, **top transactions**, **weekday distribution**
   (weekend = Sat/Sun), **merchant concentration** (top-3 share), **12-month series**.
 - **Same-period (apples-to-apples) deltas**: the previous-period figures (`prevGross`,
@@ -653,6 +663,54 @@ mortgage uses a ⬇ "closer to payoff" framing. No new endpoint or table.
 Run after pulling this change: `npm run db:push` (adds `goals`, `goal_entries`, `transfer_reviews`).
 The goal-spend feature adds `transfer_reviews.direction` and a `Goal Spend` income category — rerun
 `npm run db:push && npm run db:seed`.
+
+## 10b. Monthly surplus allocation ("give every dollar a job")
+
+A dashboard prompt (`app/components/SurplusAllocation.tsx`, rendered from `app/page.tsx` next to
+the transfer-review prompt) that appears after a month closes net-positive and lets the owner split
+that surplus across goals by **percentage** (YNAB style). Pure helpers in `app/lib/surplus.ts`;
+server layer in `app/actions/surplus.ts`; one marker table `month_allocations` (`db/schema.ts`).
+
+### The accounting principle (why it works the way it does)
+- **Net-Zero is the implicit remainder, never an explicit share.** Net-Zero's value **is** the
+  year's cumulative net (§10), so a positive month already reduces it with no action. Allocating any
+  % to Net-Zero = *do nothing*. The box shows Net-Zero as the auto-computed remainder (`100 − Σ`).
+- **Carving a slice to another goal must reduce net**, or it double-counts against Net-Zero. So each
+  carved slice is recorded via `addContribution({ asExpense: true })` (§10) — a synthetic
+  `Investment`/Savings contribution (externalId `goal:…`, excluded from the Emergency Fund, counted
+  as Savings in 50/30/20). It lowers the month's net by exactly the carved amount, leaving the rest
+  to keep paying down the deficit. A +$2,000 month split 80/10/10 → **no write** for the $1,600
+  Net-Zero share + two **$200** Investment/Savings contributions. Total wealth position unchanged.
+- **Mortgage is excluded** (controlled via Scotia prepayments) — only `kind='savings'`, non-archived
+  goals are eligible.
+
+### Behaviour
+- **Dating:** carved contributions are dated to the **completed source month** (its last day), so the
+  month you click "allocate" shows no new spend; the source month's net drops and gains a
+  Savings/Investment line (accurate — it was that month's surplus).
+- **Start floor:** the feature begins with **June 2026** (`SURPLUS_START_MONTH`) — the first month
+  whose surplus is allocated (when July's data lands). Anything before it is ignored entirely (no
+  prompt, no auto-file).
+- **Candidates** (`completedNetPositiveMonths`): months `≥ SURPLUS_START_MONTH` and `< anchor` whose
+  `netOverRange(ym,ym) > 0`.
+- **Queue** (`loadSurplusPrompts`): with an active Net-Zero goal, only the **most recent** un-actioned
+  month prompts (older ones are absorbed by cumulative net — `reconcileSurplusAllocations` auto-files
+  them as `dismissed`/all-to-Net-Zero, mirroring `reconcileNetZeroGoals`). With **no** Net-Zero goal,
+  every un-actioned net-positive month prompts (they **stack**) — every dollar must get a job.
+- **Confirm** (`confirmAllocation`): Σ ≤ 100; **Σ must == 100 when there's no Net-Zero**. Carves the
+  slices, then records `month_allocations` (`status='allocated'`, `percents`).
+- **Dismiss** (`dismissAllocation`): with Net-Zero → record `dismissed` (all to Net-Zero, no writes);
+  with no Net-Zero → auto-apply the **previous** month's split (or an equal split).
+- **Preselect next month:** the prompt defaults to the most recent `allocated` row's `percents`
+  (`defaultPercents`).
+
+`month_allocations` (`month` unique, `status`, `percents` jsonb of `{ "<savingsGoalId>": pct }`)
+records one row per actioned month; confirm/dismiss are idempotent (re-check + `onConflictDoNothing`).
+
+> **Caveat:** carves are a *conceptual earmark* of cash that stays in chequing — don't *also*
+> allocate the same dollars again via a real imported transfer review (§10), or the goal double-counts.
+
+Run after pulling this change: `npm run db:push` (adds `month_allocations`).
 
 ## 11. Demo mode (read-only showcase)
 

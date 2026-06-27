@@ -346,6 +346,27 @@ export const goalEntries = pgTable(
 )
 
 /**
+ * Monthly surplus allocation (the dashboard "give every dollar a job" prompt).
+ * One row per completed month once the owner has actioned it. `percents` holds
+ * only the SAVINGS-goal shares ({ "<goalId>": pct }); the Net-Zero goal is the
+ * implicit remainder (100 − Σ), so it never appears here and is never written —
+ * the surplus already counts toward it via cumulative net. A 'dismissed' row
+ * with empty percents means "all to Net-Zero" (auto when the prompt is ignored).
+ * See BUSINESS_RULES.md §10b.
+ */
+export const monthAllocations = pgTable('month_allocations', {
+  id: serial('id').primaryKey(),
+  // The completed (source) month the surplus came from, YYYY-MM.
+  month: text('month').notNull().unique(),
+  status: text('status', { enum: ['allocated', 'dismissed'] })
+    .notNull()
+    .default('allocated'),
+  // { "<savingsGoalId>": percent }. Net-Zero is the remainder, not stored.
+  percents: jsonb('percents').$type<Record<string, number>>().notNull().default({}),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+
+/**
  * Emergency Fund tracking (the Goals page card). One row per observed/overridden
  * ABSOLUTE balance of an account, like the mortgage's balance snapshots. The
  * first snapshot per source is the owner-entered starting balance; a manual

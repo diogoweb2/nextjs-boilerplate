@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { AppShell, Card, EmptyHint } from '@/app/components/AppShell'
 import { LineChart } from '@/app/components/charts/LineChart'
 import { PeriodSelector } from '@/app/components/PeriodSelector'
-import { loadEnriched, buildTrends, anchorMonth, availableMonths } from '@/app/lib/analytics'
+import { loadEnriched, buildTrends, anchorMonth, availableMonths, loadCategoryCredits } from '@/app/lib/analytics'
 import { formatCurrency, formatMonth } from '@/app/lib/format'
 
 export const dynamic = 'force-dynamic'
@@ -19,7 +19,7 @@ export default async function CategoryHistoryPage({
   const rawMonths = Number(Array.isArray(rawParams.months) ? rawParams.months[0] : rawParams.months)
   const period = Array.isArray(rawParams.period) ? rawParams.period[0] : rawParams.period
 
-  const all = await loadEnriched()
+  const [all, credits] = await Promise.all([loadEnriched(), loadCategoryCredits()])
   const anchor = anchorMonth(all)
 
   let months = [3, 6, 12].includes(rawMonths) ? rawMonths : 12
@@ -27,7 +27,7 @@ export default async function CategoryHistoryPage({
     months = availableMonths(all).length || 12
   }
 
-  const trends = buildTrends(all, months, false)
+  const trends = buildTrends(all, months, false, null, credits)
   const cat = trends.categories.find((c) => c.name === categoryName)
 
   const monthlyRows = cat

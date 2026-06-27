@@ -5,7 +5,7 @@ import { LineChart } from '@/app/components/charts/LineChart'
 import { Donut } from '@/app/components/charts/Donut'
 import { BarList } from '@/app/components/charts/BarList'
 import { WeekdayChart } from '@/app/components/charts/WeekdayChart'
-import { loadEnriched, buildTrends, buildOverview, anchorMonth, availableMonths } from '@/app/lib/analytics'
+import { loadEnriched, buildTrends, buildOverview, anchorMonth, availableMonths, loadCategoryCredits } from '@/app/lib/analytics'
 import { buildInsights } from '@/app/lib/insights'
 import { parsePeriodParams } from '@/app/lib/params'
 import { formatCurrency, formatCurrencyCompact, formatMonth, formatShortDate } from '@/app/lib/format'
@@ -22,7 +22,7 @@ export default async function ReportsTrendsPage({
   const { months: parsedMonths, excludeSpecial } = parsePeriodParams(rawParams)
   const rawPeriod = Array.isArray(rawParams.period) ? rawParams.period[0] : rawParams.period
 
-  const all = await loadEnriched()
+  const [all, credits] = await Promise.all([loadEnriched(), loadCategoryCredits()])
 
   let months = parsedMonths
   if (rawPeriod === 'year' || rawPeriod === 'all') {
@@ -36,9 +36,9 @@ export default async function ReportsTrendsPage({
     }
   }
 
-  const trends = buildTrends(all, months, excludeSpecial)
+  const trends = buildTrends(all, months, excludeSpecial, null, credits)
   const netWorth = await loadNetWorth(trends.months_labels)
-  const ov = buildOverview(all, months, excludeSpecial)
+  const ov = buildOverview(all, months, excludeSpecial, null, credits)
   const insights = buildInsights(all, months, excludeSpecial)
 
   const totalValues = trends.total.map((t) => t.amount)
