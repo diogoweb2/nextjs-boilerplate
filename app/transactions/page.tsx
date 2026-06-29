@@ -1,6 +1,6 @@
 import { desc, eq } from 'drizzle-orm'
 import { db } from '@/db'
-import { transactions, merchants, categories } from '@/db/schema'
+import { transactions, merchants, categories, merchantAmountRules } from '@/db/schema'
 import { AppShell, Card, EmptyHint } from '@/app/components/AppShell'
 import { TransactionsTable, type TxnRow } from '@/app/components/TransactionsTable'
 import { PeriodSelector } from '@/app/components/PeriodSelector'
@@ -37,6 +37,7 @@ export default async function TransactionsPage({
             id: transactions.id,
             txnDate: transactions.txnDate,
             rawDescription: transactions.rawDescription,
+            note: transactions.note,
             amount: transactions.amount,
             source: transactions.source,
             flow: transactions.flow,
@@ -60,10 +61,12 @@ export default async function TransactionsPage({
         db.select({ txnDate: transactions.txnDate }).from(transactions),
       ])
 
-  const [projectItems, memberships] = await Promise.all([
+  const [projectItems, memberships, amountRuleRows] = await Promise.all([
     loadProjectsForPicker(),
     loadProjectMemberships(),
+    (await isDemoSession()) ? [] : db.select({ merchantId: merchantAmountRules.merchantId, amount: merchantAmountRules.amount }).from(merchantAmountRules),
   ])
+  const amountRuleSet = new Set(amountRuleRows.map((r) => `${r.merchantId}:${r.amount}`))
 
   const catMap = new Map(catRows.map((c) => [c.id, c]))
 
@@ -81,6 +84,7 @@ export default async function TransactionsPage({
       txnDate: r.txnDate,
       merchantName: r.merchantName,
       rawDescription: r.rawDescription,
+      note: r.note ?? null,
       amount: Number(r.amount),
       categoryId: effCatId,
       categoryName: cat?.name ?? NO_CAT.name,
@@ -93,6 +97,7 @@ export default async function TransactionsPage({
       person: cardholderName(r.cardLast4),
       isSplitPart: r.splitParentId != null,
       isSplitParent: splitParentIds.has(r.id),
+      hasAmountRule: amountRuleSet.has(`${r.merchantId}:${Number(r.amount).toFixed(2)}`),
     }
   })
 

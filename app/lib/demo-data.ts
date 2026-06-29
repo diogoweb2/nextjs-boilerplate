@@ -473,6 +473,7 @@ export function demoActivityRows() {
       id: r.id,
       txnDate: r.txnDate,
       rawDescription: r.rawDescription,
+      note: null as string | null,
       amount: r.amount,
       source: r.source,
       flow: r.flow,

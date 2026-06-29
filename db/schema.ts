@@ -181,6 +181,9 @@ export const transactions = pgTable(
       (): AnyPgColumn => transactions.id,
       { onDelete: 'cascade' }
     ),
+    // Free-text reminder set by the owner — e.g. "pizza at friend's house" on an
+    // E-Transfer Out. Display-only; never affects analytics or business rules.
+    note: text('note'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (t) => [
@@ -754,6 +757,28 @@ export const emergencyConfig = pgTable('emergency_config', {
   tfsaHaircutPct: integer('tfsa_haircut_pct').notNull().default(30),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 })
+
+/**
+ * Per-merchant, per-amount auto-fill rules. When a future import produces a
+ * transaction with the same merchant and exact amount, it automatically inherits
+ * the saved category and note — useful for recurring fixed-amount payments like
+ * monthly garage transfers that always use a generic merchant (E-Transfer Out).
+ * Unique on (merchant_id, amount) so one rule per price point.
+ */
+export const merchantAmountRules = pgTable(
+  'merchant_amount_rules',
+  {
+    id: serial('id').primaryKey(),
+    merchantId: integer('merchant_id')
+      .notNull()
+      .references(() => merchants.id, { onDelete: 'cascade' }),
+    amount: numeric('amount', { precision: 10, scale: 2 }).notNull(),
+    categoryId: integer('category_id').references(() => categories.id, { onDelete: 'set null' }),
+    note: text('note'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex('merchant_amount_rules_unique_idx').on(t.merchantId, t.amount)]
+)
 
 export const categoriesRelations = relations(categories, ({ many }) => ({
   merchants: many(merchants),

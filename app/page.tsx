@@ -26,6 +26,7 @@ import { loadSurplusPrompts } from '@/app/actions/surplus'
 import { loadEmergencyFund } from '@/app/actions/emergency'
 import { isDemoSession } from '@/app/lib/demo'
 import { TransferReview } from '@/app/components/TransferReview'
+import { OtherCategoryBanner } from '@/app/components/OtherCategoryBanner'
 import { SurplusAllocation } from '@/app/components/SurplusAllocation'
 import { GoalsSummary } from '@/app/components/GoalsSummary'
 import { buildBudgetInsights } from '@/app/lib/dashboard-insights'
@@ -115,6 +116,13 @@ export default async function Home({
   const months_available = availableMonths(all)
   // Dashboard always shows a single month; default to the current (anchor) month.
   const exactMonth = month ?? anchor
+
+  const otherTxns = all.filter(
+    (t) =>
+      (t.categoryName === 'Other' || t.categoryName === 'Uncategorized') &&
+      exactMonth &&
+      t.txnDate.slice(0, 7) === exactMonth
+  ).map((t) => ({ id: t.id, merchantName: t.merchantName, amount: t.amount, txnDate: t.txnDate, category: t.categoryName }))
   const ov = buildOverview(all, 1, excludeSpecial, exactMonth, categoryCredits(allFlows))
 
   const insights = buildInsights(all, 1, excludeSpecial, exactMonth)
@@ -231,6 +239,12 @@ export default async function Home({
       {surplusPrompts.length > 0 && (
         <div className="mb-5">
           <SurplusAllocation prompts={surplusPrompts} />
+        </div>
+      )}
+
+      {otherTxns.length > 0 && (
+        <div className="mb-5">
+          <OtherCategoryBanner transactions={otherTxns} month={exactMonth} />
         </div>
       )}
 

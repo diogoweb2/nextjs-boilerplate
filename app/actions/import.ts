@@ -7,6 +7,7 @@ import {
   transactions,
   merchants,
   merchantRules,
+  merchantAmountRules,
   categories,
   importBatches,
   goalEntries,
@@ -248,10 +249,42 @@ export async function ingestStatement(
   await createWithdrawalReviews(inserted.map((r) => r.id))
   await createInboundReviews(inserted.map((r) => r.id))
 
+  // Apply merchant+amount rules: auto-fill category and note on matching new txns.
+  await applyAmountRules(inserted.map((r) => r.id))
+
   // Keep the net-zero recovery goal in sync (auto-complete / revive on new data).
   await reconcileNetZeroGoals()
 
   return { ok: true, source, inserted: insertedCount, skipped: skippedCount, period }
+}
+
+/**
+ * After inserting new transactions, check each one against `merchant_amount_rules`.
+ * A match (same merchant_id + exact amount) overwrites the transaction's category
+ * and note with the saved rule — so recurring fixed payments like a monthly garage
+ * transfer are auto-categorized and labelled without touching the merchant level.
+ */
+async function applyAmountRules(txnIds: number[]): Promise<void> {
+  if (txnIds.length === 0) return
+  const rules = await db.select().from(merchantAmountRules)
+  if (rules.length === 0) return
+
+  const txns = await db
+    .select({ id: transactions.id, merchantId: transactions.merchantId, amount: transactions.amount })
+    .from(transactions)
+    .where(inArray(transactions.id, txnIds))
+
+  for (const txn of txns) {
+    const rule = rules.find(
+      (r) => r.merchantId === txn.merchantId && Number(r.amount) === Number(txn.amount)
+    )
+    if (rule) {
+      await db
+        .update(transactions)
+        .set({ categoryId: rule.categoryId, note: rule.note })
+        .where(eq(transactions.id, txn.id))
+    }
+  }
 }
 
 /**

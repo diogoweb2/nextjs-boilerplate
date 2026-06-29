@@ -6,6 +6,9 @@ import {
   setTxnCategory,
   setTxnFlags,
   setTxnFlow,
+  setTxnNote,
+  upsertAmountRule,
+  deleteAmountRule,
   splitTransaction,
   unsplitTransaction,
   type SplitPart,
@@ -24,6 +27,7 @@ export type TxnRow = {
   txnDate: string
   merchantName: string
   rawDescription: string
+  note: string | null
   amount: number
   categoryId: number | null
   categoryName: string
@@ -38,6 +42,8 @@ export type TxnRow = {
   isSplitPart: boolean
   // Has had parts peeled off it (so it can be unsplit).
   isSplitParent: boolean
+  // A merchant+amount rule exists — future imports of this amount will auto-fill.
+  hasAmountRule: boolean
 }
 
 export function TransactionsTable({
@@ -116,7 +122,7 @@ export function TransactionsTable({
         } else if (categoryFilter && String(t.categoryId ?? '') !== categoryFilter) {
           return false
         }
-        if (q && !t.merchantName.toLowerCase().includes(q) && !t.rawDescription.toLowerCase().includes(q))
+        if (q && !t.merchantName.toLowerCase().includes(q) && !t.rawDescription.toLowerCase().includes(q) && !(t.note ?? '').toLowerCase().includes(q))
           return false
         return true
       })
@@ -219,6 +225,10 @@ export function TransactionsTable({
             onCategory={(cid) => run(() => setTxnCategory(t.id, t.merchantId, cid))}
             onFlags={(flags) => run(() => setTxnFlags(t.id, flags))}
             onFlow={(flow) => run(() => setTxnFlow(t.id, flow))}
+            onNote={(note) => run(() => setTxnNote(t.id, note))}
+            onAmountRule={(enable, note) =>
+              run(() => enable ? upsertAmountRule(t.id, note) : deleteAmountRule(t.id))
+            }
             onSplit={(parts) => run(() => splitTransaction(t.id, parts))}
             onUnsplit={() => run(() => unsplitTransaction(t.id))}
           />
@@ -359,6 +369,8 @@ function TxnRowView({
   onCategory,
   onFlags,
   onFlow,
+  onNote,
+  onAmountRule,
   onSplit,
   onUnsplit,
 }: {
@@ -372,11 +384,14 @@ function TxnRowView({
   onCategory: (categoryId: number | null) => void
   onFlags: (flags: { isRecurring?: boolean | null; isSpecial?: boolean | null }) => void
   onFlow: (flow: TxnRow['flow']) => void
+  onNote: (note: string | null) => void
+  onAmountRule: (enable: boolean, note: string | null) => void
   onSplit: (parts: SplitPart[]) => void
   onUnsplit: () => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const [splitting, setSplitting] = useState(false)
+  const [noteValue, setNoteValue] = useState(t.note ?? '')
 
   return (
     <div className={`flex flex-col gap-2 p-3 ${selected ? 'bg-[color-mix(in_srgb,var(--accent)_8%,transparent)]' : ''}`}>
@@ -397,6 +412,9 @@ function TxnRowView({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span className="truncate text-sm font-medium">{t.merchantName}</span>
+            {t.note && (
+              <span className="truncate text-sm text-[var(--muted)]">({t.note})</span>
+            )}
             {t.isSplitPart && (
               <span
                 title="Split off from another transaction"
@@ -532,6 +550,19 @@ function TxnRowView({
           >
             ★ Special
           </button>
+          <button
+            onClick={() => onAmountRule(!t.hasAmountRule, noteValue || null)}
+            title={t.hasAmountRule
+              ? `Remove rule — future ${formatCurrency(Math.abs(t.amount))} imports from this merchant will no longer be auto-filled`
+              : `Remember — future ${formatCurrency(Math.abs(t.amount))} imports from this merchant will auto-get this category and note`}
+            className={`rounded-md px-2 py-1 text-xs font-medium ${
+              t.hasAmountRule
+                ? 'bg-emerald-500/15 text-emerald-500'
+                : 'text-[var(--muted)] hover:bg-[var(--surface-2)]'
+            }`}
+          >
+            {t.hasAmountRule ? '✓ ' : ''}Remember {formatCurrency(Math.abs(t.amount))}
+          </button>
           {!t.isSplitPart && !t.isPayment && (
             <button
               onClick={() => setSplitting((v) => !v)}
@@ -552,6 +583,14 @@ function TxnRowView({
               ↩ Unsplit
             </button>
           )}
+          <input
+            value={noteValue}
+            onChange={(e) => setNoteValue(e.target.value)}
+            onBlur={() => onNote(noteValue || null)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.currentTarget.blur() } }}
+            placeholder="Add a note…"
+            className="min-w-[180px] flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs placeholder:text-[var(--muted)]"
+          />
           <span className="text-[11px] text-[var(--muted)]" title={t.rawDescription}>
             {t.rawDescription}
           </span>

@@ -2,9 +2,9 @@
 
 import { randomUUID } from 'node:crypto'
 import { revalidatePath } from 'next/cache'
-import { eq, ilike } from 'drizzle-orm'
+import { and, eq, ilike } from 'drizzle-orm'
 import { db } from '@/db'
-import { transactions, merchants, categories } from '@/db/schema'
+import { transactions, merchants, categories, merchantAmountRules } from '@/db/schema'
 import { requireAuth } from '@/app/lib/auth-guard'
 
 function revalidateAll() {
@@ -18,22 +18,39 @@ function revalidateAll() {
   revalidatePath('/goals')
 }
 
+// Catch-all bank labels that are never the same purchase twice — teaching them
+// at the merchant level would wrongly recategorize every unrelated transfer.
+const AMBIGUOUS_MERCHANTS = ['E-Transfer Out', 'Bank Withdrawal', 'Cheque Withdrawal']
+
 /**
  * Set a category by teaching it at the merchant level, then clearing all
  * per-transaction overrides for that merchant so every transaction (past and
  * future) inherits the merchant's category automatically.
+ *
+ * Exception: ambiguous catch-all bank labels (E-Transfer Out, Bank Withdrawal,
+ * Cheque Withdrawal) are never taught at the merchant level — each transfer is
+ * its own thing, so only the specific transaction is updated.
  */
 export async function setTxnCategory(
-  _txnId: number,
+  txnId: number,
   merchantId: number,
   categoryId: number | null
 ): Promise<void> {
   await requireAuth()
-  await db.update(merchants).set({ categoryId }).where(eq(merchants.id, merchantId))
-  await db
-    .update(transactions)
-    .set({ categoryId: null })
-    .where(eq(transactions.merchantId, merchantId))
+  const [merchant] = await db
+    .select({ name: merchants.name })
+    .from(merchants)
+    .where(eq(merchants.id, merchantId))
+    .limit(1)
+  if (merchant && AMBIGUOUS_MERCHANTS.includes(merchant.name)) {
+    await db.update(transactions).set({ categoryId }).where(eq(transactions.id, txnId))
+  } else {
+    await db.update(merchants).set({ categoryId }).where(eq(merchants.id, merchantId))
+    await db
+      .update(transactions)
+      .set({ categoryId: null })
+      .where(eq(transactions.merchantId, merchantId))
+  }
   revalidateAll()
 }
 
@@ -174,6 +191,54 @@ export async function splitTransaction(
  * into the original. Merchants created solely for the split become orphans and
  * are cleaned up by the merchants page's existing "prune empty" path.
  */
+/**
+ * Create or update an amount rule for this transaction's merchant+amount, saving
+ * the current category and note so future imports of the same amount from the same
+ * merchant are auto-filled. Passing `note` here also updates the transaction itself
+ * so clicking "Remember" doubles as saving the note.
+ */
+export async function upsertAmountRule(txnId: number, note: string | null): Promise<void> {
+  await requireAuth()
+  const [txn] = await db
+    .select({ merchantId: transactions.merchantId, amount: transactions.amount, categoryId: transactions.categoryId })
+    .from(transactions)
+    .where(eq(transactions.id, txnId))
+    .limit(1)
+  if (!txn) return
+  const cleanNote = note?.trim() || null
+  await db.update(transactions).set({ note: cleanNote }).where(eq(transactions.id, txnId))
+  await db
+    .insert(merchantAmountRules)
+    .values({ merchantId: txn.merchantId, amount: txn.amount, categoryId: txn.categoryId, note: cleanNote })
+    .onConflictDoUpdate({
+      target: [merchantAmountRules.merchantId, merchantAmountRules.amount],
+      set: { categoryId: txn.categoryId, note: cleanNote },
+    })
+  revalidateAll()
+}
+
+/** Remove the amount rule for this transaction's merchant+amount. */
+export async function deleteAmountRule(txnId: number): Promise<void> {
+  await requireAuth()
+  const [txn] = await db
+    .select({ merchantId: transactions.merchantId, amount: transactions.amount })
+    .from(transactions)
+    .where(eq(transactions.id, txnId))
+    .limit(1)
+  if (!txn) return
+  await db
+    .delete(merchantAmountRules)
+    .where(and(eq(merchantAmountRules.merchantId, txn.merchantId), eq(merchantAmountRules.amount, txn.amount)))
+  revalidateAll()
+}
+
+/** Persist a free-text note on a single transaction (display-only, no analytics impact). */
+export async function setTxnNote(id: number, note: string | null): Promise<void> {
+  await requireAuth()
+  await db.update(transactions).set({ note: note?.trim() || null }).where(eq(transactions.id, id))
+  revalidateAll()
+}
+
 export async function unsplitTransaction(parentId: number): Promise<void> {
   await requireAuth()
   const children = await db
