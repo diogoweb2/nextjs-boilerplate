@@ -10,6 +10,7 @@ import { loadAllFlows, anchorMonth, netOverRange } from '@/app/lib/analytics'
 import {
   completedNetPositiveMonths,
   defaultPercents,
+  autoContributePreselect,
   allocationAmounts,
   totalPercent,
   SURPLUS_START_MONTH,
@@ -27,9 +28,10 @@ export type SurplusPrompt = {
   hasNetZero: boolean
   /** Display label for the Net-Zero remainder row, e.g. "Net-Zero 2026". */
   netZeroLabel: string | null
-  /** Eligible savings goals to allocate to (mortgage & net-zero excluded). */
-  goals: { id: number; name: string; emoji: string; color: string }[]
-  /** Preselected savings-goal percentages ({ "<goalId>": pct }). */
+  /** Eligible savings goals to allocate to (mortgage & net-zero excluded), in
+   *  priority order (goal sortOrder). `autoContribute` is the fixed monthly rule. */
+  goals: { id: number; name: string; emoji: string; color: string; autoContribute: number | null }[]
+  /** Preselected savings-goal percentages ({ "<goalId>": pct }, may be fractional). */
   preselect: Record<string, number>
 }
 
@@ -47,7 +49,13 @@ function revalidate() {
 
 async function eligibleGoals() {
   return db
-    .select({ id: goals.id, name: goals.name, emoji: goals.emoji, color: goals.color })
+    .select({
+      id: goals.id,
+      name: goals.name,
+      emoji: goals.emoji,
+      color: goals.color,
+      autoContribute: goals.autoContribute,
+    })
     .from(goals)
     .where(and(eq(goals.kind, 'savings'), eq(goals.archived, false)))
     .orderBy(asc(goals.sortOrder), asc(goals.createdAt))
@@ -129,16 +137,34 @@ export async function loadSurplusPrompts(): Promise<SurplusPrompt[]> {
   // With Net-Zero, only the most recent month prompts; otherwise all stack.
   const months = hasNetZero ? open.slice(0, 1) : open
   const eligibleIds = elig.map((g) => g.id)
-  const preselect = defaultPercents(eligibleIds, prev, hasNetZero)
-
-  return months.map((m) => ({
-    month: m.ym,
-    net: m.net,
-    hasNetZero,
-    netZeroLabel: nz?.name ?? null,
-    goals: elig,
-    preselect,
+  // Priority order (= goal sortOrder, already applied) with the auto-contribute rule.
+  const priority = elig.map((g) => ({
+    id: g.id,
+    autoContribute: g.autoContribute === null ? null : Number(g.autoContribute),
   }))
+  const goalsView = elig.map((g) => ({
+    id: g.id,
+    name: g.name,
+    emoji: g.emoji,
+    color: g.color,
+    autoContribute: g.autoContribute === null ? null : Number(g.autoContribute),
+  }))
+
+  // Preselect is per-month: auto-contribute amounts depend on each month's surplus.
+  // Falls back to the equal-split / last-month default when no rule applies.
+  return months.map((m) => {
+    const autoSel = autoContributePreselect(m.net, priority, prev)
+    const preselect =
+      Object.keys(autoSel).length > 0 ? autoSel : defaultPercents(eligibleIds, prev, hasNetZero)
+    return {
+      month: m.ym,
+      net: m.net,
+      hasNetZero,
+      netZeroLabel: nz?.name ?? null,
+      goals: goalsView,
+      preselect,
+    }
+  })
 }
 
 /** Shared write path: carve savings slices for a month as Investment/Savings

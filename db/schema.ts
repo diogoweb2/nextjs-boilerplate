@@ -306,6 +306,10 @@ export const goals = pgTable('goals', {
   // Mortgage only: current interest estimate, refined when the owner overrides
   // the real balance (see app/lib/mortgage.ts → inferRate).
   annualRate: numeric('annual_rate', { precision: 6, scale: 4 }),
+  // Savings only: a fixed monthly auto-contribute amount. When set, the monthly
+  // surplus-allocation prompt (§10b) pre-fills exactly this much for the goal (in
+  // goal priority order, capped at the surplus left). null/0 = no rule.
+  autoContribute: numeric('auto_contribute', { precision: 12, scale: 2 }),
   // Include this goal in immediate push notifications when its value changes.
   notify: boolean('notify').notNull().default(false),
   archived: boolean('archived').notNull().default(false),
@@ -321,6 +325,10 @@ export const goals = pgTable('goals', {
  *    (new value − old value), so the running Σ equals the reconciled value.
  *  - 'balance'      — mortgage only; amount = the ABSOLUTE balance observed or
  *    overridden on occurredAt.
+ *  - 'transfer'     — a rebalance between goals (signed amount, no transactionId).
+ *    Counts toward the goal's value but is NOT new savings/contribution — excluded
+ *    from totalContributed, the 50/30/20 manual-savings count, and "invested this
+ *    month". The matching ledger row lives on the other goal; see goal_transfers.
  * A 3k transfer split across goals is several 'contribution' rows that share one
  * transactionId.
  */
@@ -331,7 +339,7 @@ export const goalEntries = pgTable(
     goalId: integer('goal_id')
       .notNull()
       .references(() => goals.id, { onDelete: 'cascade' }),
-    kind: text('kind', { enum: ['contribution', 'adjustment', 'balance'] })
+    kind: text('kind', { enum: ['contribution', 'adjustment', 'balance', 'transfer'] })
       .notNull()
       .default('contribution'),
     amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
@@ -343,6 +351,42 @@ export const goalEntries = pgTable(
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (t) => [index('goal_entries_goal_idx').on(t.goalId)]
+)
+
+/**
+ * Money moved between two savings goals (a rebalance), recorded so the "owed back"
+ * figure on a lender goal can be computed. Each row is mirrored by two
+ * goal_entries (kind 'transfer'): −amount on `fromGoalId`, +amount on `toGoalId`.
+ * No transaction is created (the money already left net when first contributed),
+ * so transfers never touch the budget/analytics and never notify. kind:
+ *  - 'transfer' — a permanent rebalance, no debt.
+ *  - 'borrow'   — `fromGoalId` lends to `toGoalId`; the lender is owed it back.
+ *  - 'repay'    — settles a borrow: `fromGoalId` (the borrower) pays `toGoalId`
+ *    (the lender) back, reducing the outstanding owed amount.
+ * Owed back to a lender L = Σ borrow[from=L] − Σ repay[to=L]. See BUSINESS_RULES §10.
+ */
+export const goalTransfers = pgTable(
+  'goal_transfers',
+  {
+    id: serial('id').primaryKey(),
+    fromGoalId: integer('from_goal_id')
+      .notNull()
+      .references(() => goals.id, { onDelete: 'cascade' }),
+    toGoalId: integer('to_goal_id')
+      .notNull()
+      .references(() => goals.id, { onDelete: 'cascade' }),
+    amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
+    kind: text('kind', { enum: ['transfer', 'borrow', 'repay'] })
+      .notNull()
+      .default('transfer'),
+    occurredAt: date('occurred_at').notNull(),
+    note: text('note'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => [
+    index('goal_transfers_from_idx').on(t.fromGoalId),
+    index('goal_transfers_to_idx').on(t.toGoalId),
+  ]
 )
 
 /**
@@ -814,6 +858,7 @@ export type PushSubscriptionRow = typeof pushSubscriptions.$inferSelect
 export type LoginAttempt = typeof loginAttempts.$inferSelect
 export type Goal = typeof goals.$inferSelect
 export type GoalEntry = typeof goalEntries.$inferSelect
+export type GoalTransfer = typeof goalTransfers.$inferSelect
 export type TransferReview = typeof transferReviews.$inferSelect
 export type AccountSnapshot = typeof accountSnapshots.$inferSelect
 export type RunwaySnapshot = typeof runwaySnapshots.$inferSelect

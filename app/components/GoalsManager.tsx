@@ -17,6 +17,8 @@ import {
   spendFromGoal,
   adjustValue,
   updateMortgageBalance,
+  transferBetweenGoals,
+  repayGoalBorrow,
   type GoalView,
 } from '@/app/actions/goals'
 
@@ -196,6 +198,7 @@ export function GoalsManager({
               goal={g}
               asOfYm={asOfYm}
               spendCategories={spendCategories}
+              savingsGoals={savings}
               drag={active.length > 1 ? orderedActive.dragPropsFor(g.id) : undefined}
             />
           ))}
@@ -212,7 +215,7 @@ export function GoalsManager({
           {showArchived && (
             <div className="mt-3 grid grid-cols-1 gap-5 lg:grid-cols-2">
               {archived.map((g) => (
-                <GoalCard key={g.id} goal={g} asOfYm={asOfYm} spendCategories={spendCategories} />
+                <GoalCard key={g.id} goal={g} asOfYm={asOfYm} spendCategories={spendCategories} savingsGoals={savings} />
               ))}
             </div>
           )}
@@ -222,17 +225,19 @@ export function GoalsManager({
   )
 }
 
-type Panel = 'none' | 'add' | 'spend' | 'adjust' | 'balance' | 'edit'
+type Panel = 'none' | 'add' | 'spend' | 'adjust' | 'balance' | 'edit' | 'transfer' | 'repay'
 
 function GoalCard({
   goal,
   asOfYm,
   spendCategories,
+  savingsGoals,
   drag,
 }: {
   goal: GoalView
   asOfYm: string
   spendCategories: { id: number; name: string }[]
+  savingsGoals: GoalView[]
   drag?: DragProps
 }) {
   const router = useRouter()
@@ -248,6 +253,7 @@ function GoalCard({
 
   const isMortgage = goal.kind === 'mortgage'
   const isNetZero = goal.kind === 'netzero'
+  const otherSavings = savingsGoals.filter((g) => g.id !== goal.id && !g.archived)
 
   const subtitle = isMortgage
     ? 'Balance remaining'
@@ -322,6 +328,20 @@ function GoalCard({
             <button onClick={() => setPanel(panel === 'adjust' ? 'none' : 'adjust')} className={GHOST_BTN}>
               Adjust value
             </button>
+            {otherSavings.length > 0 && (
+              <button
+                onClick={() => setPanel(panel === 'transfer' ? 'none' : 'transfer')}
+                disabled={goal.value <= 0}
+                className={`${GHOST_BTN} disabled:opacity-40`}
+              >
+                Move money
+              </button>
+            )}
+            {goal.owesOut > 0 && (
+              <button onClick={() => setPanel(panel === 'repay' ? 'none' : 'repay')} className={GHOST_BTN}>
+                Repay
+              </button>
+            )}
           </>
         )}
         <button onClick={() => setPanel(panel === 'edit' ? 'none' : 'edit')} className={`${GHOST_BTN} ${isNetZero ? 'ml-auto' : ''}`}>
@@ -356,6 +376,25 @@ function GoalCard({
           onDelete={isMortgage ? undefined : () => run(() => deleteGoal(goal.id))}
         />
       )}
+      {panel === 'transfer' && (
+        <TransferPanel
+          max={goal.value}
+          destinations={otherSavings}
+          onSubmit={(toGoalId, amount, borrowed, note) =>
+            run(() => transferBetweenGoals({ fromGoalId: goal.id, toGoalId, amount, borrowed, note }))
+          }
+        />
+      )}
+      {panel === 'repay' && (
+        <RepayPanel
+          max={goal.value}
+          debts={goal.owesTo}
+          lenders={savingsGoals}
+          onSubmit={(toGoalId, amount) =>
+            run(() => repayGoalBorrow({ fromGoalId: goal.id, toGoalId, amount }))
+          }
+        />
+      )}
     </section>
   )
 }
@@ -381,6 +420,18 @@ function SavingsBody({ goal }: { goal: GoalView }) {
         <Stat label="Contributed">{formatCurrency(goal.contributed)}</Stat>
         {goal.targetAmount && <Stat label="To go">{formatCurrency(Math.max(0, goal.targetAmount - goal.value))}</Stat>}
         {goal.projectedCompletionYm && <Stat label="On pace for">{formatMonth(goal.projectedCompletionYm)}</Stat>}
+        {goal.owedToThis > 0 && (
+          <div className="flex flex-col">
+            <dt className="text-[10px] uppercase tracking-wide">Owed back</dt>
+            <dd className="tabular-nums font-medium text-[var(--positive)]">{formatCurrency(goal.owedToThis)}</dd>
+          </div>
+        )}
+        {goal.owesOut > 0 && (
+          <div className="flex flex-col">
+            <dt className="text-[10px] uppercase tracking-wide">Owes</dt>
+            <dd className="tabular-nums font-medium text-[var(--warning)]">{formatCurrency(goal.owesOut)}</dd>
+          </div>
+        )}
       </dl>
       {goal.targetAmount !== null && goal.value < goal.targetAmount && !goal.projectedCompletionYm && (
         <p className="text-[11px] text-[var(--muted)]">
@@ -604,6 +655,108 @@ function SpendMoneyPanel({
   )
 }
 
+function TransferPanel({
+  max,
+  destinations,
+  onSubmit,
+}: {
+  max: number
+  destinations: GoalView[]
+  onSubmit: (toGoalId: number, amount: number, borrowed: boolean, note: string) => void
+}) {
+  const [toId, setToId] = useState(destinations[0] ? String(destinations[0].id) : '')
+  const [amount, setAmount] = useState('')
+  const [borrowed, setBorrowed] = useState(false)
+  const [note, setNote] = useState('')
+  const n = Number(amount)
+  const tooMuch = n > max + 0.005
+  return (
+    <Panel column>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-[var(--muted)]">Move to</span>
+        <select value={toId} onChange={(e) => setToId(e.target.value)} className={INPUT_CLASS}>
+          {destinations.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.emoji} {g.name}
+            </option>
+          ))}
+        </select>
+        <input type="number" placeholder="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} className={`${INPUT_CLASS} w-28`} />
+        <button type="button" onClick={() => setAmount(String(Math.round(max * 100) / 100))} className={GHOST_BTN}>
+          All ({formatCurrency(max)})
+        </button>
+      </div>
+      <input type="text" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} className={`${INPUT_CLASS} min-w-0 flex-1`} />
+      <label className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--muted)]">
+        <input type="checkbox" checked={borrowed} onChange={(e) => setBorrowed(e.target.checked)} />
+        Borrow (track repayment — this goal will be owed it back)
+      </label>
+      <div className="flex items-center gap-2">
+        <button disabled={!n || tooMuch || !toId} onClick={() => onSubmit(Number(toId), n, borrowed, note)} className={PRIMARY_BTN}>
+          {borrowed ? 'Lend' : 'Move'}
+        </button>
+        {tooMuch && <span className="text-xs text-[var(--negative)]">More than this goal holds.</span>}
+      </div>
+    </Panel>
+  )
+}
+
+function RepayPanel({
+  max,
+  debts,
+  lenders,
+  onSubmit,
+}: {
+  max: number
+  debts: { goalId: number; amount: number }[]
+  lenders: GoalView[]
+  onSubmit: (toGoalId: number, amount: number) => void
+}) {
+  const byId = new Map(lenders.map((g) => [g.id, g]))
+  const [toId, setToId] = useState(debts[0] ? String(debts[0].goalId) : '')
+  const owed = debts.find((d) => String(d.goalId) === toId)?.amount ?? 0
+  const cap = Math.min(max, owed)
+  const [amount, setAmount] = useState(cap > 0 ? String(Math.round(cap * 100) / 100) : '')
+  const n = Number(amount)
+  const tooMuch = n > cap + 0.005
+  return (
+    <Panel column>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-[var(--muted)]">Repay</span>
+        <select
+          value={toId}
+          onChange={(e) => {
+            setToId(e.target.value)
+            const o = debts.find((d) => String(d.goalId) === e.target.value)?.amount ?? 0
+            setAmount(String(Math.round(Math.min(max, o) * 100) / 100))
+          }}
+          className={INPUT_CLASS}
+        >
+          {debts.map((d) => {
+            const g = byId.get(d.goalId)
+            return (
+              <option key={d.goalId} value={d.goalId}>
+                {g ? `${g.emoji} ${g.name}` : `Goal ${d.goalId}`} — owes {formatCurrency(d.amount)}
+              </option>
+            )
+          })}
+        </select>
+        <input type="number" placeholder="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} className={`${INPUT_CLASS} w-28`} />
+      </div>
+      <div className="flex items-center gap-2">
+        <button disabled={!n || tooMuch || !toId} onClick={() => onSubmit(Number(toId), n)} className={PRIMARY_BTN}>
+          Repay
+        </button>
+        {tooMuch && (
+          <span className="text-xs text-[var(--negative)]">
+            More than {owed > max ? 'this goal holds' : 'is owed'}.
+          </span>
+        )}
+      </div>
+    </Panel>
+  )
+}
+
 function AdjustPanel({ current, onSubmit }: { current: number; onSubmit: (newValue: number, note: string) => void }) {
   const [value, setValue] = useState(String(current))
   const [note, setNote] = useState('')
@@ -639,7 +792,7 @@ function EditPanel({
   onDelete,
 }: {
   goal: GoalView
-  onSave: (patch: { name?: string; emoji?: string; color?: string; targetAmount?: number | null; targetDate?: string | null; annualRate?: number | null }) => void
+  onSave: (patch: { name?: string; emoji?: string; color?: string; targetAmount?: number | null; targetDate?: string | null; annualRate?: number | null; autoContribute?: number | null }) => void
   onArchive: () => void
   onDelete?: () => void
 }) {
@@ -649,6 +802,7 @@ function EditPanel({
   const [target, setTarget] = useState(goal.targetAmount ? String(goal.targetAmount) : '')
   const [date, setDate] = useState(goal.targetDate ?? '')
   const [rate, setRate] = useState(goal.annualRate !== null ? (goal.annualRate * 100).toFixed(2) : '')
+  const [auto, setAuto] = useState(goal.autoContribute ? String(goal.autoContribute) : '')
   const isMortgage = goal.kind === 'mortgage'
   const isSavings = goal.kind === 'savings'
   return (
@@ -673,21 +827,38 @@ function EditPanel({
           </span>
         </label>
       ) : isSavings ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <input type="number" placeholder="Target $" value={target} onChange={(e) => setTarget(e.target.value)} className={`${INPUT_CLASS} w-28`} />
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={`${INPUT_CLASS}`} />
-          <div className="flex gap-1">
-            {COLORS.map((c) => (
-              <button
-                key={c}
-                onClick={() => setColor(c)}
-                className={`h-6 w-6 rounded-full ${color === c ? 'ring-2 ring-offset-1 ring-[var(--accent)]' : ''}`}
-                style={{ background: c }}
-                aria-label={`Color ${c}`}
-              />
-            ))}
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <input type="number" placeholder="Target $" value={target} onChange={(e) => setTarget(e.target.value)} className={`${INPUT_CLASS} w-28`} />
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={`${INPUT_CLASS}`} />
+            <div className="flex gap-1">
+              {COLORS.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setColor(c)}
+                  className={`h-6 w-6 rounded-full ${color === c ? 'ring-2 ring-offset-1 ring-[var(--accent)]' : ''}`}
+                  style={{ background: c }}
+                  aria-label={`Color ${c}`}
+                />
+              ))}
+            </div>
           </div>
-        </div>
+          <label className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
+            ⭐ Auto-contribute
+            <span className="flex items-center gap-1">
+              $
+              <input
+                type="number"
+                placeholder="0"
+                value={auto}
+                onChange={(e) => setAuto(e.target.value)}
+                className={`${INPUT_CLASS} w-24 text-right`}
+              />
+              /mo
+            </span>
+            <span className="text-[11px]">pre-fills this amount in the monthly surplus prompt</span>
+          </label>
+        </>
       ) : null}
       <div className="flex flex-wrap gap-2">
         <button
@@ -699,6 +870,7 @@ function EditPanel({
               targetAmount: isSavings ? (target ? Number(target) : null) : undefined,
               targetDate: isSavings ? (date || null) : undefined,
               annualRate: isMortgage ? (rate ? Number(rate) / 100 : null) : undefined,
+              autoContribute: isSavings ? (auto ? Number(auto) : null) : undefined,
             })
           }
           className={PRIMARY_BTN}

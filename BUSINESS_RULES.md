@@ -551,18 +551,38 @@ transfer was *for*, track progress to a target, and handle market-valued and mor
 
 ### Tables (`db/schema.ts`)
 - **`goals`** — `kind: 'savings' | 'mortgage' | 'netzero'`, `name, emoji, color, sortOrder, archived,
-  notify`, optional `targetAmount` / `targetDate`, and mortgage-only `annualRate`.
+  notify`, optional `targetAmount` / `targetDate`, mortgage-only `annualRate`, and savings-only
+  **`autoContribute`** (a fixed monthly amount for the surplus prompt — §10b).
 - **`goal_entries`** — the ledger driving a goal's value: `contribution` (money in; signed
   `amount`; `transactionId` set when it came from a real transfer, null for a manual "extra"
   deposit), `adjustment` (savings market reconcile; `amount` = signed delta so the running Σ
-  equals the new value), `balance` (mortgage only; `amount` = the absolute statement balance).
+  equals the new value), `balance` (mortgage only; `amount` = the absolute statement balance), and
+  **`transfer`** (a rebalance between goals — signed, no `transactionId`; moves value but is **not**
+  new savings — see below).
+- **`goal_transfers`** — records money moved between two savings goals so the "owed back" figure can
+  be computed. `fromGoalId` (lender/source), `toGoalId` (borrower/dest), `amount`, and
+  **`kind: 'transfer' | 'borrow' | 'repay'`** (`transfer` = permanent rebalance, `borrow` = creates a
+  debt owed back to the lender, `repay` = settles a borrow). Each row is mirrored by two
+  `goal_entries` (kind `transfer`): −amount on the source, +amount on the destination.
 - **`transfer_reviews`** — the dashboard prompt queue (`pending|resolved|dismissed`, unique on
   `transactionId`, optional `suggestedGoalId`, **`direction: 'out' | 'in'`** — outbound money moving
   to investments vs inbound money returning from them).
 
-A **savings** goal's value = Σ contribution+adjustment amounts (a `contribution` may be **negative** —
-a goal "spend", see below). Budget/analytics impact is carried **only** by the underlying
-transaction's `flow`, so goal contributions never double-count.
+A **savings** goal's value = Σ contribution+adjustment+transfer amounts (a `contribution` may be
+**negative** — a goal "spend", see below). Budget/analytics impact is carried **only** by the
+underlying transaction's `flow`, so goal contributions never double-count.
+
+### Transfers & borrows between goals (`transferBetweenGoals` / `repayGoalBorrow`, `app/actions/goals.ts`)
+The owner can move money from one savings goal to another (e.g. Trip → Insurance) from the goal
+card's **Move money** panel. A plain **transfer** just rebalances; ticking **Borrow** records a debt
+so the lender goal shows **"Owed back $X"** and the borrower shows **"Owes $X"**. Settle it later with
+the explicit **Repay** action (borrower → lender, capped at both the borrower's value and the amount
+owed). Outstanding owed to a lender L = Σ `borrow`[from=L] − Σ `repay`[to=L]; the per-lender breakdown
+(`GoalView.owesTo`) drives the Repay picker. Transfers/borrows/repays create **no transaction** (the
+money already left net when first contributed), so they never touch the budget/analytics/net, are
+**not** counted as new savings in 50/30/20 (excluded from `loadManualSavingsContributions`,
+`totalContributed`, and "invested this month" because they use the new `transfer` entry kind), and
+**never fire notifications** (the move actions skip `notifyGoalChange`).
 
 ### Spending from a goal (the goal as a purpose-built savings account)
 A savings goal you funded (each contribution counted as an Investment **expense**, so the money already
@@ -662,14 +682,20 @@ mortgage uses a ⬇ "closer to payoff" framing. No new endpoint or table.
 
 Run after pulling this change: `npm run db:push` (adds `goals`, `goal_entries`, `transfer_reviews`).
 The goal-spend feature adds `transfer_reviews.direction` and a `Goal Spend` income category — rerun
-`npm run db:push && npm run db:seed`.
+`npm run db:push && npm run db:seed`. The auto-contribute & transfers feature adds
+`goals.autoContribute`, the `goal_entries` `transfer` kind, and the `goal_transfers` table — run
+`npm run db:push` (no seed change).
 
 ## 10b. Monthly surplus allocation ("give every dollar a job")
 
 A dashboard prompt (`app/components/SurplusAllocation.tsx`, rendered from `app/page.tsx` next to
 the transfer-review prompt) that appears after a month closes net-positive and lets the owner split
-that surplus across goals by **percentage** (YNAB style). Pure helpers in `app/lib/surplus.ts`;
-server layer in `app/actions/surplus.ts`; one marker table `month_allocations` (`db/schema.ts`).
+that surplus across goals **in dollars**. Pure helpers in `app/lib/surplus.ts`; server layer in
+`app/actions/surplus.ts`; one marker table `month_allocations` (`db/schema.ts`). The UI works in
+dollars but stores/validates **fractional percents** of the month's net (`month_allocations.percents`):
+the client converts its dollar sliders to `amount/net·100` on confirm, which round-trips back to the
+exact dollars via `allocationAmounts` (`net·pct/100`, `round2`) — so an auto rule like $700 lands
+exactly. Net-Zero is the implicit remainder.
 
 ### The accounting principle (why it works the way it does)
 - **Net-Zero is the implicit remainder, never an explicit share.** Net-Zero's value **is** the
@@ -701,16 +727,26 @@ server layer in `app/actions/surplus.ts`; one marker table `month_allocations` (
   slices, then records `month_allocations` (`status='allocated'`, `percents`).
 - **Dismiss** (`dismissAllocation`): with Net-Zero → record `dismissed` (all to Net-Zero, no writes);
   with no Net-Zero → auto-apply the **previous** month's split (or an equal split).
-- **Preselect next month:** the prompt defaults to the most recent `allocated` row's `percents`
-  (`defaultPercents`).
+- **Preselect** (`autoContributePreselect`, per month since it depends on that month's surplus):
+  **auto-contribute rules first** — each savings goal with an `autoContribute` amount is pre-filled
+  that fixed dollar figure, in **goal priority order** (`sortOrder`, the drag-to-sort order), each
+  **capped at the surplus left**; so when the surplus can't fund every rule, higher-priority goals
+  win and the badge notes the partial fund. Then any **leftover** is split across the remaining
+  (non-auto) goals using **last month's percentages**, scaled down proportionally to fit. With no
+  rule and no prior month it falls back to `defaultPercents` (equal split / all-to-Net-Zero). An auto
+  rule has **no start month** — it applies the next time the prompt shows and never to already-actioned
+  months. Mortgage & Net-Zero are unaffected (never eligible). Mortgage Freedom and Net-Zero are the
+  goals the owner explicitly wanted left out.
 
-`month_allocations` (`month` unique, `status`, `percents` jsonb of `{ "<savingsGoalId>": pct }`)
+`month_allocations` (`month` unique, `status`, `percents` jsonb of `{ "<savingsGoalId>": pct }`,
+fractional)
 records one row per actioned month; confirm/dismiss are idempotent (re-check + `onConflictDoNothing`).
 
 > **Caveat:** carves are a *conceptual earmark* of cash that stays in chequing — don't *also*
 > allocate the same dollars again via a real imported transfer review (§10), or the goal double-counts.
 
-Run after pulling this change: `npm run db:push` (adds `month_allocations`).
+Run after pulling this change: `npm run db:push` (adds `month_allocations`). Sliders now work in
+**dollars** and the preselect honours per-goal **auto-contribute** rules (above).
 
 ## 11. Demo mode (read-only showcase)
 

@@ -7,18 +7,22 @@
 import { addMonths, monthsBetween } from '@/app/lib/mortgage'
 
 export type EntryLite = {
-  kind: 'contribution' | 'adjustment' | 'balance'
+  kind: 'contribution' | 'adjustment' | 'balance' | 'transfer'
   amount: number
   occurredAt: string // YYYY-MM-DD
 }
 
-/** Current value of a savings goal = Σ contributions + Σ adjustment deltas. */
+/** Kinds that move a savings goal's running value. */
+function affectsValue(e: EntryLite): boolean {
+  return e.kind === 'contribution' || e.kind === 'adjustment' || e.kind === 'transfer'
+}
+
+/**
+ * Current value of a savings goal = Σ contributions + Σ adjustment deltas +
+ * Σ transfer (rebalance) deltas. Transfers move value but aren't new savings.
+ */
 export function savingsValue(entries: EntryLite[]): number {
-  return round2(
-    entries
-      .filter((e) => e.kind === 'contribution' || e.kind === 'adjustment')
-      .reduce((s, e) => s + e.amount, 0),
-  )
+  return round2(entries.filter(affectsValue).reduce((s, e) => s + e.amount, 0))
 }
 
 /** Total money actually put in (positive contributions only). */
@@ -40,7 +44,7 @@ export function progressPct(value: number, target: number | null): number | null
  */
 export function valueSeries(entries: EntryLite[], asOfYm: string): { ym: string; value: number }[] {
   const relevant = entries
-    .filter((e) => e.kind === 'contribution' || e.kind === 'adjustment')
+    .filter(affectsValue)
     .sort((a, b) => (a.occurredAt < b.occurredAt ? -1 : 1))
   if (relevant.length === 0) return [{ ym: asOfYm, value: 0 }]
 

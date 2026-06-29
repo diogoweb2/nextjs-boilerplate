@@ -7,6 +7,7 @@ import { db } from '@/db'
 import {
   goals,
   goalEntries,
+  goalTransfers,
   transferReviews,
   transactions,
   merchants,
@@ -85,9 +86,17 @@ export type GoalView = {
   targetAmount: number | null
   targetDate: string | null
   annualRate: number | null
+  /** Savings only: fixed monthly auto-contribute amount for the surplus prompt. */
+  autoContribute: number | null
   value: number
   contributed: number
   contributedThisMonth: number
+  /** Money other goals borrowed from this one and still owe back (lender side). */
+  owedToThis: number
+  /** Money this goal borrowed from others and still owes back (borrower side). */
+  owesOut: number
+  /** Per-lender breakdown of what this goal still owes (drives the Repay panel). */
+  owesTo: { goalId: number; amount: number }[]
   progressPct: number | null
   projectedCompletionYm: string | null
   milestone: string
@@ -290,7 +299,56 @@ export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: stri
     }
   }
 
-  const viewsWithMonth = views.map((v) => ({ ...v, contributedThisMonth: thisMonthByGoal.get(v.id) ?? 0 }))
+  // Borrow ledger: how much each goal is owed back (lender) / still owes (borrower).
+  const transferRows = goalIds.length
+    ? await db
+        .select({
+          fromGoalId: goalTransfers.fromGoalId,
+          toGoalId: goalTransfers.toGoalId,
+          amount: goalTransfers.amount,
+          kind: goalTransfers.kind,
+        })
+        .from(goalTransfers)
+        .where(inArray(goalTransfers.fromGoalId, goalIds))
+    : []
+  const owedToThis = new Map<number, number>()
+  const owesOut = new Map<number, number>()
+  // Per (borrower → lender) net owed, so each goal can repay specific lenders.
+  const owedByPair = new Map<string, number>() // `${borrower}:${lender}` → amount
+  for (const r of transferRows) {
+    const amt = Number(r.amount)
+    if (r.kind === 'borrow') {
+      // from = lender (owed back), to = borrower (owes).
+      owedToThis.set(r.fromGoalId, (owedToThis.get(r.fromGoalId) ?? 0) + amt)
+      owesOut.set(r.toGoalId, (owesOut.get(r.toGoalId) ?? 0) + amt)
+      const key = `${r.toGoalId}:${r.fromGoalId}`
+      owedByPair.set(key, (owedByPair.get(key) ?? 0) + amt)
+    } else if (r.kind === 'repay') {
+      // from = borrower (owes less), to = lender (owed less).
+      owedToThis.set(r.toGoalId, (owedToThis.get(r.toGoalId) ?? 0) - amt)
+      owesOut.set(r.fromGoalId, (owesOut.get(r.fromGoalId) ?? 0) - amt)
+      const key = `${r.fromGoalId}:${r.toGoalId}`
+      owedByPair.set(key, (owedByPair.get(key) ?? 0) - amt)
+    }
+  }
+  const clamp0 = (n: number) => Math.max(0, Math.round(n * 100) / 100)
+  const owesToByGoal = new Map<number, { goalId: number; amount: number }[]>()
+  for (const [key, raw] of owedByPair) {
+    const amt = clamp0(raw)
+    if (amt <= 0) continue
+    const [borrower, lender] = key.split(':').map(Number)
+    const list = owesToByGoal.get(borrower) ?? []
+    list.push({ goalId: lender, amount: amt })
+    owesToByGoal.set(borrower, list)
+  }
+
+  const viewsWithMonth = views.map((v) => ({
+    ...v,
+    contributedThisMonth: thisMonthByGoal.get(v.id) ?? 0,
+    owedToThis: clamp0(owedToThis.get(v.id) ?? 0),
+    owesOut: clamp0(owesOut.get(v.id) ?? 0),
+    owesTo: owesToByGoal.get(v.id) ?? [],
+  }))
 
   return { goals: viewsWithMonth, asOfYm, suggestNetZero, monthStats: { thisMonth: Math.round(thisMonth * 100) / 100, lastMonth: Math.round(lastMonth * 100) / 100 } }
 }
@@ -401,6 +459,11 @@ function baseView(g: Goal) {
     targetAmount: g.targetAmount === null ? null : Number(g.targetAmount),
     targetDate: g.targetDate,
     annualRate: g.annualRate === null ? null : Number(g.annualRate),
+    autoContribute: g.autoContribute === null ? null : Number(g.autoContribute),
+    // Real values merged in loadGoalsData after aggregating goal_transfers.
+    owedToThis: 0,
+    owesOut: 0,
+    owesTo: [],
   }
 }
 
@@ -579,6 +642,7 @@ export async function createGoal(input: {
   color?: string
   targetAmount?: number | null
   targetDate?: string | null
+  autoContribute?: number | null
 }): Promise<void> {
   await requireAuth()
   const name = input.name.trim()
@@ -596,6 +660,7 @@ export async function createGoal(input: {
     kind: 'savings',
     targetAmount: input.targetAmount != null && input.targetAmount > 0 ? input.targetAmount.toFixed(2) : null,
     targetDate: input.targetDate || null,
+    autoContribute: input.autoContribute != null && input.autoContribute > 0 ? input.autoContribute.toFixed(2) : null,
     sortOrder: (max ?? 0) + 1,
   })
   revalidateGoals()
@@ -611,6 +676,8 @@ export async function updateGoal(
     targetDate?: string | null
     /** Mortgage only: current annual interest rate as a decimal (3.55% → 0.0355). */
     annualRate?: number | null
+    /** Savings only: fixed monthly auto-contribute amount (0/null clears the rule). */
+    autoContribute?: number | null
   },
 ): Promise<void> {
   await requireAuth()
@@ -621,6 +688,9 @@ export async function updateGoal(
   if (patch.targetAmount !== undefined)
     set.targetAmount = patch.targetAmount != null && patch.targetAmount > 0 ? patch.targetAmount.toFixed(2) : null
   if (patch.targetDate !== undefined) set.targetDate = patch.targetDate || null
+  if (patch.autoContribute !== undefined)
+    set.autoContribute =
+      patch.autoContribute != null && patch.autoContribute > 0 ? patch.autoContribute.toFixed(2) : null
   if (patch.annualRate !== undefined)
     set.annualRate =
       patch.annualRate != null && Number.isFinite(patch.annualRate) && patch.annualRate >= 0
@@ -781,6 +851,102 @@ export async function spendFromGoal(input: {
     note: input.note?.trim() || 'Goal spend',
   })
   await notifyGoalChange(goal, before, before - amount)
+  revalidateGoals()
+}
+
+/**
+ * Move money between two savings goals. Writes the two balancing ledger rows
+ * (kind 'transfer': −amount on the source, +amount on the destination) plus a
+ * goal_transfers record. Creates NO transaction (the money already left net when
+ * first contributed), so it never touches the budget/analytics and never notifies.
+ * Returns the amount actually moved (capped at the source's value).
+ */
+async function moveBetweenGoals(
+  fromId: number,
+  toId: number,
+  requested: number,
+  kind: 'transfer' | 'borrow' | 'repay',
+  note?: string,
+): Promise<number> {
+  if (fromId === toId) return 0
+  const amount = Math.round(requested * 100) / 100
+  if (!Number.isFinite(amount) || amount <= 0) return 0
+  const [from] = await db.select().from(goals).where(eq(goals.id, fromId)).limit(1)
+  const [to] = await db.select().from(goals).where(eq(goals.id, toId)).limit(1)
+  if (!from || from.kind !== 'savings' || !to || to.kind !== 'savings') return 0
+  const fromValue = await currentSavingsValue(fromId)
+  const moved = Math.min(amount, fromValue)
+  if (moved <= 0) return 0
+  const occurredAt = todayIso()
+  const trimmedNote = note?.trim() || null
+
+  await db.insert(goalEntries).values([
+    { goalId: fromId, kind: 'transfer', amount: (-moved).toFixed(2), occurredAt, note: trimmedNote },
+    { goalId: toId, kind: 'transfer', amount: moved.toFixed(2), occurredAt, note: trimmedNote },
+  ])
+  await db.insert(goalTransfers).values({
+    fromGoalId: fromId,
+    toGoalId: toId,
+    amount: moved.toFixed(2),
+    kind,
+    occurredAt,
+    note: trimmedNote,
+  })
+  return moved
+}
+
+/** Outstanding amount still owed back to a lender goal (Σ borrow − Σ repay). */
+async function outstandingOwedTo(lenderId: number): Promise<number> {
+  const rows = await db
+    .select({ kind: goalTransfers.kind, amount: goalTransfers.amount, fromGoalId: goalTransfers.fromGoalId, toGoalId: goalTransfers.toGoalId })
+    .from(goalTransfers)
+  let owed = 0
+  for (const r of rows) {
+    if (r.kind === 'borrow' && r.fromGoalId === lenderId) owed += Number(r.amount)
+    else if (r.kind === 'repay' && r.toGoalId === lenderId) owed -= Number(r.amount)
+  }
+  return Math.max(0, Math.round(owed * 100) / 100)
+}
+
+/**
+ * Transfer money from one savings goal to another. `borrowed` records it as a debt
+ * the source goal is owed back (repay it later with repayGoalBorrow); otherwise it
+ * is a permanent rebalance. No notification, no transaction.
+ */
+export async function transferBetweenGoals(input: {
+  fromGoalId: number
+  toGoalId: number
+  amount: number
+  borrowed?: boolean
+  note?: string
+}): Promise<void> {
+  await requireAuth()
+  await moveBetweenGoals(
+    input.fromGoalId,
+    input.toGoalId,
+    input.amount,
+    input.borrowed ? 'borrow' : 'transfer',
+    input.note,
+  )
+  revalidateGoals()
+}
+
+/**
+ * Repay a borrow: move money from the borrower goal back to the lender, reducing
+ * the lender's outstanding "owed back" figure. Capped at both the borrower's value
+ * and the amount actually owed. No notification, no transaction.
+ */
+export async function repayGoalBorrow(input: {
+  fromGoalId: number // borrower
+  toGoalId: number // lender
+  amount: number
+  note?: string
+}): Promise<void> {
+  await requireAuth()
+  const owed = await outstandingOwedTo(input.toGoalId)
+  if (owed <= 0) return
+  const capped = Math.min(Math.round(input.amount * 100) / 100, owed)
+  await moveBetweenGoals(input.fromGoalId, input.toGoalId, capped, 'repay', input.note)
   revalidateGoals()
 }
 

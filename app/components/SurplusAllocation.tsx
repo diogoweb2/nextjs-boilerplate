@@ -7,10 +7,15 @@ import { confirmAllocation, dismissAllocation, type SurplusPrompt } from '@/app/
 
 const EPS = 0.01
 
+function round2(n: number): number {
+  return Math.round(n * 100) / 100
+}
+
 /**
  * Dashboard "give every dollar a job" prompt. After a month closes net-positive,
- * the owner splits that surplus across savings goals by percentage; Net-Zero is
- * the implicit remainder (whatever's left keeps reducing the year's deficit).
+ * the owner splits that surplus across savings goals in DOLLARS; Net-Zero is the
+ * implicit remainder (whatever's left keeps reducing the year's deficit). Goals
+ * with an auto-contribute rule pre-fill their fixed amount (in priority order).
  * Stays at the top of the dashboard until each completed month is actioned.
  */
 export function SurplusAllocation({ prompts }: { prompts: SurplusPrompt[] }) {
@@ -27,33 +32,41 @@ export function SurplusAllocation({ prompts }: { prompts: SurplusPrompt[] }) {
 function PromptCard({ prompt }: { prompt: SurplusPrompt }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const [percents, setPercents] = useState<Record<string, number>>(() => {
+  // Work in DOLLARS; the preselect arrives as percents of the month's net.
+  const [amounts, setAmounts] = useState<Record<string, number>>(() => {
     const init: Record<string, number> = {}
-    for (const g of prompt.goals) init[String(g.id)] = prompt.preselect[String(g.id)] ?? 0
+    for (const g of prompt.goals) {
+      const pct = prompt.preselect[String(g.id)] ?? 0
+      init[String(g.id)] = round2((prompt.net * pct) / 100)
+    }
     return init
   })
 
   const total = useMemo(
-    () => Object.values(percents).reduce((s, p) => s + (p > 0 ? p : 0), 0),
-    [percents],
+    () => round2(Object.values(amounts).reduce((s, a) => s + (a > 0 ? a : 0), 0)),
+    [amounts],
   )
-  const remainder = Math.round((100 - total) * 100) / 100
+  const remainder = round2(prompt.net - total)
 
-  const setPct = (goalId: number, raw: number) => {
-    const others = total - (percents[String(goalId)] ?? 0)
-    const max = Math.max(0, 100 - others) // respect the 100% ceiling
-    const safe = Number.isFinite(raw) ? Math.round(raw) : 0
+  const setAmt = (goalId: number, raw: number) => {
+    const others = total - (amounts[String(goalId)] ?? 0)
+    const max = Math.max(0, round2(prompt.net - others)) // respect the surplus ceiling
+    const safe = Number.isFinite(raw) ? round2(raw) : 0
     const v = Math.min(max, Math.max(0, safe))
-    setPercents((prev) => ({ ...prev, [String(goalId)]: v }))
+    setAmounts((prev) => ({ ...prev, [String(goalId)]: v }))
   }
 
   // With Net-Zero the remainder is a valid bucket; without it every dollar must
-  // get a job (Σ must reach 100).
+  // get a job (Σ must reach the full surplus).
   const canConfirm = prompt.hasNetZero ? true : Math.abs(remainder) < EPS
-  const dollars = (pct: number) => formatCurrency(Math.round((prompt.net * pct) / 100 * 100) / 100)
 
   const confirm = () =>
     startTransition(async () => {
+      // Convert dollars → fractional percents of net (round-trips to exact dollars).
+      const percents: Record<string, number> = {}
+      for (const [id, amt] of Object.entries(amounts)) {
+        if (amt > 0 && prompt.net > 0) percents[id] = (amt / prompt.net) * 100
+      }
       await confirmAllocation({ month: prompt.month, percents })
       router.refresh()
     })
@@ -74,12 +87,15 @@ function PromptCard({ prompt }: { prompt: SurplusPrompt }) {
         </h2>
       </div>
       <p className="mb-3 text-xs text-[var(--muted)]">
-        Split last month&apos;s surplus across your goals. This preselects next month too.
+        Split last month&apos;s surplus across your goals (in dollars). This preselects next month too.
       </p>
 
       <div className="flex flex-col gap-2.5">
         {prompt.goals.map((g) => {
-          const pct = percents[String(g.id)] ?? 0
+          const amt = amounts[String(g.id)] ?? 0
+          const auto = g.autoContribute ?? 0
+          // Partial fund: the rule wanted more than the surplus could cover.
+          const partial = auto > 0 && amt < auto - EPS
           return (
             <div
               key={g.id}
@@ -89,34 +105,47 @@ function PromptCard({ prompt }: { prompt: SurplusPrompt }) {
                 <span className="text-sm font-medium">
                   <span className="mr-1.5">{g.emoji}</span>
                   {g.name}
+                  {auto > 0 && (
+                    <span
+                      className="ml-2 rounded-full bg-[var(--accent)]/15 px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent)]"
+                      title="Auto-contribute rule"
+                    >
+                      ⭐ Auto {formatCurrency(auto)}/mo
+                    </span>
+                  )}
                 </span>
-                <span className="tabular-nums text-sm text-[var(--muted)]">{dollars(pct)}</span>
+                <span className="tabular-nums text-sm text-[var(--muted)]">{formatCurrency(amt)}</span>
               </div>
               <div className="flex items-center gap-3">
                 <input
                   type="range"
                   min={0}
-                  max={100}
+                  max={Math.max(1, Math.round(prompt.net))}
                   step={1}
-                  value={pct}
-                  onChange={(e) => setPct(g.id, Number(e.target.value))}
+                  value={amt}
+                  onChange={(e) => setAmt(g.id, Number(e.target.value))}
                   className="min-w-0 flex-1 accent-[var(--accent)]"
-                  aria-label={`${g.name} percent`}
+                  aria-label={`${g.name} amount`}
                 />
                 <div className="flex items-center gap-1">
+                  <span className="text-sm text-[var(--muted)]">$</span>
                   <input
                     type="number"
                     min={0}
-                    max={100}
+                    max={prompt.net}
                     step={1}
-                    value={pct}
-                    onChange={(e) => setPct(g.id, Number(e.target.value))}
-                    className="w-16 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-right text-sm tabular-nums text-[var(--foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
-                    aria-label={`${g.name} percent input`}
+                    value={amt}
+                    onChange={(e) => setAmt(g.id, Number(e.target.value))}
+                    className="w-20 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-right text-sm tabular-nums text-[var(--foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+                    aria-label={`${g.name} amount input`}
                   />
-                  <span className="text-sm text-[var(--muted)]">%</span>
                 </div>
               </div>
+              {partial && (
+                <p className="mt-1 text-[11px] text-[var(--warning)]">
+                  Surplus only covers {formatCurrency(amt)} of the {formatCurrency(auto)} auto rule.
+                </p>
+              )}
             </div>
           )
         })}
@@ -130,10 +159,7 @@ function PromptCard({ prompt }: { prompt: SurplusPrompt }) {
                 {prompt.netZeroLabel ?? 'Net-Zero'}
                 <span className="ml-1.5 text-xs text-[var(--muted)]">(whatever&apos;s left)</span>
               </span>
-              <span className="tabular-nums text-sm">
-                <span className="font-bold">{Math.max(0, remainder)}%</span>
-                <span className="ml-2 text-[var(--muted)]">{dollars(Math.max(0, remainder))}</span>
-              </span>
+              <span className="tabular-nums text-sm font-bold">{formatCurrency(Math.max(0, remainder))}</span>
             </div>
           </div>
         ) : (
@@ -142,7 +168,7 @@ function PromptCard({ prompt }: { prompt: SurplusPrompt }) {
           >
             {Math.abs(remainder) < EPS
               ? 'Every dollar has a job ✓'
-              : `Unassigned: ${remainder}% (${dollars(remainder)}) — assign it all to continue.`}
+              : `Unassigned: ${formatCurrency(remainder)} — assign it all to continue.`}
           </p>
         )}
       </div>

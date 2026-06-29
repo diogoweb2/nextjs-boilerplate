@@ -79,6 +79,61 @@ export function defaultPercents(
   return out
 }
 
+export type EligibleGoal = { id: number; autoContribute: number | null }
+
+/**
+ * Preselected savings-goal percentages for the monthly prompt, honoring per-goal
+ * auto-contribute rules. Auto goals (in the given priority order, = goal sortOrder)
+ * are pre-filled their fixed dollar amount first, each capped at the surplus left;
+ * then any leftover is split across the NON-auto goals using last month's
+ * percentages, scaled down proportionally to fit. Returns FRACTIONAL percents of
+ * `net` ({ "<goalId>": pct }) so the dollar slider UI round-trips exactly. Net-Zero
+ * stays the implicit remainder (100 − Σ). See BUSINESS_RULES §10b.
+ */
+export function autoContributePreselect(
+  net: number,
+  goalsInPriority: EligibleGoal[],
+  prevPercents: Record<string, number> | null,
+): Record<string, number> {
+  if (!(net > 0) || goalsInPriority.length === 0) return {}
+  const dollars: Record<string, number> = {}
+  let remaining = net
+
+  // 1) Auto rules first, in priority order, each capped at what's left.
+  const autoIds = new Set<number>()
+  for (const g of goalsInPriority) {
+    const amt = g.autoContribute ?? 0
+    if (!(amt > 0)) continue
+    autoIds.add(g.id)
+    const give = Math.min(round2(amt), remaining)
+    if (give > 0) {
+      dollars[String(g.id)] = round2(give)
+      remaining = round2(remaining - give)
+    }
+  }
+
+  // 2) Split the leftover across non-auto goals by last month's percentages.
+  if (remaining > 0 && prevPercents) {
+    const desired = goalsInPriority
+      .filter((g) => !autoIds.has(g.id))
+      .map((g) => ({ id: g.id, want: round2((net * (prevPercents[String(g.id)] ?? 0)) / 100) }))
+      .filter((d) => d.want > 0)
+    const totalWant = desired.reduce((s, d) => s + d.want, 0)
+    const scale = totalWant > remaining ? remaining / totalWant : 1
+    for (const d of desired) {
+      const give = round2(d.want * scale)
+      if (give > 0) dollars[String(d.id)] = round2((dollars[String(d.id)] ?? 0) + give)
+    }
+  }
+
+  // Convert dollars → fractional percents of net.
+  const out: Record<string, number> = {}
+  for (const [id, amt] of Object.entries(dollars)) {
+    if (amt > 0) out[id] = (amt / net) * 100
+  }
+  return out
+}
+
 /** Convert savings-goal percentages into dollar amounts for a month's net. */
 export function allocationAmounts(
   net: number,
