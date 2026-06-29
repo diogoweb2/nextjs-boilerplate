@@ -161,6 +161,20 @@ function PromptCard({ prompt }: { prompt: SurplusPrompt }) {
               </span>
               <span className="tabular-nums text-sm font-bold">{formatCurrency(Math.max(0, remainder))}</span>
             </div>
+            {prompt.minNetZero !== null && prompt.minNetZero > 0 && (
+              <div className="mt-1.5 flex items-center justify-between text-[11px]">
+                <span className="text-[var(--muted)]">
+                  Dec 31 path: {formatCurrency(prompt.minNetZero)}/mo
+                </span>
+                {remainder >= prompt.minNetZero - EPS ? (
+                  <span className="text-[var(--positive)]">on track ✓</span>
+                ) : (
+                  <span className="text-[var(--warning)]">
+                    {formatCurrency(Math.ceil(prompt.minNetZero - remainder))} below target
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         ) : (
           <p

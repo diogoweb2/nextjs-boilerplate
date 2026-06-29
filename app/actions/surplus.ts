@@ -28,6 +28,12 @@ export type SurplusPrompt = {
   hasNetZero: boolean
   /** Display label for the Net-Zero remainder row, e.g. "Net-Zero 2026". */
   netZeroLabel: string | null
+  /**
+   * Minimum dollars to leave for Net-Zero this month to stay on the Dec 31
+   * required-path slope: (-completedBaseline / monthsRemaining). Null when
+   * there is no Net-Zero goal or the year is already in the black.
+   */
+  minNetZero: number | null
   /** Eligible savings goals to allocate to (mortgage & net-zero excluded), in
    *  priority order (goal sortOrder). `autoContribute` is the fixed monthly rule. */
   goals: { id: number; name: string; emoji: string; color: string; autoContribute: number | null }[]
@@ -124,6 +130,7 @@ export async function loadSurplusPrompts(): Promise<SurplusPrompt[]> {
   const candidates = completedNetPositiveMonths(flows, anchor)
   if (candidates.length === 0) return []
 
+  if (!anchor) return []
   const actioned = await actionedMonths()
   const open = candidates.filter((c) => !actioned.has(c.ym)) // newest first
   if (open.length === 0) return []
@@ -150,17 +157,34 @@ export async function loadSurplusPrompts(): Promise<SurplusPrompt[]> {
     autoContribute: g.autoContribute === null ? null : Number(g.autoContribute),
   }))
 
+  // For the Net-Zero on-track indicator: the required monthly improvement is the
+  // dashed-line slope = -completedBaseline / monthsRemaining (same formula as the
+  // trajectory chart). Deficit carries automatically when the goal doesn't archive.
+  const yearStart = `${anchor.slice(0, 4)}-01`
+  const anchorNum = parseInt(anchor.slice(5, 7))
+  const monthsRemaining = 12 - anchorNum + 1 // anchor month through December, inclusive
+
   // Preselect is per-month: auto-contribute amounts depend on each month's surplus.
   // Falls back to the equal-split / last-month default when no rule applies.
   return months.map((m) => {
     const autoSel = autoContributePreselect(m.net, priority, prev)
     const preselect =
       Object.keys(autoSel).length > 0 ? autoSel : defaultPercents(eligibleIds, prev, hasNetZero)
+
+    let minNetZero: number | null = null
+    if (hasNetZero && monthsRemaining > 0) {
+      const baseline = netOverRange(flows, yearStart, m.ym)
+      if (baseline < 0) {
+        minNetZero = Math.round((-baseline / monthsRemaining) * 100) / 100
+      }
+    }
+
     return {
       month: m.ym,
       net: m.net,
       hasNetZero,
       netZeroLabel: nz?.name ?? null,
+      minNetZero,
       goals: goalsView,
       preselect,
     }

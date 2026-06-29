@@ -705,6 +705,7 @@ export function demoSurplusPrompts(): SurplusPrompt[] {
       net: 1840,
       hasNetZero: false,
       netZeroLabel: null,
+      minNetZero: null,
       goals: [
         { id: 1, name: 'Family Vacation', emoji: '🏖️', color: '#06b6d4', autoContribute: 500 },
         { id: 2, name: 'Emergency Fund', emoji: '🛟', color: '#16a34a', autoContribute: null },
