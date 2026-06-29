@@ -290,7 +290,14 @@ function GoalCard({
             {goal.emoji}
           </span>
           <div>
-            <h3 className="font-semibold leading-tight">{goal.name}</h3>
+            <div className="flex items-center gap-1.5">
+              <h3 className="font-semibold leading-tight">{goal.name}</h3>
+              {goal.autoContribute && goal.autoContribute > 0 && (
+                <span className="rounded-full bg-[var(--accent)]/15 px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent)]" title={`Auto-contribute $${goal.autoContribute}/mo`}>
+                  ⭐ Auto
+                </span>
+              )}
+            </div>
             <p className="text-xs text-[var(--muted)]">{subtitle}</p>
           </div>
         </div>
