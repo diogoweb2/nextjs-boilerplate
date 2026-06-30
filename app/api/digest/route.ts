@@ -4,7 +4,8 @@ import { monthReportPushes } from '@/db/schema'
 import { ingestTokenOk } from '@/app/lib/apiToken'
 import { buildDigest } from '@/app/lib/digest'
 import { buildMonthReport, buildReportNotification } from '@/app/lib/monthReport'
-import { addMonths } from '@/app/lib/analytics'
+import { completedReportMonth } from '@/app/lib/reportSchedule'
+import { loadAllFlows, anchorMonth, availableMonths } from '@/app/lib/analytics'
 import { pushConfigured, sendPushToAll } from '@/app/lib/push'
 
 /**
@@ -16,8 +17,10 @@ import { pushConfigured, sendPushToAll } from '@/app/lib/push'
  *
  *  - GET             → compute and return the daily digest (dry-run / debugging).
  *  - GET ?month=YYYY-MM → return the monthly recap JSON for that month (preview, no push).
- *  - POST            → daily push. On the 1st it instead pushes the monthly recap
- *                      (once, deduped) and skips the normal daily digest.
+ *  - POST            → daily push. Once a newer month has transactions (so the
+ *                      prior month is final — no pending charges can predate them)
+ *                      it instead pushes that month's recap (once, deduped) and
+ *                      skips the daily digest.
  */
 export const dynamic = 'force-dynamic'
 
@@ -29,12 +32,6 @@ function authProblem(request: NextRequest): Response | null {
     return Response.json({ error: 'Unauthorized.' }, { status: 401 })
   }
   return null
-}
-
-/** The previous calendar month relative to `now` (the month a day-1 report covers). */
-function reportMonthFor(now: Date): string {
-  const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-  return addMonths(ym, -1)
 }
 
 export async function GET(request: NextRequest): Promise<Response> {
@@ -59,12 +56,16 @@ export async function POST(request: NextRequest): Promise<Response> {
     ? (body.failedSources as unknown[]).filter((s): s is string => typeof s === 'string')
     : []
 
-  // On the 1st: push the monthly recap (once) and skip the normal daily digest.
-  if (new Date().getDate() === 1) {
-    const ym = reportMonthFor(new Date())
+  // The month before the current anchor (latest month with data) is final the
+  // moment that newer-month data lands — no pending charge can predate it. So once
+  // a completed month exists, push its recap (once) and skip the daily digest.
+  // Fires on the first run after new-month data; the per-`ym` dedup row caps it.
+  const flows = await loadAllFlows()
+  const ym = completedReportMonth(anchorMonth(flows.filter((t) => t.flow === 'expense')))
+  if (ym && availableMonths(flows).includes(ym)) {
     const { report } = await buildMonthReport(ym)
     if (report && pushConfigured()) {
-      // Insert-if-absent so a second run on the 1st can't double-send the recap.
+      // Insert-if-absent so later runs in the window can't double-send the recap.
       const claimed = await db
         .insert(monthReportPushes)
         .values({ ym })

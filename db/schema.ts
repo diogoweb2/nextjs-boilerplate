@@ -529,9 +529,9 @@ export const pushSubscriptions = pgTable('push_subscriptions', {
 })
 
 /**
- * Idempotency guard for the day-1 monthly-report push. One row per reported month
+ * Idempotency guard for the monthly-report push. One row per reported month
  * (YYYY-MM); the digest endpoint inserts-if-absent before pushing so the daily job
- * firing more than once on the 1st can't double-send the recap notification.
+ * firing repeatedly through the post-settle window can't double-send the recap.
  */
 export const monthReportPushes = pgTable('month_report_pushes', {
   ym: text('ym').primaryKey(),

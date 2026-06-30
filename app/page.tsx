@@ -27,6 +27,8 @@ import { loadEmergencyFund } from '@/app/actions/emergency'
 import { isDemoSession } from '@/app/lib/demo'
 import { TransferReview } from '@/app/components/TransferReview'
 import { OtherCategoryBanner } from '@/app/components/OtherCategoryBanner'
+import { ReportReminder } from '@/app/components/ReportReminder'
+import { completedReportMonth } from '@/app/lib/reportSchedule'
 import { SurplusAllocation } from '@/app/components/SurplusAllocation'
 import { GoalsSummary } from '@/app/components/GoalsSummary'
 import { buildBudgetInsights } from '@/app/lib/dashboard-insights'
@@ -114,6 +116,11 @@ export default async function Home({
 
   const anchor = anchorMonth(all)
   const months_available = availableMonths(all)
+  // The just-completed month (the one before the in-progress anchor), shown only
+  // if it has data — the device-local report reminder nags about it until seen.
+  const dueReportMonth = completedReportMonth(anchor)
+  const reminderReportMonth =
+    dueReportMonth && months_available.includes(dueReportMonth) ? dueReportMonth : null
   // Dashboard always shows a single month; default to the current (anchor) month.
   const exactMonth = month ?? anchor
 
@@ -218,6 +225,8 @@ export default async function Home({
           />
         </div>
       </div>
+
+      <ReportReminder month={reminderReportMonth} />
 
       {syncFailures.length > 0 && (
         <div className="mb-5">

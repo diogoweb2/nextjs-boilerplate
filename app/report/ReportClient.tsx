@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { formatCurrency } from '@/app/lib/format'
+import { REPORT_SEEN_KEY } from '@/app/lib/reportSchedule'
 import type { CategoryDelta, Grade, MonthReport } from '@/app/lib/monthReport'
 
 const GRADE_BLURB: Record<string, string> = {
@@ -101,6 +102,13 @@ export function ReportClient({ report, months }: { report: MonthReport; months: 
   const idx = months.indexOf(report.month)
   const older = idx >= 0 && idx < months.length - 1 ? months[idx + 1] : null
   const newer = idx > 0 ? months[idx - 1] : null
+
+  // Viewing a recap clears the dashboard reminder for that month (the "or sees it"
+  // path). Only matters when this is the month the reminder points at; storing an
+  // older month is harmless since the reminder compares against the due month.
+  useEffect(() => {
+    localStorage.setItem(REPORT_SEEN_KEY, report.month)
+  }, [report.month])
 
   const isAOrBetter = ['A+', 'A', 'A-'].includes(report.grade.letter)
 

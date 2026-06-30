@@ -1,6 +1,6 @@
 /**
  * Monthly recap builder — the data behind the standalone 80s-themed `/report`
- * page and the day-1 push notification. It's a *progress* report: it grades the
+ * page and the month-settled push notification. It's a *progress* report: it grades the
  * month on effort vs. the month before, then surfaces a handful of glanceable
  * headlines. Fully deterministic (no AI — see BUSINESS_RULES.md §Monthly report)
  * and reuses the same analytics the dashboard/budget render, so every number ties
@@ -413,7 +413,7 @@ const GRADE_EMOJI: Record<string, string> = {
   F: '💾',
 }
 
-/** Fun, motivational push payload for the day-1 notification. */
+/** Fun, motivational push payload for the month-settled recap notification. */
 export function buildReportNotification(report: MonthReport): { title: string; body: string; url: string } {
   const emoji = GRADE_EMOJI[report.grade.letter] ?? '🪩'
   const bits: string[] = []

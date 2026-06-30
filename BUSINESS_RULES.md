@@ -718,7 +718,8 @@ exactly. Net-Zero is the implicit remainder.
   whose surplus is allocated (when July's data lands). Anything before it is ignored entirely (no
   prompt, no auto-file).
 - **Candidates** (`completedNetPositiveMonths`): months `≥ SURPLUS_START_MONTH` and `< anchor` whose
-  `netOverRange(ym,ym) > 0`.
+  `netOverRange(ym,ym) > 0`. The `< anchor` bound is itself the "month is done" rule (§15): a month
+  only prompts once a newer month has data, so its net (and surplus) is already final.
 - **Queue** (`loadSurplusPrompts`): with an active Net-Zero goal, only the **most recent** un-actioned
   month prompts (older ones are absorbed by cumulative net — `reconcileSurplusAllocations` auto-files
   them as `dismissed`/all-to-Net-Zero, mirroring `reconcileNetZeroGoals`). With **no** Net-Zero goal,
@@ -1147,13 +1148,33 @@ Five 0–1 signals × weights, summed to 0–100 → letter (`A+ ≥95 … D ≥
 
 Thresholds/weights are intentionally easy to retune after a few real months.
 
-### Day-1 push (no cloud cron — piggybacks the daily digest)
-`POST /api/digest` (the existing daily launchd job) checks `new Date().getDate() === 1`; on the 1st it
-builds the recap for the **previous calendar month**, sends `buildReportNotification(...)` (a fun
-graded payload, `url: /report?month=YYYY-MM`) via `sendPushToAll`, and **returns early — the normal
-daily digest push is skipped that day**. Idempotency: it inserts-if-absent into `month_report_pushes`
-(`ym` PK) before pushing, so a second run on the 1st can't double-send; if already sent (or no data /
-push unconfigured) it falls through to the normal daily digest. `GET /api/digest?month=YYYY-MM` returns
-the recap JSON for previewing without pushing.
+### When a month is "done" (`app/lib/reportSchedule.ts`)
+A statement charge takes a few days to post to the CSV, so a month isn't final the instant the calendar
+flips. But we don't *guess* a settling window: the moment a transaction dated in a **newer month**
+appears, every pending charge from the prior month must already have posted (nothing pending can be
+newer than a charge already on the statement). That signal is exactly the app's `anchorMonth` (latest
+month with transactions), so the just-completed month is simply `completedReportMonth(anchor)` =
+`monthBefore(anchor)`. This is the same `< anchor` rule the surplus prompt already uses (§10b), now
+shared with the recap push and reminder. Pure & db-free so the client reminder can import it; callers
+pass the anchor (computed server-side).
+
+### Recap push (no cloud cron — piggybacks the daily digest)
+`POST /api/digest` (the existing daily launchd job) computes the anchor from the flows and takes
+`completedReportMonth(anchor)`; if that month has data it builds its recap, sends
+`buildReportNotification(...)` (a fun graded payload, `url: /report?month=YYYY-MM`) via `sendPushToAll`,
+and **returns early — the normal daily digest push is skipped that run**. Idempotency: it inserts-if-absent
+into `month_report_pushes` (`ym` PK) before pushing, so it fires only on the **first run after the new
+month's data lands** and later runs can't double-send; if already sent (or no data / push unconfigured)
+it falls through to the normal daily digest. `GET /api/digest?month=YYYY-MM` returns the recap JSON for
+previewing without pushing.
+
+### In-app reminder (`app/components/ReportReminder.tsx`) — device-local, not db
+The push is one-shot and easy to miss, so a dashboard banner (rendered from `app/page.tsx`) keeps
+nagging on every visit until the recap is seen. The **month** to nag about is decided server-side
+(`completedReportMonth(anchor)`, only if it has data) and passed in; what's been **seen** is purely
+client-side — `localStorage[reportReminderSeen]` (key `REPORT_SEEN_KEY`) holds the last month the owner
+cleared. Opening the recap (`ReportClient` writes the key) **or** tapping Dismiss clears it — so that
+state is **per device**, not shared via the db. Read with `useSyncExternalStore` (server snapshot
+`null`) so there's no hydration mismatch.
 
 Run after pulling this change: `npm run db:push` (adds `month_report_pushes`).
