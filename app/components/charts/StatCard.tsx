@@ -97,14 +97,12 @@ export function StatCard({
         </span>
         {/* Rest of content — pointer-events-none so clicks pass through to the full-coverage link */}
         <div className="relative z-10 flex flex-col gap-1 pointer-events-none">
-          <div className="flex items-end justify-between gap-2">
-            <span className="text-2xl font-bold tabular-nums tracking-tight">{value}</span>
-            {delta && (
-              <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${badgeClass}`}>
-                {delta.direction === 'up' ? '↑' : delta.direction === 'down' ? '↓' : ''} {delta.text}
-              </span>
-            )}
-          </div>
+          <span className="text-2xl font-bold tabular-nums tracking-tight leading-none">{value}</span>
+          {delta && (
+            <span className={`self-start rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${badgeClass}`}>
+              {delta.direction === 'up' ? '↑' : delta.direction === 'down' ? '↓' : ''}{delta.text}
+            </span>
+          )}
           {delta && (
             <span className="text-[10px] text-[var(--muted)]">
               vs previous period – {formatCurrency(previous!)}
@@ -153,14 +151,12 @@ export function StatCard({
         )}
         {label}
       </span>
-      <div className="flex items-end justify-between gap-2">
-        <span className="text-2xl font-bold tabular-nums tracking-tight">{value}</span>
-        {delta && (
-          <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${badgeClass}`}>
-            {delta.direction === 'up' ? '↑' : delta.direction === 'down' ? '↓' : ''} {delta.text}
-          </span>
-        )}
-      </div>
+      <span className="text-2xl font-bold tabular-nums tracking-tight leading-none">{value}</span>
+      {delta && (
+        <span className={`self-start rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${badgeClass}`}>
+          {delta.direction === 'up' ? '↑' : delta.direction === 'down' ? '↓' : ''}{delta.text}
+        </span>
+      )}
       {delta && (
         <span className="text-[10px] text-[var(--muted)]">
           vs previous period – {formatCurrency(previous!)}
