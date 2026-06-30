@@ -1,5 +1,6 @@
 const COOKIE_NAME = 'auth_session'
-const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000
+const SESSION_DURATION_MS = 10 * 365 * 24 * 60 * 60 * 1000
+const DEMO_SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000
 
 type SessionPayload = { ok: true; exp: number; demo?: boolean }
 
@@ -30,7 +31,8 @@ function b64decode(str: string): Uint8Array {
  * app/lib/demo.ts.
  */
 export async function createSessionToken(opts?: { demo?: boolean }): Promise<string> {
-  const data: SessionPayload = { ok: true, exp: Date.now() + SESSION_DURATION_MS }
+  const duration = opts?.demo ? DEMO_SESSION_DURATION_MS : SESSION_DURATION_MS
+  const data: SessionPayload = { ok: true, exp: Date.now() + duration }
   if (opts?.demo) data.demo = true
   const payload = btoa(JSON.stringify(data))
   const key = await getKey()

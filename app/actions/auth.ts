@@ -44,7 +44,7 @@ export async function login(state: LoginState, formData: FormData): Promise<Logi
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60,
+    maxAge: 10 * 365 * 24 * 60 * 60,
     path: '/',
   })
 
