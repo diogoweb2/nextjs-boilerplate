@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { DemoBanner } from "@/app/components/DemoBanner";
 import { SwRegister } from "@/app/components/SwRegister";
+import { PushPrompt } from "@/app/components/PushPrompt";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -46,6 +47,7 @@ export default function RootLayout({
     >
       <body className="min-h-full">
         <SwRegister />
+        <PushPrompt />
         <DemoBanner />
         {children}
       </body>

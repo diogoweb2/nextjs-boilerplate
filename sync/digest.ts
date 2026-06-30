@@ -49,6 +49,10 @@ type DigestResponse = {
   body?: string
   error?: string
   push?: { sent: number; failed: number; skipped?: boolean }
+  // Monthly recap path: returned instead of title/body when a prior month is final.
+  monthReport?: boolean
+  ym?: string
+  note?: { title: string; body: string; url?: string }
 }
 
 function digestUrl(): string {
@@ -76,13 +80,20 @@ async function main(): Promise<void> {
   })
   const json = (await res.json().catch(() => null)) as DigestResponse | null
 
-  if (!res.ok || !json?.title) {
+  if (!res.ok) {
     const reason = json?.error ?? `${res.status} ${res.statusText}`
     throw new Error(`digest endpoint error: ${reason}`)
   }
+  if (!json?.title && !json?.monthReport) {
+    throw new Error(`digest endpoint error: unexpected response (no title or monthReport)`)
+  }
 
   const { sent = 0, failed = 0, skipped = false } = json.push ?? {}
-  console.log(`${json.title}\n${json.body ?? ''}`)
+  if (json.monthReport && json.note) {
+    console.log(`[Monthly recap — ${json.ym}] ${json.note.title}\n${json.note.body ?? ''}`)
+  } else {
+    console.log(`${json.title}\n${json.body ?? ''}`)
+  }
   if (skipped) {
     console.log('\n→ push skipped (failed syncs, no new transactions, or already sent today)')
   } else {
