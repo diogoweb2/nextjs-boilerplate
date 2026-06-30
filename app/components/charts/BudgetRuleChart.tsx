@@ -7,7 +7,7 @@ import type { BudgetRuleData } from '@/app/lib/fifty-thirty-twenty'
  * plus one comparison row per bucket showing actual share of income vs the target
  * and the signed difference. See app/lib/fifty-thirty-twenty.ts.
  */
-export function BudgetRuleChart({ data }: { data: BudgetRuleData }) {
+export function BudgetRuleChart({ data, month }: { data: BudgetRuleData; month?: string | null }) {
   const spend = data.needs + data.wants + data.savings
   const pctText = (f: number) => `${Math.round(f * 100)}%`
 
@@ -49,14 +49,19 @@ export function BudgetRuleChart({ data }: { data: BudgetRuleData }) {
             ? 'on target'
             : `${pts > 0 ? '+' : ''}${pts} pts · ${b.diffAmount > 0 ? '+' : '−'}${formatCurrency(Math.abs(b.diffAmount))}`
           const actualWidth = Math.min(100, Math.max(0, b.actualPct * 100))
+          const href = `/transactions?bucket=${b.key}${month ? `&month=${month}` : ''}`
           return (
             <div key={b.key}>
               <div className="mb-1 flex items-center justify-between text-sm">
-                <span className="flex items-center gap-2 font-medium">
+                <a
+                  href={href}
+                  className="flex items-center gap-2 font-medium hover:underline"
+                  title={`View ${b.label} transactions`}
+                >
                   <span className="h-2.5 w-2.5 rounded-full" style={{ background: b.color }} />
                   {b.label}
                   <span className="text-[var(--muted)]">{formatCurrency(b.amount)}</span>
-                </span>
+                </a>
                 <span className={`tabular-nums ${tone}`}>
                   {pctText(b.actualPct)} <span className="text-[var(--muted)]">/ {pctText(b.targetPct)}</span> ·{' '}
                   {diffLabel}

@@ -95,7 +95,7 @@ export default async function BudgetPage() {
                   </a>
                 }
               >
-                <BudgetRuleChart data={budgetRule} />
+                <BudgetRuleChart data={budgetRule} month={anchor} />
               </Card>
             </div>
           )}

@@ -77,6 +77,41 @@ export type BudgetRuleData = {
 export type BucketMeta = { name: string; kind: string; bucket: Bucket }
 export type ManualContribution = { occurredAt: string; amount: number }
 
+/**
+ * Which 50/30/20 bucket a *single* transaction is attributed to — the per-row
+ * mirror of the aggregation in `computeBudgetRule`. Returns null when the row is
+ * not part of any consumption/savings bucket (true income, transfers, or an
+ * expense in a `none`-bucket category). Used to drill into a bucket from the
+ * dashboard card (`/transactions?bucket=…`), so the two MUST agree — see
+ * BUSINESS_RULES.md §8d. The two wrinkles it must honour:
+ *  - The voluntary extra mortgage prepayment is reattributed from Needs (its
+ *    `Home` category) to **Savings** (`isExtraMortgagePayment`).
+ *  - A reimbursement (income-flow row under an expense-kind category) stays with
+ *    that category's bucket as a credit; true income (income-kind) is excluded.
+ *
+ * Note: the card clamps each category's net to `max(0, net)` and adds manual
+ * (txn-less) contributions, so in rare over-reimbursed months or when manual
+ * savings exist the filtered rows won't sum to the headline figure exactly.
+ */
+export function bucketForTxn(
+  t: { merchantName: string; flow: string; rawDescription: string },
+  cat: { kind: string; bucket: Bucket } | undefined,
+): 'needs' | 'wants' | 'savings' | null {
+  const ofBucket = (b: Bucket | undefined) =>
+    b === 'needs' || b === 'wants' || b === 'savings' ? b : null
+
+  if (t.flow === 'income') {
+    // True income (income-kind category) is not in any bucket; a reimbursement
+    // filed under an expense category nets against that category's bucket.
+    if (!cat || cat.kind === 'income') return null
+    return ofBucket(cat.bucket)
+  }
+  if (t.flow !== 'expense') return null // ignore transfers
+  // Voluntary extra mortgage principal counts as Savings, not Needs.
+  if (isExtraMortgagePayment(t)) return 'savings'
+  return ofBucket(cat?.bucket)
+}
+
 function monthKey(d: string): string {
   return d.slice(0, 7)
 }

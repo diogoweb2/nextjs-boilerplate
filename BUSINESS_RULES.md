@@ -529,6 +529,13 @@ scoped to the **selected period** (same window as the rest of the Overview). Log
 - Each bucket shows actual % of income, the target (50/30/20) and the signed difference (points +
   dollars). Run after the schema change: `npm run db:push` and re-run `npm run db:seed` to backfill
   bucket defaults (the seed only fills buckets still set to `none`, never clobbering owner edits).
+- **Drill-down:** each bucket label links to `/transactions?bucket=<key>&month=<anchor>`, which
+  filters the activity list with `bucketForTxn` (`app/lib/fifty-thirty-twenty.ts`) — the per-row
+  mirror of the aggregation above, so the **same** reclassifications apply (extra mortgage shows
+  under Savings, not Needs; reimbursements stay with their category's bucket; income/transfers are
+  excluded). `bucketForTxn` and `computeBudgetRule` must stay in sync. The clamp (`max(0, net)`) and
+  manual (txn-less) contributions are aggregate-only, so a drilled list may not sum to the headline
+  figure in an over-reimbursed month or when manual savings exist.
 
 ## 9. Income page (`/income`)
 

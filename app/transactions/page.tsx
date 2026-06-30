@@ -7,6 +7,7 @@ import { PeriodSelector } from '@/app/components/PeriodSelector'
 import { cardholderName } from '@/app/lib/cardholders'
 import { parsePeriodParams } from '@/app/lib/params'
 import { addMonths } from '@/app/lib/analytics'
+import { bucketForTxn } from '@/app/lib/fifty-thirty-twenty'
 import { isDemoSession } from '@/app/lib/demo'
 import { loadProjectsForPicker, loadProjectMemberships } from '@/app/actions/projects'
 
@@ -21,6 +22,10 @@ export default async function TransactionsPage({
 }) {
   const sp = await searchParams
   const { category } = parsePeriodParams(sp)
+  const rawBucket = Array.isArray(sp.bucket) ? sp.bucket[0] : sp.bucket
+  const bucket = rawBucket && ['needs', 'wants', 'savings'].includes(rawBucket)
+    ? (rawBucket as 'needs' | 'wants' | 'savings')
+    : null
   const rawMonth = Array.isArray(sp.month) ? sp.month[0] : sp.month
   const rawPeriod = Array.isArray(sp.period) ? sp.period[0] : sp.period
   const rawMonths = Number(Array.isArray(sp.months) ? sp.months[0] : sp.months)
@@ -129,14 +134,33 @@ export default async function TransactionsPage({
     txns = allTxns.filter((t) => t.txnDate.slice(0, 7) === anchor)
   }
 
+  if (bucket) {
+    txns = txns.filter((t) => {
+      const cat = t.categoryId != null ? catMap.get(t.categoryId) : undefined
+      return bucketForTxn(t, cat) === bucket
+    })
+  }
+
   return (
     <AppShell>
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-bold tracking-tight">Activity</h1>
+          <h1 className="text-xl font-bold tracking-tight">
+            Activity
+            {bucket && (
+              <>
+                {' '}
+                <span className="text-[var(--muted)] font-normal">·</span>{' '}
+                <span style={{ color: bucket === 'needs' ? '#f59e0b' : bucket === 'wants' ? '#9f1239' : '#0ea5e9' }}>
+                  {bucket.charAt(0).toUpperCase() + bucket.slice(1)}
+                </span>
+              </>
+            )}
+          </h1>
           <p className="text-sm text-[var(--muted)]">
-            Every transaction. Tap a row to override its category or mark it as a
-            subscription or special purchase.
+            {bucket
+              ? <>Showing <strong>{bucket}</strong> transactions. <a href="/transactions" className="underline">Clear filter</a></>
+              : 'Every transaction. Tap a row to override its category or mark it as a subscription or special purchase.'}
           </p>
         </div>
         <PeriodSelector
