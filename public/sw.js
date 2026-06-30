@@ -14,6 +14,12 @@
 self.addEventListener('install', () => self.skipWaiting())
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()))
 
+// Chrome only treats the app as installable (and fires beforeinstallprompt /
+// shows the install button) once the service worker has a fetch handler. We
+// don't cache anything — this just passes every request straight to the
+// network so the install prompt becomes available.
+self.addEventListener('fetch', () => {})
+
 self.addEventListener('push', (event) => {
   let data = {}
   try {

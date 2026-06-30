@@ -24,6 +24,19 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next()
   }
 
+  // PWA install assets must be publicly fetchable. Chrome requests the manifest
+  // and its icons *without credentials*, so if these 307 to /login the browser
+  // can't parse the manifest and the "Install app" option never appears. They
+  // hold no personal data — just the app name, colours, and icon artwork.
+  if (
+    pathname === '/manifest.webmanifest' ||
+    pathname === '/icon-192.png' ||
+    pathname === '/icon-512.png' ||
+    pathname === '/badge.png'
+  ) {
+    return NextResponse.next()
+  }
+
   // Public shortcut into the read-only demo: the route handler mints the demo
   // session cookie and redirects to the dashboard. Must be reachable without an
   // existing session.
