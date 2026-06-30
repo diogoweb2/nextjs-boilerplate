@@ -23,7 +23,7 @@ const MOBILE_MORE = LINKS.slice(MOBILE_PRIMARY_COUNT)
 
 function isActive(pathname: string, href: string): boolean {
   if (href === '/') return pathname === '/'
-  return pathname.startsWith(href)
+  return pathname === href || pathname.startsWith(href + '/')
 }
 
 export function NavBar() {

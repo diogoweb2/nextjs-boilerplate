@@ -392,13 +392,23 @@ proposal). Run after adding the tables: `npm run db:push` (no seed change).
 A button in the Category-goals card. Disabled when nothing is over budget (all green). It turns every
 over-budget (red) category green while keeping `ΣG ≤ B` — which is *exactly* the year-end-net-goal
 constraint, since `projected ≥ target ⟺ ΣG ≤ B`. Mechanics:
-- Red categories can't un-spend → their goal rises to the month's actual spend (green).
-- The extra is funded by trimming the **cushion** (`goal − actual`) of the flexible green categories,
-  proportionally. **Fixed** categories (Home) are never trimmed below their committed goal.
-- Floor: a trimmed goal never drops below that category's own actual spend, so it can't go red again.
-- **Impossible** when even zero-cushion flexible spending plus commitments exceed `B`; the UI then
-  shows a warning naming the minimum achievable total and the overage, instead of rebalancing. The
-  warning auto-clears once edits (e.g. raising the target) make rebalancing viable again.
+- **Day-of-month projection.** A red category can't un-spend, so its goal rises — but not merely to
+  today's actual (that would read 100% used and go red again next week). It rises to the **projected
+  month-end** spend via a run-rate extrapolation: `actual / fraction`, where `fraction = anchorAsOfDay
+  / anchorDaysInMonth` (the latest txn day over the month length, the same data-driven "as of" day as
+  §6). Early in the month this leaves realistic headroom; near month-end `fraction → 1` so the goal
+  lands at ≈ the actual (100%). **Fixed** categories (Home) are lumpy bills and are **never**
+  run-rated — their need is just what's committed/spent.
+- **Funding priority.** The extra is **first** taken from the categories *doing better* — trimming the
+  **cushion** (`goal − projected`) of flexible green lines proportionally, which keeps `ΣG` (and thus
+  the projected year-end net) **untouched**. **Only** when that cushion can't cover the reds do we draw
+  down the **projected year-end-net surplus** — letting `ΣG` rise toward the cap `B`. If the goals were
+  already over `B`, the rebalance also pulls `ΣG` back down to `B`.
+- Floor: a trimmed green never drops below its own **projected** month-end spend, so it can't go red.
+- **Impossible** when even every flexible line trimmed to its projected spend plus commitments exceeds
+  `B` (rebalancing would push the projected year-end net below the target); the UI then shows a warning
+  naming the minimum achievable total and the overage, instead of rebalancing. The warning auto-clears
+  once edits (e.g. raising the target) make rebalancing viable again.
 
 ### Non-budget categories
 Financial / transfer-like expense categories — **CC Payment, Cash, Bank Fees** (`NON_BUDGET_CATEGORIES`)

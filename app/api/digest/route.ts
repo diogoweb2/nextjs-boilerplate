@@ -1,12 +1,13 @@
 import type { NextRequest } from 'next/server'
 import { db } from '@/db'
-import { monthReportPushes } from '@/db/schema'
+import { monthReportPushes, syncRuns, dailyDigestPushes } from '@/db/schema'
 import { ingestTokenOk } from '@/app/lib/apiToken'
 import { buildDigest } from '@/app/lib/digest'
 import { buildMonthReport, buildReportNotification } from '@/app/lib/monthReport'
 import { completedReportMonth } from '@/app/lib/reportSchedule'
 import { loadAllFlows, anchorMonth, availableMonths } from '@/app/lib/analytics'
 import { pushConfigured, sendPushToAll } from '@/app/lib/push'
+import { SYNC_SOURCES } from '@/app/lib/sync'
 
 /**
  * Token-authed daily-digest endpoint for the budget-sync runner.
@@ -82,10 +83,35 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   const digest = await buildDigest(Date.now(), failedSources)
   const hasNewData = digest.newSpend.count > 0
-  const push =
-    hasNewData && pushConfigured()
+
+  // Gate on all sources having a successful run today (UTC date). Requires each
+  // source to have status='ok' AND lastRunAt on today's UTC calendar date so that
+  // yesterday's stale 'ok' doesn't count as today's sync being done.
+  const todayUtc = new Date()
+  todayUtc.setUTCHours(0, 0, 0, 0)
+  const syncRunRows = await db
+    .select({ source: syncRuns.source, status: syncRuns.status, lastRunAt: syncRuns.lastRunAt })
+    .from(syncRuns)
+  const allSyncsOk = SYNC_SOURCES.every(({ source }) => {
+    const row = syncRunRows.find((r) => r.source === source)
+    return row?.status === 'ok' && row.lastRunAt != null && row.lastRunAt >= todayUtc
+  })
+
+  let push: { sent: number; failed: number; skipped?: boolean }
+  if (!allSyncsOk || !hasNewData || !pushConfigured()) {
+    push = { sent: 0, failed: 0, skipped: true }
+  } else {
+    // Daily dedup: claim today's UTC date slot; if already claimed, skip.
+    const today = todayUtc.toISOString().slice(0, 10)
+    const claimed = await db
+      .insert(dailyDigestPushes)
+      .values({ date: today })
+      .onConflictDoNothing()
+      .returning()
+    push = claimed.length > 0
       ? await sendPushToAll({ title: digest.title, body: digest.body, url: '/' })
-      : { sent: 0, failed: 0, skipped: !hasNewData }
+      : { sent: 0, failed: 0, skipped: true }
+  }
 
   return Response.json({ ...digest, push }, { status: 200 })
 }

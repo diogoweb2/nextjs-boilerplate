@@ -27,20 +27,42 @@ type AutoBalanceResult =
   | { status: 'feasible'; newGoals: Record<number, number> }
 
 /**
+ * Run-rate extrapolation of a category's spend to month-end, given the fraction
+ * of the month elapsed. Early in the month a category already spending fast is
+ * projected to keep that pace; as the month closes (fraction → 1) the projection
+ * converges to what's actually been spent (so the new goal ≈ 100% of actual).
+ * Only meaningful for discretionary categories that accrue steadily — fixed
+ * bills are lumpy and handled separately (never run-rated).
+ */
+function projectMonthEnd(actual: number, fraction: number): number {
+  if (fraction >= 1 || fraction <= 0 || actual <= 0) return actual
+  return actual / fraction
+}
+
+/**
  * Rebalance category goals so every over-budget (red) line turns green, while
  * keeping the sum of goals within the monthly cap B (which is exactly the
  * year-end-net-goal constraint, since projected ≥ target ⟺ ΣG ≤ B).
  *
- * Strategy: red categories can't un-spend, so their goal rises to what's already
- * spent. The extra is funded by trimming the *cushion* (goal − actual) of the
- * flexible green categories, proportionally; fixed categories (Home) are left at
- * their committed goal. If even zero-cushion flexible spending can't fit under B,
- * it's impossible and we say why.
+ * Two improvements over a naive "raise the goal to today's actual":
+ *  1. Day-of-month aware: a red line's new goal is its *projected month-end*
+ *     spend (run-rate), so it doesn't immediately go red again next week. Near
+ *     month-end the projection ≈ actual (so the goal lands at ~100%).
+ *  2. Funding priority: the extra is first taken from categories that are doing
+ *     better — trimming the *cushion* (goal − projected) of flexible green lines,
+ *     which keeps ΣG (and thus the year-end net) untouched. Only when that cushion
+ *     isn't enough do we draw down the projected year-end-net surplus (letting ΣG
+ *     rise toward the cap B). Fixed categories (Home) are never trimmed.
+ *
+ * If even every flexible line trimmed to its own projected spend can't fit under
+ * B, rebalancing would break the year-end net goal — it's impossible and we say
+ * why.
  */
 function computeAutoBalance(
   categories: BudgetData['categories'],
   goals: Record<number, number>,
-  B: number
+  B: number,
+  fraction: number
 ): AutoBalanceResult {
   const goalOf = (c: BudgetData['categories'][number]) => goals[c.categoryId] ?? 0
   const isOver = (c: BudgetData['categories'][number]) => c.currentMonthActual > goalOf(c) + 0.5
@@ -48,43 +70,57 @@ function computeAutoBalance(
   const reds = categories.filter(isOver)
   if (reds.length === 0) return { status: 'disabled' }
 
+  // Realistic month-end need per category. Fixed bills are paid in one shot, so
+  // we never run-rate them — their need is simply what's committed/spent.
+  const needOf = (c: BudgetData['categories'][number]) =>
+    c.fixed ? Math.max(goalOf(c), c.currentMonthActual) : projectMonthEnd(c.currentMonthActual, fraction)
+
   const newGoals = { ...goals }
-  // Reds: already spent — set the goal to the actual so the line goes green.
-  for (const c of reds) newGoals[c.categoryId] = round2(c.currentMonthActual)
+  // Reds rise to their projected month-end spend so the line turns — and stays —
+  // green for the rest of the month.
+  for (const c of reds) newGoals[c.categoryId] = round2(needOf(c))
 
   const fixedKept = categories.filter((c) => c.fixed && !isOver(c))
   const flexGreen = categories.filter((c) => !c.fixed && !isOver(c))
 
-  // Committed = fixed goals (untouched) + reds raised to their actual spend.
+  // A flexible green's floor = its own projected month-end spend (so trimming it
+  // can't push it red later); cushion is everything above that floor — the money
+  // we can safely move from a category that's doing better.
+  const floorOf = (c: BudgetData['categories'][number]) => Math.min(goalOf(c), needOf(c))
+
+  // Untrimmable commitments: fixed goals (kept) + reds at their projection.
   const committed = sum(fixedKept.map(goalOf)) + sum(reds.map((c) => newGoals[c.categoryId]))
-  const flexActualTotal = sum(flexGreen.map((c) => c.currentMonthActual))
+  const greenFloorTotal = sum(flexGreen.map(floorOf))
 
   // Minimum achievable total = commitments + every flexible line at its own
-  // actual spend (zero cushion). If that already exceeds B, we can't rebalance.
-  const minTotal = committed + flexActualTotal
+  // projected spend (zero cushion). If that already exceeds B, rebalancing would
+  // push the projected year-end net below the target — impossible.
+  const minTotal = committed + greenFloorTotal
   if (minTotal > B + 0.5) {
     return {
       status: 'impossible',
-      reason: `Even trimming every flexible category to what you've already spent, your commitments come to ${formatCurrency(
+      reason: `Even moving every dollar of cushion from the categories you're doing well in, your commitments project to ${formatCurrency(
         minTotal
-      )} — ${formatCurrency(minTotal - B)} over your ${formatCurrency(
+      )} this month — ${formatCurrency(minTotal - B)} over the ${formatCurrency(
         B
-      )} monthly cap. To rebalance you'd need to cut spending this month or raise your Year-end net goal.`,
+      )} you can spend and still hit your Year-end net goal. To rebalance you'd need to cut spending this month or raise your Year-end net goal.`,
     }
   }
 
-  const flexCurrentTotal = sum(flexGreen.map(goalOf))
-  const slackForFlex = B - committed
-  if (flexCurrentTotal > slackForFlex) {
-    // Shrink each flexible cushion proportionally so the total lands on B,
-    // never below that category's own actual spend (so it stays green).
-    const cushionNeeded = flexCurrentTotal - flexActualTotal
-    const cushionAvailable = Math.max(0, slackForFlex - flexActualTotal)
-    const factor = cushionNeeded > 0 ? Math.min(1, cushionAvailable / cushionNeeded) : 0
-    for (const c of flexGreen) {
-      const cushion = Math.max(0, goalOf(c) - c.currentMonthActual)
-      newGoals[c.categoryId] = round2(c.currentMonthActual + cushion * factor)
-    }
+  const greenCurrentTotal = sum(flexGreen.map(goalOf))
+  const oldTotal = sum(categories.map(goalOf))
+  // Target ΣG: keep it at the current total (year-end net untouched) when the
+  // cushion alone covers the reds; let it rise to the floor only as needed
+  // (drawing the year-end surplus); never above the cap B, and pull it back to B
+  // if the goals were already over the cap.
+  const targetTotal = Math.max(minTotal, Math.min(oldTotal, B))
+  const desiredGreenTotal = targetTotal - committed
+  const amountToTrim = Math.max(0, greenCurrentTotal - desiredGreenTotal)
+  const totalCushion = Math.max(0, greenCurrentTotal - greenFloorTotal)
+  const factor = totalCushion > 0 ? Math.min(1, amountToTrim / totalCushion) : 0
+  for (const c of flexGreen) {
+    const cushion = Math.max(0, goalOf(c) - floorOf(c))
+    newGoals[c.categoryId] = round2(goalOf(c) - cushion * factor)
   }
 
   return { status: 'feasible', newGoals }
@@ -146,14 +182,18 @@ export function BudgetPlanner({ data, autoPropose = true }: { data: BudgetData; 
   }, [netStatus])
 
   // ── Auto-balance ──
+  // Fraction of the anchor month elapsed (latest txn day / days in month) — drives
+  // the day-of-month projection so the rebalance lands on a realistic month-end goal.
+  const monthFraction =
+    data.anchorDaysInMonth > 0 ? Math.min(1, data.anchorAsOfDay / data.anchorDaysInMonth) : 1
   const [autoBalanceWarning, setAutoBalanceWarning] = useState<string | null>(null)
-  const autoBalResult = computeAutoBalance(data.categories, goals, B)
+  const autoBalResult = computeAutoBalance(data.categories, goals, B, monthFraction)
   const allGreen = autoBalResult.status === 'disabled'
   // Drop a stale "impossible" warning once edits make rebalancing viable again.
   if (autoBalanceWarning && autoBalResult.status !== 'impossible') setAutoBalanceWarning(null)
 
   const handleAutoBalance = () => {
-    const result = computeAutoBalance(data.categories, goals, B)
+    const result = computeAutoBalance(data.categories, goals, B, monthFraction)
     if (result.status === 'impossible') {
       setAutoBalanceWarning(result.reason)
       return
@@ -481,7 +521,7 @@ export function BudgetPlanner({ data, autoPropose = true }: { data: BudgetData; 
               <button
                 onClick={handleAutoBalance}
                 disabled={allGreen}
-                title={allGreen ? 'All categories are already on budget' : 'Raise over-budget goals to cover actual spend'}
+                title={allGreen ? 'All categories are already on budget' : 'Raise over-budget goals to their projected month-end spend, funded from categories doing better'}
                 className={`rounded-lg border px-2 py-1 text-xs font-medium transition-colors ${
                   allGreen
                     ? 'cursor-not-allowed border-[var(--border)] text-[var(--muted)] opacity-50'

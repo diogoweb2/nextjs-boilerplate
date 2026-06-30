@@ -84,7 +84,7 @@ async function main(): Promise<void> {
   const { sent = 0, failed = 0, skipped = false } = json.push ?? {}
   console.log(`${json.title}\n${json.body ?? ''}`)
   if (skipped) {
-    console.log('\n→ no new transactions — push skipped')
+    console.log('\n→ push skipped (failed syncs, no new transactions, or already sent today)')
   } else {
     console.log(`\n→ pushed to ${sent} device(s)${failed ? `, ${failed} failed` : ''}`)
     if (sent === 0) {

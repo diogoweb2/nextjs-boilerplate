@@ -30,3 +30,7 @@ else
   echo "fail" > "$STATUS_DIR/amex"
   exit "$status"
 fi
+# Trigger the digest now that this sync succeeded. If all other sources are also
+# ok today the push fires; the server deduplicates so the 11:15 job is a no-op.
+echo "→ triggering digest check…"
+"$NODE" "$TSX" "$REPO/sync/digest.ts" || echo "  (digest trigger failed — scheduled digest at 11:15 will retry)"

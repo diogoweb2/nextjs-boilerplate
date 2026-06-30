@@ -102,6 +102,12 @@ export type BudgetData = {
   year: string
   /** Whole months from the anchor through December inclusive. */
   monthsRemaining: number
+  /** Latest transaction day-of-month in the anchor month (the data-driven "as of"
+   *  day, matching the §6 same-period clamp). Drives auto-balance's day-of-month
+   *  projection. 1-based. */
+  anchorAsOfDay: number
+  /** Number of days in the anchor month (e.g. 30 for June). */
+  anchorDaysInMonth: number
   periodMode: PeriodMode
   targetNet: number
   /** Expected monthly income. */
@@ -457,7 +463,7 @@ export function computeBudget(
   const anchor = anchorMonth(all)
   if (!anchor) {
     return {
-      hasData: false, anchor: null, year: '', monthsRemaining: 0, periodMode, targetNet,
+      hasData: false, anchor: null, year: '', monthsRemaining: 0, anchorAsOfDay: 0, anchorDaysInMonth: 0, periodMode, targetNet,
       income: 0, completedBaseline: 0, ytdNet: 0, categories: [],
       monthly: { labels: [], realSpend: [], cumulativeNet: [] }, currentMonthIndex: 0,
       monthlyCap: 0, unavoidable: { total: 0, lines: [] },
@@ -467,6 +473,18 @@ export function computeBudget(
   const year = anchor.slice(0, 4)
   const anchorMonthNum = Number(anchor.slice(5, 7))
   const monthsRemaining = 12 - anchorMonthNum + 1 // anchor..Dec inclusive
+
+  // Day-of-month progress in the anchor month: the latest transaction day (the
+  // data-driven "as of" used by the §6 same-period clamp) over the month length.
+  // Drives auto-balance's day-of-month projection (early month → run-rate
+  // extrapolation; near month-end → ≈ actual spend).
+  let anchorAsOfDay = 1
+  for (const t of all) {
+    if (monthKey(t.txnDate) !== anchor) continue
+    const day = Number(t.txnDate.slice(8, 10))
+    if (day > anchorAsOfDay) anchorAsOfDay = day
+  }
+  const anchorDaysInMonth = new Date(Number(year), anchorMonthNum, 0).getDate()
 
   // --- Month windows (averages use COMPLETE months: exclude the partial anchor) ---
   const last3 = new Set([1, 2, 3].map((i) => addMonths(anchor, -i)))
@@ -561,6 +579,8 @@ export function computeBudget(
     anchor,
     year,
     monthsRemaining,
+    anchorAsOfDay,
+    anchorDaysInMonth,
     periodMode,
     targetNet,
     income,

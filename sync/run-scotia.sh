@@ -39,6 +39,10 @@ for attempt in $(seq 1 "$ATTEMPTS"); do
   if [ "$status" -eq 0 ]; then
     echo "✓ scotia sync succeeded on attempt $attempt @ $(date)"
     echo "ok" > "$STATUS_DIR/scotia"
+    # Trigger the digest now that this sync succeeded. If all other sources are
+    # also ok today the push fires; the server deduplicates so the 11:15 job is a no-op.
+    echo "→ triggering digest check…"
+    "$NODE" "$TSX" "$REPO/sync/digest.ts" || echo "  (digest trigger failed — scheduled digest at 11:15 will retry)"
     exit 0
   fi
   echo "✗ scotia sync failed on attempt $attempt (exit $status) @ $(date)"
