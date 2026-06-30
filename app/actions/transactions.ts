@@ -2,7 +2,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { revalidatePath } from 'next/cache'
-import { and, eq, ilike } from 'drizzle-orm'
+import { and, eq, ilike, inArray } from 'drizzle-orm'
 import { db } from '@/db'
 import { transactions, merchants, categories, merchantAmountRules } from '@/db/schema'
 import { requireAuth } from '@/app/lib/auth-guard'
@@ -237,6 +237,21 @@ export async function setTxnNote(id: number, note: string | null): Promise<void>
   await requireAuth()
   await db.update(transactions).set({ note: note?.trim() || null }).where(eq(transactions.id, id))
   revalidateAll()
+}
+
+/**
+ * Dismiss one or more transactions from the dashboard "needs categorizing"
+ * banner. Persisted server-side so the dismissal syncs across every device,
+ * unlike the old per-browser localStorage flag.
+ */
+export async function dismissCategorizePrompts(ids: number[]): Promise<void> {
+  await requireAuth()
+  if (ids.length === 0) return
+  await db
+    .update(transactions)
+    .set({ categorizeDismissed: true })
+    .where(inArray(transactions.id, ids))
+  revalidatePath('/')
 }
 
 export async function unsplitTransaction(parentId: number): Promise<void> {

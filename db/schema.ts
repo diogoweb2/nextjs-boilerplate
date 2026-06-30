@@ -184,6 +184,10 @@ export const transactions = pgTable(
     // Free-text reminder set by the owner — e.g. "pizza at friend's house" on an
     // E-Transfer Out. Display-only; never affects analytics or business rules.
     note: text('note'),
+    // true = the owner dismissed this row from the dashboard "needs categorizing"
+    // banner (an Other/Uncategorized txn they're fine leaving as-is). Stored here
+    // instead of localStorage so the dismissal syncs across devices.
+    categorizeDismissed: boolean('categorize_dismissed').notNull().default(false),
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (t) => [

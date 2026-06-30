@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useTransition } from 'react'
 import { formatCurrency } from '@/app/lib/format'
+import { dismissCategorizePrompts } from '@/app/actions/transactions'
 
 export type OtherTxn = {
   id: number
@@ -11,24 +12,6 @@ export type OtherTxn = {
   category: string
 }
 
-const STORAGE_KEY = 'dismissed-other-txns'
-
-function loadDismissed(): Set<number> {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return new Set()
-    return new Set(JSON.parse(raw) as number[])
-  } catch {
-    return new Set()
-  }
-}
-
-function saveDismissed(ids: Set<number>) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify([...ids]))
-  } catch {}
-}
-
 export function OtherCategoryBanner({
   transactions,
   month,
@@ -36,36 +19,27 @@ export function OtherCategoryBanner({
   transactions: OtherTxn[]
   month: string | null
 }) {
+  // Optimistically hidden ids for this session; the server persists the dismissal
+  // (so it syncs across devices) and revalidation drops them from `transactions`.
   const [dismissed, setDismissed] = useState<Set<number>>(new Set())
-  const [mounted, setMounted] = useState(false)
-
-  useEffect(() => {
-    setDismissed(loadDismissed())
-    setMounted(true)
-  }, [])
-
-  if (!mounted) return null
+  const [, startTransition] = useTransition()
 
   const visible = transactions.filter((t) => !dismissed.has(t.id))
   if (visible.length === 0) return null
 
-  const dismiss = (id: number) => {
+  const persist = (ids: number[]) => {
     setDismissed((prev) => {
       const next = new Set(prev)
-      next.add(id)
-      saveDismissed(next)
+      for (const id of ids) next.add(id)
       return next
+    })
+    startTransition(() => {
+      dismissCategorizePrompts(ids)
     })
   }
 
-  const dismissAll = () => {
-    setDismissed((prev) => {
-      const next = new Set(prev)
-      for (const t of visible) next.add(t.id)
-      saveDismissed(next)
-      return next
-    })
-  }
+  const dismiss = (id: number) => persist([id])
+  const dismissAll = () => persist(visible.map((t) => t.id))
 
   const monthParam = month ? `&month=${month}` : ''
   const hasOther = visible.some((t) => t.category === 'Other')

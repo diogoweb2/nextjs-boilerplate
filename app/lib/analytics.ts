@@ -23,6 +23,7 @@ export type EnrichedTxn = {
   isRecurring: boolean
   isSpecial: boolean
   batchId: number | null
+  categorizeDismissed?: boolean
 }
 
 const NO_CATEGORY = { name: 'Uncategorized', color: '#94a3b8' }
@@ -52,6 +53,7 @@ export async function loadAllFlows(): Promise<EnrichedTxn[]> {
       txnCategoryId: transactions.categoryId,
       txnRecurring: transactions.isRecurring,
       txnSpecial: transactions.isSpecial,
+      categorizeDismissed: transactions.categorizeDismissed,
       batchId: transactions.batchId,
       merchantId: merchants.id,
       merchantName: merchants.name,
@@ -83,6 +85,7 @@ export async function loadAllFlows(): Promise<EnrichedTxn[]> {
         isRecurring: r.txnRecurring ?? r.merchantRecurring,
         isSpecial: r.txnSpecial ?? r.merchantSpecial,
         batchId: r.batchId,
+        categorizeDismissed: r.categorizeDismissed,
       }
     })
 }

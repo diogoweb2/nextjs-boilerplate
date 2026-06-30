@@ -120,6 +120,7 @@ export default async function Home({
   const otherTxns = all.filter(
     (t) =>
       (t.categoryName === 'Other' || t.categoryName === 'Uncategorized') &&
+      !t.categorizeDismissed &&
       exactMonth &&
       t.txnDate.slice(0, 7) === exactMonth
   ).map((t) => ({ id: t.id, merchantName: t.merchantName, amount: t.amount, txnDate: t.txnDate, category: t.categoryName }))
