@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { DemoBanner } from "@/app/components/DemoBanner";
+import { SwRegister } from "@/app/components/SwRegister";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -17,6 +18,11 @@ export const metadata: Metadata = {
   title: "Family Budget",
   description: "Private spending insights from your card statements.",
   robots: { index: false, follow: false },
+  appleWebApp: {
+    capable: true,
+    title: "Budget",
+    statusBarStyle: "black-translucent",
+  },
 };
 
 export const viewport: Viewport = {
@@ -39,6 +45,7 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full">
+        <SwRegister />
         <DemoBanner />
         {children}
       </body>
