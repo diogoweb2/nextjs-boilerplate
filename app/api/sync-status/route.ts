@@ -1,9 +1,11 @@
 import { revalidatePath } from 'next/cache'
+import { after } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { sql } from 'drizzle-orm'
 import { db } from '@/db'
 import { syncRuns } from '@/db/schema'
 import { ingestTokenOk } from '@/app/lib/apiToken'
+import { maybeTriggerDigest } from '@/app/lib/digest'
 
 /**
  * Token-authed health endpoint for the budget-sync runner. After every run the
@@ -14,6 +16,10 @@ import { ingestTokenOk } from '@/app/lib/apiToken'
  * Same bearer-token auth as /api/ingest (proxy.ts whitelists it). Upserts the
  * single row per source: on 'ok' we stamp lastSuccessAt and clear the error/
  * counter; on 'fail' we keep the prior lastSuccessAt and bump failureCount.
+ *
+ * On 'ok', also checks (post-response, via `after`) whether every source has
+ * now synced today — if so it fires the daily digest immediately instead of
+ * waiting for the 11:15 launchd job. See maybeTriggerDigest.
  */
 const SOURCES = ['master', 'amex', 'tangerine', 'scotia'] as const
 type Source = (typeof SOURCES)[number]
@@ -69,5 +75,10 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   // Reflect the new health on the dashboard without waiting for the next deploy.
   revalidatePath('/')
+
+  if (status === 'ok') {
+    after(() => maybeTriggerDigest())
+  }
+
   return Response.json({ ok: true }, { status: 200 })
 }

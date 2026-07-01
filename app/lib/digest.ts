@@ -245,6 +245,41 @@ async function recordDigestRun(status: 'ok' | 'fail', error?: string): Promise<v
 }
 
 /**
+ * True once every SYNC_SOURCES entry has a successful run today (UTC date).
+ * Requires status='ok' AND lastRunAt on today's UTC calendar date so that
+ * yesterday's stale 'ok' doesn't count as today's sync being done. Shared by
+ * the daily push gate below and by `maybeTriggerDigest`'s early-fire check.
+ */
+export async function allSourcesSyncedToday(): Promise<boolean> {
+  const todayUtc = new Date()
+  todayUtc.setUTCHours(0, 0, 0, 0)
+  const rows = await db
+    .select({ source: syncRuns.source, status: syncRuns.status, lastRunAt: syncRuns.lastRunAt })
+    .from(syncRuns)
+  return SYNC_SOURCES.every(({ source }) => {
+    const row = rows.find((r) => r.source === source)
+    return row?.status === 'ok' && row.lastRunAt != null && row.lastRunAt >= todayUtc
+  })
+}
+
+/**
+ * Event-triggered digest: called (via `after()`, so it never blocks the
+ * response) right after a sync source reports 'ok' — either the automated
+ * runner (POST /api/sync-status) or a manual CSV upload clearing a failed
+ * source (importCsv). Fires `runDailyDigestJob` the moment the *last* of the
+ * four sources syncs clean for the day, instead of waiting for the 11:15
+ * launchd job — so "upload the one bank that failed automatically" also
+ * triggers it right away. Cheap no-op the rest of the day: `dailyDigestPushes`
+ * dedup means at most one of these (or the 11:15 fallback) actually pushes.
+ * Errors are swallowed — `runDailyDigestJob` already records them to
+ * `digest_runs` for the dashboard banner.
+ */
+export async function maybeTriggerDigest(): Promise<void> {
+  if (!(await allSourcesSyncedToday())) return
+  await runDailyDigestJob().catch(() => {})
+}
+
+/**
  * The daily-digest job: computes the digest (or, once a prior month is final,
  * its one-shot recap) and pushes it. Shared by the token-authed POST
  * /api/digest (the local launchd runner) and the session-authed manual retry
@@ -288,18 +323,10 @@ export async function runDailyDigestJob(
     const digest = await buildDigest(now, failedSources)
     const hasNewData = digest.newSpend.count > 0
 
-    // Gate on all sources having a successful run today (UTC date). Requires each
-    // source to have status='ok' AND lastRunAt on today's UTC calendar date so that
-    // yesterday's stale 'ok' doesn't count as today's sync being done.
+    // Gate on all sources having a successful run today (UTC date).
+    const allSyncsOk = await allSourcesSyncedToday()
     const todayUtc = new Date()
     todayUtc.setUTCHours(0, 0, 0, 0)
-    const syncRunRows = await db
-      .select({ source: syncRuns.source, status: syncRuns.status, lastRunAt: syncRuns.lastRunAt })
-      .from(syncRuns)
-    const allSyncsOk = SYNC_SOURCES.every(({ source }) => {
-      const row = syncRunRows.find((r) => r.source === source)
-      return row?.status === 'ok' && row.lastRunAt != null && row.lastRunAt >= todayUtc
-    })
 
     // If the last attempt failed outright, the owner may have missed real news —
     // don't let "no new spend today" suppress the notification that things are

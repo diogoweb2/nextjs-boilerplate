@@ -1215,4 +1215,20 @@ compound into "also no notification today" once it's back up. This is also what 
 send a push: the failed run it's reacting to *is* the previous row. (`allSyncsOk` and `pushConfigured()`
 are **not** bypassed — an incomplete sync or missing VAPID keys still skips.)
 
+### Event-triggered digest — don't wait for 11:15 (`maybeTriggerDigest`)
+The 11:15 launchd job is a fallback now, not the only trigger. `maybeTriggerDigest` (`app/lib/digest.ts`)
+is called from `next/server`'s `after()` — so it runs post-response and never adds latency — from the two
+places a source can turn 'ok' in `sync_runs`:
+
+- `POST /api/sync-status` (the automated per-bank runner reporting in), after every `status: 'ok'` write.
+- `importCsv` (`app/actions/import.ts`), after a manual CSV upload's `clearSyncFailure` — this is what
+  makes hand-fixing the one bank that failed automatically also trigger it, same day, no waiting.
+
+`maybeTriggerDigest` first checks `allSourcesSyncedToday()` (the same all-four-sources-'ok'-today check
+`runDailyDigestJob` gates on) and only calls `runDailyDigestJob` once that's true — so the three earlier
+syncs each morning are a cheap no-op, not four full digest computations. Because `dailyDigestPushes` dedups
+per UTC date, whichever of these fires first each day (an event trigger, or the 11:15 fallback) is the one
+that actually pushes; the rest just record another `digest_runs` row. Errors are swallowed at the call site
+— `runDailyDigestJob`'s own try/catch already logs them to `digest_runs` for the dashboard banner.
+
 Run after pulling this change: `npm run db:push` (adds `month_report_pushes`, `digest_runs`).
