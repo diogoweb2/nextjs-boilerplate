@@ -45,7 +45,9 @@ export default async function BudgetPage() {
     budgetedMonth: settings.budgetedMonth,
   })
 
-  const anchor = anchorMonth(all.filter((t) => t.flow === 'expense'))
+  // Same anchor computeBudget derives internally (over all flows, §5) — keeps the
+  // 50/30/20 range in sync instead of lagging behind a payday-only new month.
+  const anchor = anchorMonth(all)
   const bucketMeta = catRows.map((c) => ({ name: c.name, kind: c.kind, bucket: c.bucket }))
   const budgetRule = anchor
     ? computeBudgetRule(all, bucketMeta, {

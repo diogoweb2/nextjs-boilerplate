@@ -137,7 +137,10 @@ export default async function Home({
 
   const all = allFlows.filter((t) => t.flow === 'expense')
 
-  const anchor = anchorMonth(all)
+  // Anchor = latest transaction month present in the data (§5), over ALL flows —
+  // not just expenses — so a payday on the 1st of a new month rolls the period
+  // forward immediately instead of waiting for the first card charge to post.
+  const anchor = anchorMonth(allFlows)
   const months_available = availableMonths(all)
   // The just-completed month (the one before the in-progress anchor), shown only
   // if it has data — the device-local report reminder nags about it until seen.

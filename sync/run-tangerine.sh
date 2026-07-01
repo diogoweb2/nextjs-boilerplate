@@ -23,15 +23,35 @@ echo "===== budget-sync tangerine @ $(date) ====="
 # headless; a headed run in the trust-built profile passes. A browser window
 # appears for ~30s at run time. Requires the user to be logged into the GUI
 # session.
-status=0
-"$NODE" "$TSX" "$REPO/sync/run-tangerine.ts" || status=$?
-if [ "$status" -eq 0 ]; then
-  echo "ok" > "$STATUS_DIR/tangerine"
-else
-  echo "fail" > "$STATUS_DIR/tangerine"
-  exit "$status"
-fi
-# Trigger the digest now that this sync succeeded. If all other sources are also
-# ok today the push fires; the server deduplicates so the 11:15 job is a no-op.
-echo "→ triggering digest check…"
-"$NODE" "$TSX" "$REPO/sync/digest.ts" || echo "  (digest trigger failed — scheduled digest at 11:15 will retry)"
+
+# Retry on failure: the initial run plus up to 3 retries (4 attempts total), 5
+# min apart, before giving up. Bank syncs fail for transient reasons (a slow
+# page, a momentary MFA escalation, a blip in the deployed ingest endpoint);
+# spacing retries 5 min apart lets those clear. Re-imports dedup to zero, so
+# retrying after a partial success is harmless.
+ATTEMPTS=4
+DELAY=300  # 5 minutes between attempts
+
+for attempt in $(seq 1 "$ATTEMPTS"); do
+  echo "----- attempt $attempt/$ATTEMPTS @ $(date) -----"
+  status=0
+  "$NODE" "$TSX" "$REPO/sync/run-tangerine.ts" || status=$?
+  if [ "$status" -eq 0 ]; then
+    echo "✓ tangerine sync succeeded on attempt $attempt @ $(date)"
+    echo "ok" > "$STATUS_DIR/tangerine"
+    # Trigger the digest now that this sync succeeded. If all other sources are
+    # also ok today the push fires; the server deduplicates so the 11:15 job is a no-op.
+    echo "→ triggering digest check…"
+    "$NODE" "$TSX" "$REPO/sync/digest.ts" || echo "  (digest trigger failed — scheduled digest at 11:15 will retry)"
+    exit 0
+  fi
+  echo "✗ tangerine sync failed on attempt $attempt (exit $status) @ $(date)"
+  if [ "$attempt" -lt "$ATTEMPTS" ]; then
+    echo "retrying in $((DELAY / 60)) min…"
+    sleep "$DELAY"
+  fi
+done
+
+echo "✗ tangerine sync gave up after $ATTEMPTS attempts @ $(date)"
+echo "fail" > "$STATUS_DIR/tangerine"
+exit 1
