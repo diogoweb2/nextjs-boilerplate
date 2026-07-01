@@ -810,6 +810,19 @@ export const merchantAmountRules = pgTable(
   (t) => [uniqueIndex('merchant_amount_rules_unique_idx').on(t.merchantId, t.amount)]
 )
 
+/**
+ * The Manage → Feedback tracker: a personal todo list of bugs to fix and ideas
+ * to build. Marking an item complete deletes the row outright (no archive) —
+ * there's no need to keep history of finished todos.
+ */
+export const feedbackItems = pgTable('feedback_items', {
+  id: serial('id').primaryKey(),
+  kind: text('kind', { enum: ['bug', 'idea'] }).notNull(),
+  label: text('label').notNull(),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+
 export const categoriesRelations = relations(categories, ({ many }) => ({
   merchants: many(merchants),
   transactions: many(transactions),
@@ -927,3 +940,5 @@ export type RegisteredContribution = typeof registeredContributions.$inferSelect
 export type RegisteredKind = 'tfsa' | 'resp' | 'rrsp' | 'fhsa' | 'nonreg'
 export type EmergencyConfig = typeof emergencyConfig.$inferSelect
 export type TfsaEmergencyMode = 'cash_equivalent' | 'whole' | 'crash_adjusted'
+export type FeedbackItem = typeof feedbackItems.$inferSelect
+export type FeedbackKind = 'bug' | 'idea'

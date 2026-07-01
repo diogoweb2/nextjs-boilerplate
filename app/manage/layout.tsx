@@ -7,6 +7,7 @@ const TABS = [
   { href: '/manage/projects', label: 'Projects' },
   { href: '/manage/notifications', label: 'Notifications' },
   { href: '/manage/import', label: 'Import' },
+  { href: '/manage/feedback', label: 'Feedback' },
 ]
 
 export default function ManageLayout({ children }: { children: React.ReactNode }) {
