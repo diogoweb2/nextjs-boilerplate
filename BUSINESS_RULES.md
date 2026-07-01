@@ -1194,4 +1194,25 @@ cleared. Opening the recap (`ReportClient` writes the key) **or** tapping Dismis
 state is **per device**, not shared via the db. Read with `useSyncExternalStore` (server snapshot
 `null`) so there's no hydration mismatch.
 
-Run after pulling this change: `npm run db:push` (adds `month_report_pushes`).
+### Digest run tracking, failure banner, retry (`app/lib/digest.ts` → `runDailyDigestJob`)
+The recap-or-digest logic above (plus the daily push gating) lives in `runDailyDigestJob`, shared by
+`POST /api/digest` (token-authed, the launchd runner) and the session-authed `retryDailyDigest` server
+action (`app/actions/digest.ts`). Every attempt — success or thrown error — appends one row to
+`digest_runs` (`status: 'ok'|'fail'`, `lastRunAt`, `error`); it's append-only history like `backup_runs`,
+not a dedup table. If the route throws (e.g. a DB hiccup → 500), the failure is still recorded before
+the error is re-thrown/returned, so the local launchd runner's own `notify()` (Mac banner, easy to miss)
+isn't the only signal.
+
+`app/page.tsx` reads the most recent `digest_runs` row; if `status === 'fail'` it renders
+`DigestStatusBanner` with a **Retry** button that calls `retryDailyDigest`, re-running the exact same
+`runDailyDigestJob` path (no ingest token needed — the button is already behind the session cookie).
+The banner clears once a run succeeds (`revalidatePath('/')`).
+
+**No-new-data override:** the daily push is normally skipped when `newSpend.count === 0` (nothing
+discretionary to report). But if the *previous* `digest_runs` row is `status: 'fail'`, that gate is
+bypassed — a run right after a failure pushes regardless of new spend, so a stale pipeline doesn't
+compound into "also no notification today" once it's back up. This is also what makes Retry actually
+send a push: the failed run it's reacting to *is* the previous row. (`allSyncsOk` and `pushConfigured()`
+are **not** bypassed — an incomplete sync or missing VAPID keys still skips.)
+
+Run after pulling this change: `npm run db:push` (adds `month_report_pushes`, `digest_runs`).

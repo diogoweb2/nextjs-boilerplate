@@ -1,13 +1,7 @@
 import type { NextRequest } from 'next/server'
-import { db } from '@/db'
-import { monthReportPushes, syncRuns, dailyDigestPushes } from '@/db/schema'
 import { ingestTokenOk } from '@/app/lib/apiToken'
-import { buildDigest } from '@/app/lib/digest'
-import { buildMonthReport, buildReportNotification } from '@/app/lib/monthReport'
-import { completedReportMonth } from '@/app/lib/reportSchedule'
-import { loadAllFlows, anchorMonth, availableMonths } from '@/app/lib/analytics'
-import { pushConfigured, sendPushToAll } from '@/app/lib/push'
-import { SYNC_SOURCES } from '@/app/lib/sync'
+import { buildDigest, runDailyDigestJob } from '@/app/lib/digest'
+import { buildMonthReport } from '@/app/lib/monthReport'
 
 /**
  * Token-authed daily-digest endpoint for the budget-sync runner.
@@ -21,7 +15,10 @@ import { SYNC_SOURCES } from '@/app/lib/sync'
  *  - POST            → daily push. Once a newer month has transactions (so the
  *                      prior month is final — no pending charges can predate them)
  *                      it instead pushes that month's recap (once, deduped) and
- *                      skips the daily digest.
+ *                      skips the daily digest. Every attempt (success or failure)
+ *                      is recorded to `digest_runs` — see runDailyDigestJob — so a
+ *                      500 here surfaces on the dashboard (DigestStatusBanner)
+ *                      instead of only in the local launchd log.
  */
 export const dynamic = 'force-dynamic'
 
@@ -57,61 +54,11 @@ export async function POST(request: NextRequest): Promise<Response> {
     ? (body.failedSources as unknown[]).filter((s): s is string => typeof s === 'string')
     : []
 
-  // The month before the current anchor (latest month with data) is final the
-  // moment that newer-month data lands — no pending charge can predate it. So once
-  // a completed month exists, push its recap (once) and skip the daily digest.
-  // Fires on the first run after new-month data; the per-`ym` dedup row caps it.
-  const flows = await loadAllFlows()
-  const ym = completedReportMonth(anchorMonth(flows.filter((t) => t.flow === 'expense')))
-  if (ym && availableMonths(flows).includes(ym)) {
-    const { report } = await buildMonthReport(ym)
-    if (report && pushConfigured()) {
-      // Insert-if-absent so later runs in the window can't double-send the recap.
-      const claimed = await db
-        .insert(monthReportPushes)
-        .values({ ym })
-        .onConflictDoNothing()
-        .returning()
-      if (claimed.length > 0) {
-        const note = buildReportNotification(report)
-        const push = await sendPushToAll({ title: note.title, body: note.body, url: note.url })
-        return Response.json({ monthReport: true, ym, note, push }, { status: 200 })
-      }
-    }
-    // No data yet, push not configured, or already sent → fall through to the daily digest.
+  try {
+    const result = await runDailyDigestJob(failedSources)
+    return Response.json(result, { status: 200 })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Digest failed.'
+    return Response.json({ error: message }, { status: 500 })
   }
-
-  const digest = await buildDigest(Date.now(), failedSources)
-  const hasNewData = digest.newSpend.count > 0
-
-  // Gate on all sources having a successful run today (UTC date). Requires each
-  // source to have status='ok' AND lastRunAt on today's UTC calendar date so that
-  // yesterday's stale 'ok' doesn't count as today's sync being done.
-  const todayUtc = new Date()
-  todayUtc.setUTCHours(0, 0, 0, 0)
-  const syncRunRows = await db
-    .select({ source: syncRuns.source, status: syncRuns.status, lastRunAt: syncRuns.lastRunAt })
-    .from(syncRuns)
-  const allSyncsOk = SYNC_SOURCES.every(({ source }) => {
-    const row = syncRunRows.find((r) => r.source === source)
-    return row?.status === 'ok' && row.lastRunAt != null && row.lastRunAt >= todayUtc
-  })
-
-  let push: { sent: number; failed: number; skipped?: boolean }
-  if (!allSyncsOk || !hasNewData || !pushConfigured()) {
-    push = { sent: 0, failed: 0, skipped: true }
-  } else {
-    // Daily dedup: claim today's UTC date slot; if already claimed, skip.
-    const today = todayUtc.toISOString().slice(0, 10)
-    const claimed = await db
-      .insert(dailyDigestPushes)
-      .values({ date: today })
-      .onConflictDoNothing()
-      .returning()
-    push = claimed.length > 0
-      ? await sendPushToAll({ title: digest.title, body: digest.body, url: '/' })
-      : { sent: 0, failed: 0, skipped: true }
-  }
-
-  return Response.json({ ...digest, push }, { status: 200 })
 }

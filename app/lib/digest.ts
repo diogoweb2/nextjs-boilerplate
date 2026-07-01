@@ -12,8 +12,18 @@
  */
 import { and, desc, eq, gte } from 'drizzle-orm'
 import { db } from '@/db'
-import { importBatches, transactions, merchants, categories, budgetGoals, syncRuns } from '@/db/schema'
-import { loadAllFlows, anchorMonth, type EnrichedTxn } from '@/app/lib/analytics'
+import {
+  importBatches,
+  transactions,
+  merchants,
+  categories,
+  budgetGoals,
+  syncRuns,
+  digestRuns,
+  monthReportPushes,
+  dailyDigestPushes,
+} from '@/db/schema'
+import { loadAllFlows, anchorMonth, availableMonths, type EnrichedTxn } from '@/app/lib/analytics'
 import { buildInsights } from '@/app/lib/insights'
 import { computeBudget, FIXED_CATEGORIES, type CategoryMeta } from '@/app/lib/budget'
 import { computeMonthBurndown, daysInMonth, pacePercent, unavoidableMerchantIds, type PaceLevel } from '@/app/lib/projection'
@@ -21,6 +31,9 @@ import { getBudgetSettings } from '@/app/actions/budget'
 import { loadProjectionRules } from '@/app/actions/projection'
 import { formatCurrency } from '@/app/lib/format'
 import { SYNC_SOURCES, syncStale, mostRecentIso } from '@/app/lib/sync'
+import { pushConfigured, sendPushToAll } from '@/app/lib/push'
+import { buildMonthReport, buildReportNotification } from '@/app/lib/monthReport'
+import { completedReportMonth } from '@/app/lib/reportSchedule'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -220,4 +233,106 @@ export async function buildDigest(now: number = Date.now(), failedSources: strin
   const body = [paceStr, failStr].filter(Boolean).join('\n')
 
   return { alert, title, body, sync, newSpend, pace, newMerchants, outlier }
+}
+
+type PushResult = { sent: number; failed: number; skipped?: boolean }
+export type DigestRunResult =
+  | { monthReport: true; ym: string; note: { title: string; body: string; url?: string }; push: PushResult }
+  | (Digest & { push: PushResult })
+
+async function recordDigestRun(status: 'ok' | 'fail', error?: string): Promise<void> {
+  await db.insert(digestRuns).values({ status, error: error ?? null })
+}
+
+/**
+ * The daily-digest job: computes the digest (or, once a prior month is final,
+ * its one-shot recap) and pushes it. Shared by the token-authed POST
+ * /api/digest (the local launchd runner) and the session-authed manual retry
+ * (`retryDailyDigest`), so a dashboard "Retry" click runs the exact same path
+ * a healthy cron run would have. Every attempt — success or thrown error — is
+ * recorded to `digest_runs` so DigestStatusBanner can surface a failure and so
+ * a fresh run can tell "the last one failed" and push through even with no
+ * new spend today (see `previousRunFailed` below).
+ */
+export async function runDailyDigestJob(
+  failedSources: string[] = [],
+  now: number = Date.now()
+): Promise<DigestRunResult> {
+  try {
+    // The month before the current anchor (latest month with data) is final the
+    // moment that newer-month data lands — no pending charge can predate it. So
+    // once a completed month exists, push its recap (once) and skip the daily
+    // digest. Fires on the first run after new-month data; the per-`ym` dedup
+    // row caps it.
+    const flows = await loadAllFlows()
+    const ym = completedReportMonth(anchorMonth(flows.filter((t) => t.flow === 'expense')))
+    if (ym && availableMonths(flows).includes(ym)) {
+      const { report } = await buildMonthReport(ym)
+      if (report && pushConfigured()) {
+        // Insert-if-absent so later runs in the window can't double-send the recap.
+        const claimed = await db
+          .insert(monthReportPushes)
+          .values({ ym })
+          .onConflictDoNothing()
+          .returning()
+        if (claimed.length > 0) {
+          const note = buildReportNotification(report)
+          const push = await sendPushToAll({ title: note.title, body: note.body, url: note.url })
+          await recordDigestRun('ok')
+          return { monthReport: true, ym, note, push }
+        }
+      }
+      // No data yet, push not configured, or already sent → fall through to the daily digest.
+    }
+
+    const digest = await buildDigest(now, failedSources)
+    const hasNewData = digest.newSpend.count > 0
+
+    // Gate on all sources having a successful run today (UTC date). Requires each
+    // source to have status='ok' AND lastRunAt on today's UTC calendar date so that
+    // yesterday's stale 'ok' doesn't count as today's sync being done.
+    const todayUtc = new Date()
+    todayUtc.setUTCHours(0, 0, 0, 0)
+    const syncRunRows = await db
+      .select({ source: syncRuns.source, status: syncRuns.status, lastRunAt: syncRuns.lastRunAt })
+      .from(syncRuns)
+    const allSyncsOk = SYNC_SOURCES.every(({ source }) => {
+      const row = syncRunRows.find((r) => r.source === source)
+      return row?.status === 'ok' && row.lastRunAt != null && row.lastRunAt >= todayUtc
+    })
+
+    // If the last attempt failed outright, the owner may have missed real news —
+    // don't let "no new spend today" suppress the notification that things are
+    // working again. Doubles as what makes the dashboard Retry button actually
+    // push: the failed run it's reacting to is the "previous" one.
+    const [lastRun] = await db
+      .select({ status: digestRuns.status })
+      .from(digestRuns)
+      .orderBy(desc(digestRuns.lastRunAt))
+      .limit(1)
+    const previousRunFailed = lastRun?.status === 'fail'
+
+    let push: PushResult
+    if (!allSyncsOk || (!hasNewData && !previousRunFailed) || !pushConfigured()) {
+      push = { sent: 0, failed: 0, skipped: true }
+    } else {
+      // Daily dedup: claim today's UTC date slot; if already claimed, skip.
+      const today = todayUtc.toISOString().slice(0, 10)
+      const claimed = await db
+        .insert(dailyDigestPushes)
+        .values({ date: today })
+        .onConflictDoNothing()
+        .returning()
+      push = claimed.length > 0
+        ? await sendPushToAll({ title: digest.title, body: digest.body, url: '/' })
+        : { sent: 0, failed: 0, skipped: true }
+    }
+
+    await recordDigestRun('ok')
+    return { ...digest, push }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    await recordDigestRun('fail', message).catch(() => {})
+    throw err
+  }
 }

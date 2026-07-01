@@ -27,7 +27,7 @@ export function NetBudgetTrajectory({
   const width = 640
   const height = 200
   const padX = 40
-  const padTop = 16
+  const padTop = 28
   const padBottom = 28
   const n = labels.length
   const innerW = width - padX * 2
@@ -189,11 +189,41 @@ export function NetBudgetTrajectory({
             strokeLinecap="round"
           />
         ))}
-        {actual.map((p) => (
-          <circle key={p.i} cx={x(p.i)} cy={y(p.v)} r={2.8} fill={p.v >= 0 ? LINE_GREEN : LINE_RED}>
-            <title>{`${formatMonth(labels[p.i])}: ${formatCurrencyCompact(p.v)}`}</title>
-          </circle>
-        ))}
+        {actual.map((p) => {
+          const cx = x(p.i)
+          const cy = y(p.v)
+          const color = p.v >= 0 ? LINE_GREEN : LINE_RED
+          const label = formatCurrencyCompact(p.v)
+          const above = cy - padTop > 26
+          const labelY = above ? cy - 14 : cy + 22
+          const boxW = label.length * 5.6 + 10
+          const boxH = 14
+          return (
+            <g key={p.i}>
+              <circle cx={cx} cy={cy} r={2.8} fill={color} />
+              <rect
+                x={cx - boxW / 2}
+                y={labelY - 10}
+                width={boxW}
+                height={boxH}
+                rx={4}
+                fill="var(--surface)"
+                stroke={color}
+                strokeWidth={1}
+                opacity={0.95}
+              />
+              <text
+                x={cx}
+                y={labelY}
+                textAnchor="middle"
+                style={{ fontSize: 9, fontWeight: 600 }}
+                fill={color}
+              >
+                {label}
+              </text>
+            </g>
+          )
+        })}
         {labels.map((lab, i) => (
           <text key={lab} x={x(i)} y={height - 8} textAnchor="middle" style={{ fontSize: 9 }} className="fill-[var(--muted)]">
             {formatMonth(lab).replace(' 20', " '")}

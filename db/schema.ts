@@ -529,6 +529,22 @@ export const pushSubscriptions = pgTable('push_subscriptions', {
 })
 
 /**
+ * One row per daily-digest run attempt (the 11:15 launchd job POSTing
+ * /api/digest, or a manual retry from the dashboard's DigestStatusBanner).
+ * Append-only history, like backup_runs: the dashboard reads the most recent
+ * row to show the failure banner, and the digest route itself reads it to
+ * decide whether to force tonight's push through even with no new spend (see
+ * "previous run failed" in app/lib/digest.ts) — a silent gap is worse than an
+ * uneventful notification.
+ */
+export const digestRuns = pgTable('digest_runs', {
+  id: serial('id').primaryKey(),
+  status: text('status', { enum: ['ok', 'fail'] }).notNull(),
+  lastRunAt: timestamp('last_run_at').defaultNow().notNull(),
+  error: text('error'),
+})
+
+/**
  * Idempotency guard for the monthly-report push. One row per reported month
  * (YYYY-MM); the digest endpoint inserts-if-absent before pushing so the daily job
  * firing repeatedly through the post-settle window can't double-send the recap.

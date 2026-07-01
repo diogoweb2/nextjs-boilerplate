@@ -1,12 +1,13 @@
 import { desc, eq } from 'drizzle-orm'
 import { db } from '@/db'
-import { importBatches, categories, budgetGoals, syncRuns, backupRuns } from '@/db/schema'
+import { importBatches, categories, budgetGoals, syncRuns, backupRuns, digestRuns } from '@/db/schema'
 import { AppShell, Card, EmptyHint } from '@/app/components/AppShell'
 import { UploadDialog } from '@/app/components/UploadDialog'
 import { PeriodSelector } from '@/app/components/PeriodSelector'
 import { SyncStatusBar } from '@/app/components/SyncStatusBar'
 import { SyncErrorBanner, type SyncFailure } from '@/app/components/SyncErrorBanner'
 import { BackupStatusBanner } from '@/app/components/BackupStatusBanner'
+import { DigestStatusBanner } from '@/app/components/DigestStatusBanner'
 import { backupStale } from '@/app/lib/backup'
 import { SYNC_SOURCES, mostRecentIso } from '@/app/lib/sync'
 import { StatCard } from '@/app/components/charts/StatCard'
@@ -65,8 +66,28 @@ export default async function Home({
       .limit(1)
       .then((rows) => rows[0]?.lastSuccessAt?.toISOString() ?? null)
 
+  const lastDigestRunQuery = () =>
+    db
+      .select({ status: digestRuns.status, lastRunAt: digestRuns.lastRunAt, error: digestRuns.error })
+      .from(digestRuns)
+      .orderBy(desc(digestRuns.lastRunAt))
+      .limit(1)
+      .then((rows) => rows[0] ?? null)
+
   const demo = await isDemoSession()
-  const [allFlows, catRows, goalRows, settings, rules, syncTimes, syncRunRows, pendingReviews, backupLastSuccess, surplusPrompts] = demo
+  const [
+    allFlows,
+    catRows,
+    goalRows,
+    settings,
+    rules,
+    syncTimes,
+    syncRunRows,
+    pendingReviews,
+    backupLastSuccess,
+    surplusPrompts,
+    lastDigestRun,
+  ] = demo
     ? await (async () => {
         const d = await import('@/app/lib/demo-data')
         return [
@@ -80,6 +101,7 @@ export default async function Home({
           d.demoPendingReviews(),
           null as string | null,
           d.demoSurplusPrompts(),
+          null as { status: string; lastRunAt: Date; error: string | null } | null,
         ] as const
       })()
     : await Promise.all([
@@ -93,6 +115,7 @@ export default async function Home({
         loadPendingReviews(),
         lastBackupQuery(),
         loadSurplusPrompts(),
+        lastDigestRunQuery(),
       ])
 
   const syncFailures: SyncFailure[] = SYNC_SOURCES.flatMap((s) => {
@@ -237,6 +260,12 @@ export default async function Home({
       {backupStale(backupLastSuccess) && (
         <div className="mb-5">
           <BackupStatusBanner lastSuccessAt={backupLastSuccess} />
+        </div>
+      )}
+
+      {lastDigestRun?.status === 'fail' && (
+        <div className="mb-5">
+          <DigestStatusBanner lastRunAt={lastDigestRun.lastRunAt.toISOString()} error={lastDigestRun.error} />
         </div>
       )}
 
