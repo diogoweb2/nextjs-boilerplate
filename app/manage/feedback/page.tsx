@@ -14,7 +14,7 @@ export default async function ManageFeedbackPage() {
   return (
     <>
       <p className="mb-4 text-sm text-[var(--muted)]">
-        A running list of bugs to fix and ideas to build. Mark one complete to clear it.
+        A running list of bugs to fix and ideas to build. Mark one complete to move it out of the active list.
       </p>
       <FeedbackManager items={items} />
     </>

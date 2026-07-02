@@ -34,10 +34,9 @@ export async function updateFeedbackItem(
   revalidatePath('/manage/feedback')
 }
 
-/** Marking an item complete just removes it — no archive/history is kept. */
-export async function completeFeedbackItem(id: number): Promise<void> {
+export async function setFeedbackItemCompleted(id: number, completed: boolean): Promise<void> {
   await requireAuth()
-  await db.delete(feedbackItems).where(eq(feedbackItems.id, id))
+  await db.update(feedbackItems).set({ completed }).where(eq(feedbackItems.id, id))
   revalidatePath('/manage/feedback')
 }
 

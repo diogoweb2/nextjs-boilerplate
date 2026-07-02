@@ -375,11 +375,31 @@ goal override, unique on `category_id`).
   Property Tax, Hydro, Water). Hydro & Water therefore have **no** projection rule (they would
   double-count against the fixed Home total). Every other unavoidable cost (Belair, Scholars,
   Koodo, subscriptions) is a per-merchant **projected bill** managed on Settings (§8c).
-- **AI initial goals** (`suggestGoals`, the default until the user edits a category): fixed cats =
-  average; **Travel and Investment default to ~$0** (no more flights/Airbnb this year, and "pause
-  investing" is an explicit lever — Investment is an `expense` here, so it still counts toward net);
-  remaining discretionary cats = their average, **proportionally haircut** so the discretionary
-  total fits the pool. The page therefore opens already balanced to hit the target.
+- **Suggestion basis** = each category's **last-2-month out-of-pocket average** (`avg2` =
+  `netSpendOver(last 2 complete months) / 2`). Recent enough to track how you're spending now, but
+  smoothed so one quiet month (no subscriptions billed) doesn't tank the goal, and it keeps lumpy
+  annual charges (e.g. the April insurance premium) from inflating the fixed lines the way a full-year
+  average did. `netSpendOver` nets same-category reimbursements (see the out-of-pocket note above) so
+  a category like Dental reflects what you actually pay after insurance pays you back.
+- **Initial goals** (`suggestGoals`, the default until the user edits a category) are **tiered** so
+  the cut lands where it realistically can:
+  - **fixed** cats (Home) = basis;
+  - **`ESSENTIAL_CATEGORIES`** (Groceries, Transport, Health) = basis, **PROTECTED** — never
+    haircut, because you can't decide to buy 26% less food to fit a target. Keep this list to
+    incompressible *and* steady cats; lumpy ones like Dental/Cars are left out so a single big bill
+    doesn't over-commit the cap;
+  - **Travel and Investment default to ~$0** (no more flights/Airbnb this year, and "pause investing"
+    is an explicit lever — Investment is an `expense` here, so it still counts toward net);
+  - remaining **discretionary** cats = their basis, **proportionally haircut** so fixed + essentials
+    + discretionary fit the monthly cap `B`. When discretionary alone can't absorb the gap the factor
+    floors at 0 (every discretionary line → $0) and the plan reports **"behind"** rather than clawing
+    the shortfall out of groceries.
+- **Auto-adopt on month advance**: when the anchor month moves past `budgetedMonth`, the planner
+  automatically sets every category to its suggestion (`suggestionsMap` in BudgetPlanner) as the new
+  month's starting budget — already fit to the year-end net goal — which the owner can then tweak. The
+  **Auto balance** button applies the same suggestions on demand.
+
+  The page therefore opens already balanced to hit the target (or honestly flags that it can't).
 - **Period toggle** (`periodMode`: `year` | `12mo`) switches which average (calendar-year vs
   trailing-12-month) drives the displayed averages and the suggestions across the page. The net
   target is always end-of-this-year.

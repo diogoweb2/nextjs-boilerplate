@@ -28,6 +28,20 @@ export type PeriodMode = 'year' | '12mo'
  * double-count against the fixed Home total).
  */
 export const FIXED_CATEGORIES = ['Home']
+/**
+ * Incompressible living costs. These are funded at their realistic recent level
+ * (their own average) and are NEVER haircut to fit the cap — you can't decide to
+ * buy 26% less food. When the plan is over the cap, the required savings come out
+ * of the discretionary categories first (see suggestGoals). If discretionary alone
+ * can't close the gap the plan simply reports "behind" rather than silently
+ * starving groceries. Edit this list to match how you think about your budget.
+ *
+ * Keep this list to categories that are both incompressible AND steady month to
+ * month (avg ≈ median). Lumpy ones like Dental or Cars (a single big bill inflates
+ * the average) are deliberately left OUT so they get the discretionary haircut
+ * instead of over-committing the cap to a one-off.
+ */
+export const ESSENTIAL_CATEGORIES = ['Groceries', 'Transport', 'Health']
 /** Categories whose suggested goal defaults to ~$0 (an explicit lever to pull). */
 const ZERO_DEFAULT_CATEGORIES = ['Travel', 'Investment']
 /**
@@ -94,6 +108,8 @@ export type BudgetCategory = {
   goal: number
   /** This (anchor) month's spend so far in the category. */
   currentMonthActual: number
+  /** Spend in the last complete month (the month before the anchor). */
+  lastMonthActual: number
 }
 
 export type BudgetData = {
@@ -136,6 +152,26 @@ export type BudgetData = {
 function incomeOver(all: EnrichedTxn[], months: Set<string>, pred: (t: EnrichedTxn) => boolean): number {
   return -sum(all.filter((t) => t.flow === 'income' && pred(t) && months.has(monthKey(t.txnDate))).map((t) => t.amount))
 }
+/**
+ * Out-of-pocket spend in a category = gross expense minus same-category income
+ * (insurance reimbursements / refunds — income-flow rows booked against an
+ * expense category, the `categoryCredits` pattern in analytics.ts; e.g. Sun Life
+ * & Manulife paying back a dental claim). Netted per month and floored at 0 so a
+ * lumpy claim-repayment month can't drive the figure negative and hide real
+ * out-of-pocket in the other months. Used for the per-category budget figures
+ * (averages, this/last month) — NOT the global net baseline, which already nets
+ * these globally as income.
+ */
+function netSpendOver(all: EnrichedTxn[], months: Set<string>, catName: string): number {
+  let total = 0
+  for (const ym of months) {
+    const m = new Set([ym])
+    const gross = spendOver(all, m, catName)
+    const reimbursed = incomeOver(all, m, (t) => t.categoryName === catName && t.categoryKind === 'expense')
+    total += Math.max(0, gross - reimbursed)
+  }
+  return total
+}
 /** Sum positive expense spend over given months for an optional category. */
 function spendOver(all: EnrichedTxn[], months: Set<string>, catName?: string): number {
   return sum(
@@ -152,11 +188,16 @@ function spendOver(all: EnrichedTxn[], months: Set<string>, catName?: string): n
 }
 
 /**
- * The AI suggestion: fixed categories at their average; zero-default categories
- * (Travel/Investment by default) at 0; remaining discretionary categories at
- * their average, proportionally haircut so the discretionary total never exceeds
- * what the monthly cap `B` allows after the fixed lines. Pure so the client can
- * re-run it on "Reset to suggested".
+ * The suggestion, tiered so the cut lands where it realistically can:
+ *  - fixed categories (Home) → their average;
+ *  - zero-default categories (Travel/Investment) → 0;
+ *  - essential categories (Groceries, Transport, …) → their average, PROTECTED
+ *    (never haircut — you can't buy 26% less food to fit a target);
+ *  - remaining discretionary categories → their average, proportionally haircut
+ *    so the whole plan fits the monthly cap `B` after the fixed + essential lines.
+ * When discretionary alone can't absorb the gap the factor floors at 0 (every
+ * discretionary line → $0) and the plan reports "behind" rather than clawing the
+ * shortfall out of groceries. Pure so the client can re-run it on "Reset".
  *
  * `zeroCats` overrides which names are forced to 0 — the seasonal proposal passes
  * an empty set so a category like Travel can be lifted by a seasonal signal
@@ -168,15 +209,20 @@ export function suggestGoals(
   zeroCats: Set<string> = new Set(ZERO_DEFAULT_CATEGORIES)
 ): Map<string, number> {
   const out = new Map<string, number>()
+  const isEssential = (c: { name: string; fixed: boolean }) =>
+    !c.fixed && !zeroCats.has(c.name) && ESSENTIAL_CATEGORIES.includes(c.name)
   const fixedTotal = sum(cats.filter((c) => c.fixed).map((c) => c.avg))
-  const discretionary = cats.filter((c) => !c.fixed && !zeroCats.has(c.name))
+  const essentialTotal = sum(cats.filter(isEssential).map((c) => c.avg))
+  const discretionary = cats.filter((c) => !c.fixed && !zeroCats.has(c.name) && !isEssential(c))
   const discAvgTotal = sum(discretionary.map((c) => c.avg))
-  const poolCap = B - fixedTotal // zero-default cats default to 0, so they don't consume the pool.
+  // Fixed + protected essentials come off the top; discretionary shares what's left.
+  const poolCap = B - fixedTotal - essentialTotal
   const factor = discAvgTotal > 0 ? Math.min(1, Math.max(0, poolCap / discAvgTotal)) : 0
 
   for (const c of cats) {
     if (c.fixed) out.set(c.name, round2(c.avg))
     else if (zeroCats.has(c.name)) out.set(c.name, 0)
+    else if (isEssential(c)) out.set(c.name, round2(c.avg)) // protected at recent level
     else out.set(c.name, round2(c.avg * factor))
   }
   return out
@@ -357,7 +403,7 @@ const SEASONAL_MIN_ABS = 25
  */
 function proposeSeasonal(
   all: EnrichedTxn[],
-  kept: Array<{ meta: CategoryMeta; avgYear: number; avg12: number; fixed: boolean }>,
+  kept: Array<{ meta: CategoryMeta; avgYear: number; avg12: number; lastMonthActual: number; fixed: boolean }>,
   anchor: string,
   year: string,
   mn: number,
@@ -370,7 +416,9 @@ function proposeSeasonal(
 
   for (const d of kept) {
     const name = d.meta.name
-    const baseAvg = periodMode === 'year' ? d.avgYear : d.avg12
+    // Fixed bills use last month's actual (see basisFor in computeBudget); the
+    // yearly average double-counts lumpy annual charges like insurance.
+    const baseAvg = d.fixed ? d.lastMonthActual : periodMode === 'year' ? d.avgYear : d.avg12
     // No-signal default mirrors the regular suggestion's pre-haircut input:
     // zero-default cats start at 0, everything else at its average.
     const isZeroDefault = ZERO_DEFAULT_CATEGORIES.includes(name)
@@ -381,7 +429,7 @@ function proposeSeasonal(
 
     if (canLift && name === 'Groceries') {
       const last3 = new Set([1, 2, 3].map((i) => addMonths(anchor, -i)))
-      const last3Avg = spendOver(all, last3, name) / 3
+      const last3Avg = netSpendOver(all, last3, name) / 3
       const pct = baseAvg > 0 ? (last3Avg - baseAvg) / baseAvg : 0
       if (last3Avg > 0 && Math.abs(last3Avg - baseAvg) > 15) {
         avg = round2(last3Avg)
@@ -391,7 +439,7 @@ function proposeSeasonal(
       // Same-calendar-month history from prior years (up to 5).
       const sameMonthSpends: number[] = []
       for (let y = 1; y <= 5; y++) {
-        const s = spendOver(all, new Set([`${Number(year) - y}-${String(mn).padStart(2, '0')}`]), name)
+        const s = netSpendOver(all, new Set([`${Number(year) - y}-${String(mn).padStart(2, '0')}`]), name)
         if (s > 0) sameMonthSpends.push(s)
       }
       if (sameMonthSpends.length >= 2) {
@@ -487,6 +535,7 @@ export function computeBudget(
   const anchorDaysInMonth = new Date(Number(year), anchorMonthNum, 0).getDate()
 
   // --- Month windows (averages use COMPLETE months: exclude the partial anchor) ---
+  const last2 = new Set([1, 2].map((i) => addMonths(anchor, -i)))
   const last3 = new Set([1, 2, 3].map((i) => addMonths(anchor, -i)))
   const last12 = new Set(Array.from({ length: 12 }, (_, i) => addMonths(anchor, -(i + 1))))
   const yearAll = new Set<string>() // year months present, incl. anchor (for ytdNet)
@@ -500,7 +549,10 @@ export function computeBudget(
   const completedCount = Math.max(1, yearCompleted.size)
 
   // --- Expected monthly income I ---
-  const inc3total = incomeOver(all, last3, () => true)
+  // Exclude reimbursements (income booked against an expense category, e.g. dental
+  // insurance payouts): they're netted into that category's spend above, so
+  // counting them as income here too would credit them twice.
+  const inc3total = incomeOver(all, last3, (t) => t.categoryKind !== 'expense')
   const inc3insurance = incomeOver(all, last3, (t) => t.categoryName === 'Insurance')
   const insurance12 = incomeOver(all, last12, (t) => t.categoryName === 'Insurance')
   const income = round2((inc3total - inc3insurance) / 3 + insurance12 / 12)
@@ -514,22 +566,33 @@ export function computeBudget(
 
   // --- Per-category figures (expense categories only) ---
   const anchorSet = new Set([anchor])
+  const lastMonthSet = new Set([addMonths(anchor, -1)])
   const expenseCats = categoriesMeta.filter(
     (c) => c.kind === 'expense' && !NON_BUDGET_CATEGORIES.includes(c.name)
   )
   const draft = expenseCats.map((c) => {
-    const avgYear = round2(spendOver(all, yearCompleted, c.name) / completedCount)
-    const avg12 = round2(spendOver(all, last12, c.name) / 12)
-    const currentMonthActual = round2(spendOver(all, anchorSet, c.name))
+    // Out-of-pocket (gross expense − same-category reimbursements), so a category
+    // like Dental reflects what you actually pay after insurance pays you back.
+    const avgYear = round2(netSpendOver(all, yearCompleted, c.name) / completedCount)
+    const avg12 = round2(netSpendOver(all, last12, c.name) / 12)
+    // The suggestion basis: the mean of the last 2 complete months — recent enough
+    // to track how you're actually spending now, smoothed so a single quiet month
+    // (e.g. no subscriptions billed) doesn't tank the goal.
+    const avg2 = round2(netSpendOver(all, last2, c.name) / 2)
+    const currentMonthActual = round2(netSpendOver(all, anchorSet, c.name))
+    const lastMonthActual = round2(netSpendOver(all, lastMonthSet, c.name))
     const fixed = FIXED_CATEGORIES.includes(c.name)
-    return { meta: c, avgYear, avg12, currentMonthActual, fixed }
+    return { meta: c, avgYear, avg12, avg2, currentMonthActual, lastMonthActual, fixed }
   })
   // Keep categories that matter: any spend signal or a fixed/required line.
   const kept = draft.filter((d) => d.fixed || d.avgYear > 0 || d.avg12 > 0 || d.currentMonthActual > 0)
 
-  const avgFor = (d: (typeof kept)[number]) => (periodMode === 'year' ? d.avgYear : d.avg12)
+  // Every category's suggestion is based on its last-2-month average (essentials
+  // protected, discretionary trimmed to fit the cap B — see suggestGoals). Using
+  // 2 months also keeps lumpy annual charges (e.g. the April insurance premium)
+  // from inflating the fixed lines the way a full-year average did.
   const suggestions = suggestGoals(
-    kept.map((d) => ({ name: d.meta.name, fixed: d.fixed, avg: avgFor(d) })),
+    kept.map((d) => ({ name: d.meta.name, fixed: d.fixed, avg: d.avg2 })),
     B
   )
 
@@ -547,6 +610,7 @@ export function computeBudget(
         suggestedGoal,
         goal: saved ?? suggestedGoal,
         currentMonthActual: d.currentMonthActual,
+        lastMonthActual: d.lastMonthActual,
       }
     })
     // Fixed first, then by the active-period average descending.

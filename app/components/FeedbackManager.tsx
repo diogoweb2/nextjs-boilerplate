@@ -6,7 +6,7 @@ import { Card, EmptyHint } from '@/app/components/AppShell'
 import {
   createFeedbackItem,
   updateFeedbackItem,
-  completeFeedbackItem,
+  setFeedbackItemCompleted,
   reorderFeedbackItems,
 } from '@/app/actions/feedback'
 import type { FeedbackItem, FeedbackKind } from '@/db/schema'
@@ -16,7 +16,7 @@ const KIND_META: Record<FeedbackKind, { label: string; icon: string }> = {
   idea: { label: 'Idea', icon: '💡' },
 }
 
-type Filter = 'all' | FeedbackKind
+type Filter = 'all' | FeedbackKind | 'completed'
 
 type DragProps = {
   dragging: boolean
@@ -32,6 +32,7 @@ const FILTERS: { value: Filter; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'bug', label: 'Bugs' },
   { value: 'idea', label: 'Ideas' },
+  { value: 'completed', label: 'Completed' },
 ]
 
 const INPUT_CLASS =
@@ -118,16 +119,34 @@ function useReorder(items: FeedbackItem[]) {
   return { ordered, dragPropsFor }
 }
 
+function buildCopyText(items: FeedbackItem[]): string {
+  const bugs = items.filter((i) => i.kind === 'bug')
+  const ideas = items.filter((i) => i.kind === 'idea')
+  const sections: string[] = []
+  bugs.forEach((item, i) => sections.push(`Bug ${i + 1}:\n${item.label}`))
+  ideas.forEach((item, i) => sections.push(`Improvement ${i + 1}:\n${item.label}`))
+  return sections.join('\n\n')
+}
+
 export function FeedbackManager({ items }: { items: FeedbackItem[] }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [filter, setFilter] = useState<Filter>('all')
   const [newKind, setNewKind] = useState<FeedbackKind>('bug')
   const [newLabel, setNewLabel] = useState('')
+  const [copied, setCopied] = useState(false)
 
-  const { ordered, dragPropsFor } = useReorder(items)
-  const visible = filter === 'all' ? ordered : ordered.filter((i) => i.kind === filter)
-  const canReorder = filter === 'all' && items.length > 1
+  const active = items.filter((i) => !i.completed)
+  const completed = items.filter((i) => i.completed)
+
+  const { ordered, dragPropsFor } = useReorder(active)
+  const visible =
+    filter === 'all'
+      ? ordered
+      : filter === 'completed'
+        ? completed
+        : ordered.filter((i) => i.kind === filter)
+  const canReorder = filter === 'all' && active.length > 1
 
   const run = (fn: () => Promise<void>) =>
     startTransition(async () => {
@@ -143,56 +162,83 @@ export function FeedbackManager({ items }: { items: FeedbackItem[] }) {
     })
   }
 
+  const copyActive = async () => {
+    const text = buildCopyText(active)
+    if (!text) return
+    await navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
   return (
     <div className={`flex flex-col gap-4 ${pending ? 'opacity-70 transition-opacity' : ''}`}>
       <Card>
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={newKind}
-            onChange={(e) => setNewKind(e.target.value as FeedbackKind)}
-            className={INPUT_CLASS}
-            aria-label="Type"
-          >
-            <option value="bug">🐛 Bug</option>
-            <option value="idea">💡 Idea</option>
-          </select>
-          <input
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <select
+              value={newKind}
+              onChange={(e) => setNewKind(e.target.value as FeedbackKind)}
+              className={INPUT_CLASS}
+              aria-label="Type"
+            >
+              <option value="bug">🐛 Bug</option>
+              <option value="idea">💡 Idea</option>
+            </select>
+            <button
+              disabled={!newLabel.trim()}
+              onClick={submit}
+              className="ml-auto rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-[var(--accent-fg)] disabled:opacity-40"
+            >
+              Add
+            </button>
+          </div>
+          <textarea
             value={newLabel}
             onChange={(e) => setNewLabel(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && submit()}
-            placeholder="What's the bug or idea?"
-            className={`${INPUT_CLASS} min-w-0 flex-1`}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit()
+            }}
+            placeholder="What's the bug or idea? (Cmd/Ctrl+Enter to add)"
+            rows={3}
+            className={`${INPUT_CLASS} resize-y`}
           />
-          <button
-            disabled={!newLabel.trim()}
-            onClick={submit}
-            className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-[var(--accent-fg)] disabled:opacity-40"
-          >
-            Add
-          </button>
         </div>
       </Card>
 
-      <div className="flex gap-1 self-start rounded-xl bg-[var(--surface-2)] p-1">
-        {FILTERS.map((f) => (
-          <button
-            key={f.value}
-            onClick={() => setFilter(f.value)}
-            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-              filter === f.value
-                ? 'bg-[var(--background)] text-[var(--foreground)] shadow-sm'
-                : 'text-[var(--muted)] hover:text-[var(--foreground)]'
-            }`}
-          >
-            {f.label}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex gap-1 self-start rounded-xl bg-[var(--surface-2)] p-1">
+          {FILTERS.map((f) => (
+            <button
+              key={f.value}
+              onClick={() => setFilter(f.value)}
+              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                filter === f.value
+                  ? 'bg-[var(--background)] text-[var(--foreground)] shadow-sm'
+                  : 'text-[var(--muted)] hover:text-[var(--foreground)]'
+              }`}
+            >
+              {f.label}
+              {f.value === 'completed' && completed.length > 0 ? ` (${completed.length})` : ''}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={copyActive}
+          disabled={active.length === 0}
+          className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--surface-2)] disabled:opacity-40"
+        >
+          {copied ? 'Copied!' : 'Copy for AI'}
+        </button>
       </div>
 
       {visible.length === 0 ? (
         <Card>
           <EmptyHint>
-            {filter === 'all' ? 'Nothing tracked yet — add a bug or idea above.' : `No ${filter}s right now.`}
+            {filter === 'all'
+              ? 'Nothing tracked yet — add a bug or idea above.'
+              : filter === 'completed'
+                ? 'Nothing completed yet.'
+                : `No ${filter}s right now.`}
           </EmptyHint>
         </Card>
       ) : (
@@ -204,7 +250,7 @@ export function FeedbackManager({ items }: { items: FeedbackItem[] }) {
               drag={canReorder ? dragPropsFor(item.id) : undefined}
               onKind={(kind) => run(() => updateFeedbackItem(item.id, { kind }))}
               onLabel={(label) => run(() => updateFeedbackItem(item.id, { label }))}
-              onComplete={() => run(() => completeFeedbackItem(item.id))}
+              onComplete={() => run(() => setFeedbackItemCompleted(item.id, !item.completed))}
             />
           ))}
         </div>
@@ -252,9 +298,13 @@ function FeedbackRow({
       )}
       <button
         onClick={onComplete}
-        title="Mark complete"
-        aria-label="Mark complete"
-        className="h-5 w-5 shrink-0 rounded-full border-2 border-[var(--border)] hover:border-[var(--positive)] hover:bg-[var(--positive)]/15"
+        title={item.completed ? 'Add back to active list' : 'Mark complete'}
+        aria-label={item.completed ? 'Add back to active list' : 'Mark complete'}
+        className={`h-5 w-5 shrink-0 rounded-full border-2 ${
+          item.completed
+            ? 'border-[var(--positive)] bg-[var(--positive)]/15'
+            : 'border-[var(--border)] hover:border-[var(--positive)] hover:bg-[var(--positive)]/15'
+        }`}
       />
       <select
         value={item.kind}
@@ -265,12 +315,14 @@ function FeedbackRow({
         <option value="bug">🐛 Bug</option>
         <option value="idea">💡 Idea</option>
       </select>
-      <input
+      <textarea
         value={label}
         onChange={(e) => setLabel(e.target.value)}
         onBlur={() => label.trim() && label !== item.label && onLabel(label)}
-        onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-        className="min-w-0 flex-1 rounded-md bg-transparent px-1 py-0.5 text-sm outline-none hover:bg-[var(--surface-2)] focus:bg-[var(--surface-2)]"
+        rows={1}
+        className={`min-w-0 flex-1 resize-y rounded-md bg-transparent px-1 py-0.5 text-sm outline-none hover:bg-[var(--surface-2)] focus:bg-[var(--surface-2)] ${
+          item.completed ? 'text-[var(--muted)] line-through' : ''
+        }`}
       />
       <span className="hidden shrink-0 text-xs text-[var(--muted)] sm:inline">{meta.label}</span>
     </div>

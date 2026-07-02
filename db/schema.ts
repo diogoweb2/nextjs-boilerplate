@@ -812,14 +812,15 @@ export const merchantAmountRules = pgTable(
 
 /**
  * The Manage → Feedback tracker: a personal todo list of bugs to fix and ideas
- * to build. Marking an item complete deletes the row outright (no archive) —
- * there's no need to keep history of finished todos.
+ * to build. Marking an item complete just flags it `completed` — it stays in
+ * the table so it can be filtered into view or reactivated.
  */
 export const feedbackItems = pgTable('feedback_items', {
   id: serial('id').primaryKey(),
   kind: text('kind', { enum: ['bug', 'idea'] }).notNull(),
   label: text('label').notNull(),
   sortOrder: integer('sort_order').notNull().default(0),
+  completed: boolean('completed').notNull().default(false),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 })
 

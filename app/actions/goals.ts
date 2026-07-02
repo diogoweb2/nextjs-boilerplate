@@ -212,8 +212,11 @@ export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: stri
     }
   }
 
-  const expenses = flows.filter((t) => t.flow === 'expense')
-  const asOfYm = anchorMonth(expenses) ?? todayIso().slice(0, 7)
+  // Anchor over ALL flows (not just expenses) so a posted paycheck rolls the
+  // period into the new month immediately — matching the dashboard's net
+  // trajectory, which anchors the same way (see app/page.tsx). Otherwise the
+  // net-zero card lags a month behind the dashboard until the first expense posts.
+  const asOfYm = anchorMonth(flows) ?? todayIso().slice(0, 7)
   const payments = mortgagePayments(flows)
 
   const views: GoalView[] = goalRows.map((g) => {
@@ -284,14 +287,18 @@ export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: stri
   const suggestNetZero = !goalRows.some((g) => g.kind === 'netzero') && currentYearNet < -0.005
 
   const savingsGoalIds = new Set(goalRows.filter((g) => g.kind === 'savings' || g.kind === 'mortgage').map((g) => g.id))
-  const prevYm = prevMonth(asOfYm)
+  // "Invested this/last month" tracks the real calendar month the money was moved
+  // (createdAt), not the surplus's backdated source month (occurredAt) or the
+  // latest-expense anchor — so a contribution made today always counts as "this month".
+  const nowYm = todayIso().slice(0, 7)
+  const prevYm = prevMonth(nowYm)
   let thisMonth = 0
   let lastMonth = 0
   const thisMonthByGoal = new Map<number, number>()
   for (const e of entries) {
     if (!savingsGoalIds.has(e.goalId) || e.kind !== 'contribution' || Number(e.amount) <= 0) continue
-    const ym = e.occurredAt.slice(0, 7)
-    if (ym === asOfYm) {
+    const ym = new Date(e.createdAt).toISOString().slice(0, 7)
+    if (ym === nowYm) {
       thisMonth += Number(e.amount)
       thisMonthByGoal.set(e.goalId, (thisMonthByGoal.get(e.goalId) ?? 0) + Number(e.amount))
     } else if (ym === prevYm) {
@@ -391,7 +398,8 @@ export async function reconcileNetZeroGoals(): Promise<void> {
   const rows = await db.select().from(goals).where(eq(goals.kind, 'netzero'))
   if (rows.length === 0) return
   const flows = await loadAllFlows()
-  const asOfYm = anchorMonth(flows.filter((t) => t.flow === 'expense')) ?? todayIso().slice(0, 7)
+  // Anchor over ALL flows so this stays in step with loadGoalsData / the dashboard.
+  const asOfYm = anchorMonth(flows) ?? todayIso().slice(0, 7)
   const curYear = asOfYm.slice(0, 4)
 
   for (const g of rows) {
@@ -431,7 +439,8 @@ export async function createNetZeroGoal(): Promise<void> {
     return
   }
   const flows = await loadAllFlows()
-  const asOfYm = anchorMonth(flows.filter((t) => t.flow === 'expense')) ?? todayIso().slice(0, 7)
+  // Anchor over ALL flows so this stays in step with loadGoalsData / the dashboard.
+  const asOfYm = anchorMonth(flows) ?? todayIso().slice(0, 7)
   const year = asOfYm.slice(0, 4)
   await db.insert(goals).values({
     name: `Net-Zero ${year}`,

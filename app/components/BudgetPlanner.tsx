@@ -19,113 +19,6 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100
 }
 
-// ─── Auto-balance ─────────────────────────────────────────────────────────────
-
-type AutoBalanceResult =
-  | { status: 'disabled' }
-  | { status: 'impossible'; reason: string }
-  | { status: 'feasible'; newGoals: Record<number, number> }
-
-/**
- * Run-rate extrapolation of a category's spend to month-end, given the fraction
- * of the month elapsed. Early in the month a category already spending fast is
- * projected to keep that pace; as the month closes (fraction → 1) the projection
- * converges to what's actually been spent (so the new goal ≈ 100% of actual).
- * Only meaningful for discretionary categories that accrue steadily — fixed
- * bills are lumpy and handled separately (never run-rated).
- */
-function projectMonthEnd(actual: number, fraction: number): number {
-  if (fraction >= 1 || fraction <= 0 || actual <= 0) return actual
-  return actual / fraction
-}
-
-/**
- * Rebalance category goals so every over-budget (red) line turns green, while
- * keeping the sum of goals within the monthly cap B (which is exactly the
- * year-end-net-goal constraint, since projected ≥ target ⟺ ΣG ≤ B).
- *
- * Two improvements over a naive "raise the goal to today's actual":
- *  1. Day-of-month aware: a red line's new goal is its *projected month-end*
- *     spend (run-rate), so it doesn't immediately go red again next week. Near
- *     month-end the projection ≈ actual (so the goal lands at ~100%).
- *  2. Funding priority: the extra is first taken from categories that are doing
- *     better — trimming the *cushion* (goal − projected) of flexible green lines,
- *     which keeps ΣG (and thus the year-end net) untouched. Only when that cushion
- *     isn't enough do we draw down the projected year-end-net surplus (letting ΣG
- *     rise toward the cap B). Fixed categories (Home) are never trimmed.
- *
- * If even every flexible line trimmed to its own projected spend can't fit under
- * B, rebalancing would break the year-end net goal — it's impossible and we say
- * why.
- */
-function computeAutoBalance(
-  categories: BudgetData['categories'],
-  goals: Record<number, number>,
-  B: number,
-  fraction: number
-): AutoBalanceResult {
-  const goalOf = (c: BudgetData['categories'][number]) => goals[c.categoryId] ?? 0
-  const isOver = (c: BudgetData['categories'][number]) => c.currentMonthActual > goalOf(c) + 0.5
-
-  const reds = categories.filter(isOver)
-  if (reds.length === 0) return { status: 'disabled' }
-
-  // Realistic month-end need per category. Fixed bills are paid in one shot, so
-  // we never run-rate them — their need is simply what's committed/spent.
-  const needOf = (c: BudgetData['categories'][number]) =>
-    c.fixed ? Math.max(goalOf(c), c.currentMonthActual) : projectMonthEnd(c.currentMonthActual, fraction)
-
-  const newGoals = { ...goals }
-  // Reds rise to their projected month-end spend so the line turns — and stays —
-  // green for the rest of the month.
-  for (const c of reds) newGoals[c.categoryId] = round2(needOf(c))
-
-  const fixedKept = categories.filter((c) => c.fixed && !isOver(c))
-  const flexGreen = categories.filter((c) => !c.fixed && !isOver(c))
-
-  // A flexible green's floor = its own projected month-end spend (so trimming it
-  // can't push it red later); cushion is everything above that floor — the money
-  // we can safely move from a category that's doing better.
-  const floorOf = (c: BudgetData['categories'][number]) => Math.min(goalOf(c), needOf(c))
-
-  // Untrimmable commitments: fixed goals (kept) + reds at their projection.
-  const committed = sum(fixedKept.map(goalOf)) + sum(reds.map((c) => newGoals[c.categoryId]))
-  const greenFloorTotal = sum(flexGreen.map(floorOf))
-
-  // Minimum achievable total = commitments + every flexible line at its own
-  // projected spend (zero cushion). If that already exceeds B, rebalancing would
-  // push the projected year-end net below the target — impossible.
-  const minTotal = committed + greenFloorTotal
-  if (minTotal > B + 0.5) {
-    return {
-      status: 'impossible',
-      reason: `Even moving every dollar of cushion from the categories you're doing well in, your commitments project to ${formatCurrency(
-        minTotal
-      )} this month — ${formatCurrency(minTotal - B)} over the ${formatCurrency(
-        B
-      )} you can spend and still hit your Year-end net goal. To rebalance you'd need to cut spending this month or raise your Year-end net goal.`,
-    }
-  }
-
-  const greenCurrentTotal = sum(flexGreen.map(goalOf))
-  const oldTotal = sum(categories.map(goalOf))
-  // Target ΣG: keep it at the current total (year-end net untouched) when the
-  // cushion alone covers the reds; let it rise to the floor only as needed
-  // (drawing the year-end surplus); never above the cap B, and pull it back to B
-  // if the goals were already over the cap.
-  const targetTotal = Math.max(minTotal, Math.min(oldTotal, B))
-  const desiredGreenTotal = targetTotal - committed
-  const amountToTrim = Math.max(0, greenCurrentTotal - desiredGreenTotal)
-  const totalCushion = Math.max(0, greenCurrentTotal - greenFloorTotal)
-  const factor = totalCushion > 0 ? Math.min(1, amountToTrim / totalCushion) : 0
-  for (const c of flexGreen) {
-    const cushion = Math.max(0, goalOf(c) - floorOf(c))
-    newGoals[c.categoryId] = round2(goalOf(c) - cushion * factor)
-  }
-
-  return { status: 'feasible', newGoals }
-}
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function BudgetPlanner({ data, autoPropose = true }: { data: BudgetData; autoPropose?: boolean }) {
@@ -182,30 +75,17 @@ export function BudgetPlanner({ data, autoPropose = true }: { data: BudgetData; 
   }, [netStatus])
 
   // ── Auto-balance ──
-  // Fraction of the anchor month elapsed (latest txn day / days in month) — drives
-  // the day-of-month projection so the rebalance lands on a realistic month-end goal.
-  const monthFraction =
-    data.anchorDaysInMonth > 0 ? Math.min(1, data.anchorAsOfDay / data.anchorDaysInMonth) : 1
-  const [autoBalanceWarning, setAutoBalanceWarning] = useState<string | null>(null)
-  const autoBalResult = computeAutoBalance(data.categories, goals, B, monthFraction)
-  const allGreen = autoBalResult.status === 'disabled'
-  // Drop a stale "impossible" warning once edits make rebalancing viable again.
-  if (autoBalanceWarning && autoBalResult.status !== 'impossible') setAutoBalanceWarning(null)
-
+  // Every category's suggested goal = last-2-month average, essentials protected and
+  // discretionary trimmed to fit the cap. Used by the button and the month-advance
+  // auto-adopt below.
+  const suggestionsMap = () => Object.fromEntries(data.categories.map((c) => [c.categoryId, c.suggestedGoal]))
   const handleAutoBalance = () => {
-    const result = computeAutoBalance(data.categories, goals, B, monthFraction)
-    if (result.status === 'impossible') {
-      setAutoBalanceWarning(result.reason)
-      return
-    }
-    if (result.status === 'feasible') {
-      setAutoBalanceWarning(null)
-      setGoals(result.newGoals)
-      startTransition(async () => {
-        await saveAllGoals(result.newGoals)
-        router.refresh()
-      })
-    }
+    const newGoals = suggestionsMap()
+    setGoals(newGoals)
+    startTransition(async () => {
+      await saveAllGoals(newGoals)
+      router.refresh()
+    })
   }
 
   // ── Seasonal proposal ──
@@ -224,10 +104,11 @@ export function BudgetPlanner({ data, autoPropose = true }: { data: BudgetData; 
     })
   }
 
-  // ── Auto-adopt the proposal when the month advances ──────────────────────────
+  // ── Auto-adopt the suggestions when the month advances ───────────────────────
   // First-ever run (budgetedMonth null): just record the marker so existing goals
-  // are preserved. When the anchor month moves past the marker: adopt the seasonal
-  // proposal as the new starting budget (the owner can then adjust). Runs once.
+  // are preserved. When the anchor month moves past the marker: adopt the tiered
+  // suggestions (last-2-month averages, fit to the year-end net goal) as the new
+  // month's starting budget (the owner can then adjust). Runs once.
   const [autoProposed, setAutoProposed] = useState(false)
   const didAutoRef = useRef(false)
   useEffect(() => {
@@ -236,7 +117,7 @@ export function BudgetPlanner({ data, autoPropose = true }: { data: BudgetData; 
     if (!anchor || data.budgetedMonth === anchor) return
     didAutoRef.current = true
     const monthAdvanced = data.budgetedMonth != null && data.budgetedMonth < anchor
-    const goalsToApply = monthAdvanced ? proposedMap() : undefined
+    const goalsToApply = monthAdvanced ? suggestionsMap() : undefined
     if (goalsToApply) setAutoProposed(true)
     startTransition(async () => {
       await commitMonthlyBudget(anchor, goalsToApply)
@@ -520,13 +401,8 @@ export function BudgetPlanner({ data, autoPropose = true }: { data: BudgetData; 
               <span className="text-xs text-[var(--muted)]">goal vs avg · this month so far</span>
               <button
                 onClick={handleAutoBalance}
-                disabled={allGreen}
-                title={allGreen ? 'All categories are already on budget' : 'Raise over-budget goals to their projected month-end spend, funded from categories doing better'}
-                className={`rounded-lg border px-2 py-1 text-xs font-medium transition-colors ${
-                  allGreen
-                    ? 'cursor-not-allowed border-[var(--border)] text-[var(--muted)] opacity-50'
-                    : 'border-[var(--border)] text-[var(--foreground)] hover:bg-[var(--surface-2)]'
-                }`}
+                title="Set every category to its suggested goal (essentials protected, discretionary trimmed to fit your Year-end net goal)"
+                className="rounded-lg border border-[var(--border)] px-2 py-1 text-xs font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--surface-2)]"
               >
                 Auto balance
               </button>
@@ -601,6 +477,8 @@ export function BudgetPlanner({ data, autoPropose = true }: { data: BudgetData; 
                   </div>
                   <span className="text-[11px] text-[var(--muted)]">
                     avg {formatCurrency(avg)}/mo ({mode === 'year' ? data.year : 'last 12mo'})
+                    {' · last month spent '}
+                    {formatCurrency(c.lastMonthActual)}
                     {c.suggestedGoal !== goal && <> · suggested {formatCurrency(c.suggestedGoal)}</>}
                   </span>
                 </li>
@@ -617,23 +495,6 @@ export function BudgetPlanner({ data, autoPropose = true }: { data: BudgetData; 
           </div>
         </Card>
       </div>
-
-      {/* Auto-balance warning */}
-      {autoBalanceWarning && (
-        <div className="flex items-start gap-3 rounded-xl border border-[color-mix(in_srgb,var(--negative)_40%,transparent)] bg-[color-mix(in_srgb,var(--negative)_8%,transparent)] px-4 py-3 text-sm text-[var(--negative)]">
-          <span className="mt-0.5 shrink-0 font-bold">!</span>
-          <div className="flex-1">
-            <p className="font-medium">Can&apos;t auto-balance</p>
-            <p className="mt-0.5 text-xs opacity-80">{autoBalanceWarning}</p>
-          </div>
-          <button
-            onClick={() => setAutoBalanceWarning(null)}
-            className="shrink-0 text-[var(--muted)] hover:text-[var(--foreground)]"
-          >
-            ✕
-          </button>
-        </div>
-      )}
 
       {/* Unavoidable this month */}
       <Card
