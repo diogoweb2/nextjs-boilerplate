@@ -5,6 +5,7 @@ const TABS = [
   { href: '/reports', label: 'Trends', exact: true },
   { href: '/reports/income', label: 'Income' },
   { href: '/reports/cashflow', label: 'Cash flow' },
+  { href: '/reports/subscriptions', label: 'Subscriptions' },
   { href: '/reports/custom', label: 'Custom' },
 ]
 

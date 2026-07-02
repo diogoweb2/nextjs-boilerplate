@@ -21,6 +21,8 @@ export type EnrichedTxn = {
   categoryColor: string
   categoryKind: 'expense' | 'income' | 'neutral' | null
   isRecurring: boolean
+  /** Owner-declared yearly billing for this merchant (see merchants.recurringAnnual). */
+  recurringAnnual: boolean
   isSpecial: boolean
   batchId: number | null
   categorizeDismissed?: boolean
@@ -59,6 +61,7 @@ export async function loadAllFlows(): Promise<EnrichedTxn[]> {
       merchantName: merchants.name,
       merchantCategoryId: merchants.categoryId,
       merchantRecurring: merchants.defaultRecurring,
+      merchantAnnual: merchants.recurringAnnual,
       merchantSpecial: merchants.defaultSpecial,
     })
     .from(transactions)
@@ -83,6 +86,7 @@ export async function loadAllFlows(): Promise<EnrichedTxn[]> {
         categoryColor: cat?.color ?? NO_CATEGORY.color,
         categoryKind: cat?.kind ?? null,
         isRecurring: r.txnRecurring ?? r.merchantRecurring,
+        recurringAnnual: r.merchantAnnual,
         isSpecial: r.txnSpecial ?? r.merchantSpecial,
         batchId: r.batchId,
         categorizeDismissed: r.categorizeDismissed,

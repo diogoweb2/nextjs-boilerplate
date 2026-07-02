@@ -7,6 +7,7 @@ import {
   isExcludedFromBiggest,
 } from '@/app/lib/analytics'
 import { formatCurrency } from '@/app/lib/format'
+import { buildSubscriptionWatch, type PriceAlert } from '@/app/lib/subscription-watch'
 
 export type InsightTone = 'good' | 'warn' | 'up' | 'down' | 'neutral'
 export type InsightCard = { title: string; detail: string; tone: InsightTone; href?: string }
@@ -17,6 +18,8 @@ export type Insights = {
   movers: { name: string; color: string; current: number; previous: number; delta: number }[]
   subscriptions: { name: string; amount: number; chargedThisPeriod: boolean }[]
   outliers: { merchant: string; amount: number; date: string; typical: number }[]
+  /** Stable-price subscriptions whose latest charge changed (watchdog, §12). */
+  priceAlerts: PriceAlert[]
 }
 
 function sum(nums: number[]): number {
@@ -31,7 +34,7 @@ export function buildInsights(
 ): Insights {
   const anchor = anchorMonth(all)
   if (!anchor) {
-    return { cards: [], newMerchants: [], movers: [], subscriptions: [], outliers: [] }
+    return { cards: [], newMerchants: [], movers: [], subscriptions: [], outliers: [], priceAlerts: [] }
   }
   const data = excludeSpecial ? all.filter((t) => !t.isSpecial) : all
 
@@ -57,6 +60,23 @@ export function buildInsights(
   const prevTotal = sum(prev.map((t) => t.amount))
 
   const cards: InsightCard[] = []
+
+  // 1. Price-creep watchdog: a subscription whose stable price just changed.
+  // Computed on full history (not the period window) so the alert doesn't
+  // vanish when the user flips ranges; it clears once the next charge confirms
+  // the new price. First card — it's the most actionable warning here.
+  const priceAlerts = buildSubscriptionWatch(data).alerts
+  if (priceAlerts[0]) {
+    const a = priceAlerts[0]
+    const up = a.delta > 0
+    const rest = priceAlerts.length > 1 ? ` +${priceAlerts.length - 1} more change${priceAlerts.length > 2 ? 's' : ''}.` : ''
+    cards.push({
+      title: `${a.name} price ${up ? 'increase' : 'drop'}`,
+      detail: `Charged ${formatCurrency(a.current)}, was ${formatCurrency(a.previous)} (${a.pctDelta > 0 ? '+' : ''}${a.pctDelta}%) — ${up ? '+' : '−'}${formatCurrency(Math.abs(a.annualizedDelta))}/yr.${rest}`,
+      tone: up ? 'warn' : 'good',
+      href: '/reports/subscriptions',
+    })
+  }
 
   const txnHref = (extra = '') =>
     `/transactions${start ? `?month=${start}${extra}` : extra ? `?${extra.slice(1)}` : ''}`
@@ -188,7 +208,12 @@ export function buildInsights(
     })
     .sort((a, b) => b.amount - a.amount)
 
-  const notCharged = subscriptions.filter((s) => !s.chargedThisPeriod)
+  // Yearly-billed subscriptions are expected to be absent ~11 months of the
+  // year, so they never belong in the "didn't appear" nag.
+  const annualNames = new Set(
+    data.filter((t) => t.isRecurring && t.recurringAnnual).map((t) => t.merchantName)
+  )
+  const notCharged = subscriptions.filter((s) => !s.chargedThisPeriod && !annualNames.has(s.name))
   if (notCharged.length > 0 && months <= 3) {
     cards.push({
       title: 'Subscription check',
@@ -207,5 +232,6 @@ export function buildInsights(
     movers,
     subscriptions,
     outliers,
+    priceAlerts,
   }
 }

@@ -33,6 +33,8 @@ import { completedReportMonth } from '@/app/lib/reportSchedule'
 import { SurplusAllocation } from '@/app/components/SurplusAllocation'
 import { GoalsSummary } from '@/app/components/GoalsSummary'
 import { buildBudgetInsights } from '@/app/lib/dashboard-insights'
+import { computePaceAlerts } from '@/app/lib/pace-alerts'
+import { PaceAlertModal } from '@/app/components/PaceAlertModal'
 import {
   formatCurrency,
   formatCurrencyCompact,
@@ -230,11 +232,18 @@ export default async function Home({
   const emergency = await loadEmergencyFund()
   const goalsSummary = await loadGoalsData()
 
+  // Tapping a digest push that carried "🔥 running hot" lines lands on
+  // /?paceAlert=1 — recompute the live hot list (no hysteresis: the modal shows
+  // everything currently hot, even categories already alerted) and open the modal.
+  const showPaceModal = rawParams.paceAlert === '1'
+  const paceAlerts = showPaceModal ? computePaceAlerts(budget) : []
+
   const budgetInsights = buildBudgetInsights(budget, burndown)
   const allInsightCards = ov.hasData ? [...budgetInsights, ...statInsights, ...insights.cards] : []
 
   return (
     <AppShell>
+      {showPaceModal && <PaceAlertModal alerts={paceAlerts} />}
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-bold tracking-tight">Overview</h1>

@@ -99,6 +99,8 @@ type MerchantDef = {
   name: string
   category: string | null
   recurring?: boolean
+  /** Owner-declared yearly billing (recurring subscriptions only). */
+  annual?: boolean
   special?: boolean
 }
 const MERCHANT_DEFS: MerchantDef[] = [
@@ -162,6 +164,7 @@ export type DemoMerchant = {
   name: string
   categoryId: number | null
   defaultRecurring: boolean
+  recurringAnnual: boolean
   defaultSpecial: boolean
   projectionDismissed: boolean
 }
@@ -170,6 +173,7 @@ export const DEMO_MERCHANTS: DemoMerchant[] = MERCHANT_DEFS.map((m, i) => ({
   name: m.name,
   categoryId: m.category ? catId(m.category) : null,
   defaultRecurring: m.recurring ?? false,
+  recurringAnnual: m.annual ?? false,
   defaultSpecial: m.special ?? false,
   projectionDismissed: false,
 }))
@@ -407,6 +411,7 @@ export function demoAllFlows(): EnrichedTxn[] {
       categoryColor: cat?.color ?? NO_CATEGORY.color,
       categoryKind: cat?.kind ?? null,
       isRecurring: r.txnRecurring ?? m.defaultRecurring,
+      recurringAnnual: m.recurringAnnual,
       isSpecial: r.txnSpecial ?? m.defaultSpecial,
       batchId: r.batchId,
     }
@@ -487,6 +492,7 @@ export function demoActivityRows() {
       merchantName: m.name,
       merchantCategoryId: m.categoryId,
       merchantRecurring: m.defaultRecurring,
+      merchantAnnual: m.recurringAnnual,
       merchantSpecial: m.defaultSpecial,
     }
   }).sort((a, b) => (a.txnDate < b.txnDate ? 1 : -1))

@@ -33,7 +33,7 @@ export async function setMerchantCategory(
 
 export async function setMerchantFlags(
   id: number,
-  flags: { defaultRecurring?: boolean; defaultSpecial?: boolean }
+  flags: { defaultRecurring?: boolean; defaultSpecial?: boolean; recurringAnnual?: boolean }
 ): Promise<void> {
   await requireAuth()
   await db.update(merchants).set(flags).where(eq(merchants.id, id))

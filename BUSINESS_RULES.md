@@ -302,9 +302,10 @@ Payments are always excluded. Aggregations are computed in JS over the loaded ro
 Pure, computed (no external/LLM calls). Cards include: top spending theme (category), biggest
 category mover, new merchants (first ever seen this period), top-3 concentration warning
 (fixed bills excluded via `isExcludedFromBiggest`; lists each merchant's amount),
-unusual purchase (≥2× a merchant's typical and ≥ $80), and a subscription check (recurring
-merchants that didn't appear this period). Dedicated sections expose new merchants, category
-movers, subscriptions, and outliers. The overall **spending up/down** verdict is *not* an
+unusual purchase (≥2× a merchant's typical and ≥ $80), a subscription check (recurring
+merchants that didn't appear this period), and the **price-creep watchdog** (§18 — first card
+when it fires, computed on full history so it survives period changes). Dedicated sections
+expose new merchants, category movers, subscriptions, outliers, and `priceAlerts`. The overall **spending up/down** verdict is *not* an
 insight card — it lives as subtext on the dashboard's Total-spend KPI tile (same-period
 compare, §6).
 
@@ -1282,3 +1283,80 @@ that actually pushes; the rest just record another `digest_runs` row. Errors are
 — `runDailyDigestJob`'s own try/catch already logs them to `digest_runs` for the dashboard banner.
 
 Run after pulling this change: `npm run db:push` (adds `month_report_pushes`, `digest_runs`).
+
+### Mid-month category pace alerts (§B5-pace, `app/lib/pace-alerts.ts`)
+Folded into the daily digest (no separate push). `computePaceAlerts(budget)` — pure & db-free over
+the already-computed `BudgetData` — flags a category as **running hot** when its run-rate month-end
+projection (`currentMonthActual / anchorAsOfDay × daysInMonth`) overshoots its goal by
+**≥ 20%** (`HOT_THRESHOLD`). Only discretionary categories with a goal > 0 qualify (fixed categories
+are bills); the check runs only on days **5–27** of the month (run-rate is noise earlier, not
+actionable later — the recap covers month-end).
+
+- **Notification**: one compact body line, phone-truncation friendly: `🔥 Groceries +30% · Dining +22%`
+  (max 3 names). Pace alerts set the digest's ⚠ alert flag and count as "news" for the no-new-data gate.
+- **Hysteresis (don't nag daily)**: `pace_alert_pushes` (`ym` + `category_id` unique, `spent_at_push`,
+  `over_pct`) stores the MTD spend at the moment a category was last pushed. A hot category re-alerts
+  **only when its MTD spend has grown past `spent_at_push`** — so "+30%" yesterday stays silent today,
+  but a new grocery run (even to just +31%) alerts again. If the pace cools below threshold and later
+  re-crosses with new spend, it alerts again. Rows are written only when a push actually sends
+  (a deduped/skipped run stays eligible tomorrow); rows for past months are inert.
+- **Tap → dashboard modal**: when the digest carries pace alerts its push URL is `/?paceAlert=1`;
+  `app/page.tsx` sees the param and renders `PaceAlertModal` over the normal dashboard with the
+  **live** hot list (no hysteresis — the modal shows everything currently hot): spent so far, goal,
+  projected month-end, +% over, and the $/day for the remaining days that would land on goal, plus a
+  per-category Activity deep-link. Closing strips the param (`router.replace`), leaving the dashboard.
+
+Run after pulling this change: `npm run db:push` (adds `pace_alert_pushes`).
+
+---
+
+## 18. Subscription price-creep watchdog (`/reports/subscriptions`)
+
+`app/lib/subscription-watch.ts` — pure & db-free over `loadAllFlows`, shared by the dashboard
+insight card, the daily digest push, and the `/reports/subscriptions` page (a "Subscriptions"
+tab under Reports).
+
+**Candidate set.** A "subscription" is any merchant with at least one recurring-flagged expense
+charge (per-txn `is_recurring` override or the merchant's `default_recurring`) — i.e. exactly
+what the owner marks as recurring on the Merchants page. Its charge history is the per-month
+positive expense total (one occurrence per posting month, cents-exact). Cadence is inferred from
+the median month-gap between occurrences (1 → monthly, 3 → quarterly, ≥11 → annual, else
+periodic), same heuristic as projection-rule suggestions (§8c).
+
+**Yearly declaration (`merchants.recurring_annual`).** Inference can't tell "yearly bill" from
+"lapsed monthly sub" until two renewals exist, so annual is owner-declared: on the Activity page,
+marking a transaction as ↻ Subscription reveals a **"1y yearly"** toggle beside it (a merchant-level
+flag; the row shows a small `1y` chip next to ↻). A declared-annual merchant is forced to
+cadence=annual/gap=12 — so it stays *active* for 12 months after a charge instead of looking
+cancelled, its monthly-equivalent is price÷12, its price-stability window is the annual one below,
+and the §7 "didn't appear this period" subscription check skips it. Weekly/monthly/quarterly stay
+inferred on purpose (they have plenty of data points).
+
+**The alert rule (deterministic).** A warning fires only when a *stable* price *changes*:
+
+- **Stable** = the occurrences immediately before the latest one all posted the *same* amount —
+  **3 in a row** for monthly/quarterly/periodic; **2 in a row for annual** (or the single prior
+  charge when only one year of history exists, so a yearly renewal that jumps still warns).
+- Variable-priced subscriptions (FX-priced, usage-based — no stable streak) therefore **never
+  alert**, by design.
+- The alert **clears itself** once the next charge posts: the streak restarts at the new amount,
+  so a confirmed new price is just the new normal. No dismiss state, no table.
+- Alerts are annualized (`delta × charges/year`) — that's the number shown everywhere.
+- Only *active* subscriptions alert (last seen within one cadence gap of the newest data month).
+
+**Surfaces.**
+- **Dashboard**: first insight card (`warn` tone for increases, `good` for drops), linking to
+  `/reports/subscriptions`. Shows as long as the changed charge is the latest occurrence.
+- **Daily digest push**: a body line per change (`Netflix ↑ $16.99 → $20.99 (+$48/yr)`), only
+  when the changed charge was imported in the last ~24h — so it pushes **once per price change**
+  (the per-day dedup and this freshness window make repeats impossible). Price alerts count as
+  "news" for the push gate (new subscription spend alone won't be suppressed as a no-spend day)
+  and set the digest's ⚠ alert flag. The freshness match uses the *unfiltered* recent-charge
+  list, because subscriptions with projection rules are "unavoidable" and excluded from the
+  discretionary `newSpend` list.
+- **`/reports/subscriptions`**: KPI tiles (monthly load = Σ active monthly-equivalents, per-year
+  total, active count, price changes in 12 mo), a review list of open alerts, a 12-month actual
+  subscription-spend line (annual bills show as spikes), a per-year cost bar list, and a table of
+  every recurring merchant — current price, step-line price-history sparkline, monthly/annual
+  equivalent, last-charged month, and status (Stable / Variable price / Price increase / Not
+  seen). Inactive subs are listed dimmed at the bottom.

@@ -22,6 +22,7 @@ import {
   digestRuns,
   monthReportPushes,
   dailyDigestPushes,
+  paceAlertPushes,
 } from '@/db/schema'
 import { loadAllFlows, anchorMonth, availableMonths, type EnrichedTxn } from '@/app/lib/analytics'
 import { buildInsights } from '@/app/lib/insights'
@@ -33,6 +34,8 @@ import { formatCurrency } from '@/app/lib/format'
 import { SYNC_SOURCES, syncStale, mostRecentIso } from '@/app/lib/sync'
 import { pushConfigured, sendPushToAll } from '@/app/lib/push'
 import { buildMonthReport, buildReportNotification } from '@/app/lib/monthReport'
+import type { PriceAlert } from '@/app/lib/subscription-watch'
+import { computePaceAlerts, type PaceAlert as CategoryPaceAlert } from '@/app/lib/pace-alerts'
 import { completedReportMonth } from '@/app/lib/reportSchedule'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -64,6 +67,14 @@ export type Digest = {
   pace: DigestPace | null
   newMerchants: string[]
   outlier: { merchant: string; amount: number; typical: number } | null
+  /** Price-creep alerts whose changed charge arrived in this digest's window. */
+  priceAlerts: PriceAlert[]
+  /**
+   * Categories running hot (§B5-pace) that pass the hysteresis gate: never
+   * alerted this month, or spent has grown since the last alert. Recorded to
+   * pace_alert_pushes only when the push actually sends.
+   */
+  paceAlerts: CategoryPaceAlert[]
 }
 
 function round2(n: number): number {
@@ -190,9 +201,34 @@ export async function buildDigest(now: number = Date.now(), failedSources: strin
     pace = { mtd: bd.spentToDate, budget: bd.budget, projected, onPace: bd.onPace, pct: status.pct, level: status.level }
   }
 
+  // 3b. Per-category pace alerts (§B5-pace), hysteresis-gated so a hot category
+  // pushes once and stays quiet until *new spend* moves it — "+30%" yesterday
+  // must not re-fire today, but a fresh grocery run to +31% may.
+  let paceAlerts: CategoryPaceAlert[] = []
+  const hotNow = computePaceAlerts(budget)
+  if (hotNow.length > 0 && anchor) {
+    const pushedRows = await db
+      .select({ categoryId: paceAlertPushes.categoryId, spentAtPush: paceAlertPushes.spentAtPush })
+      .from(paceAlertPushes)
+      .where(eq(paceAlertPushes.ym, anchor))
+    const pushedSpend = new Map(pushedRows.map((r) => [r.categoryId, Number(r.spentAtPush)]))
+    paceAlerts = hotNow.filter((a) => {
+      const prev = pushedSpend.get(a.categoryId)
+      return prev === undefined || a.spent > prev + 0.005
+    })
+  }
+
   // 4. New / unusual — first-seen merchants and a larger-than-usual charge this month.
   const insights = buildInsights(expenses, 1, false, anchor)
   const newMerchants = insights.newMerchants.map((m) => m.name)
+  // 4b. Price-creep watchdog (§18): only alerts whose changed charge was
+  // imported in the last ~24h, so the push fires once per price change — the
+  // dashboard card keeps showing it until the next charge confirms the price.
+  // Note: the unfiltered charge list — subscriptions with projection rules are
+  // "unavoidable" and would be excluded by the newSpend exclusion above.
+  const freshMerchants = new Set((await recentCharges(now)).map((c) => c.merchant))
+  const priceAlerts = insights.priceAlerts.filter((a) => freshMerchants.has(a.name))
+
   const outlier = insights.outliers[0]
     ? {
         merchant: insights.outliers[0].merchant,
@@ -215,7 +251,12 @@ export async function buildDigest(now: number = Date.now(), failedSources: strin
 
   // ----- compose the notification -----
   const overPace = pace ? pace.projected > pace.budget : false
-  const alert = sync.some((s) => s.stale) || overPace || activeFailures.length > 0
+  const alert =
+    sync.some((s) => s.stale) ||
+    overPace ||
+    activeFailures.length > 0 ||
+    priceAlerts.length > 0 ||
+    paceAlerts.length > 0
 
   // Title: total spent since the last import (unchanged copy).
   const title = `Budget ${alert ? '⚠️' : '✓'}${
@@ -230,9 +271,23 @@ export async function buildDigest(now: number = Date.now(), failedSources: strin
   }
   const paceStr = pace ? `${PACE_LABEL[pace.level]} · ${pace.pct >= 0 ? '+' : ''}${pace.pct}%` : ''
   const failStr = activeFailures.length > 0 ? `Failed: ${activeFailures.join(', ')}` : ''
-  const body = [paceStr, failStr].filter(Boolean).join('\n')
+  // One line per price change: "Netflix ↑ $16.99 → $20.99 (+$48/yr)".
+  const creepStr = priceAlerts
+    .slice(0, 3)
+    .map(
+      (a) =>
+        `${a.name} ${a.delta > 0 ? '↑' : '↓'} ${formatCurrency(a.previous)} → ${formatCurrency(a.current)} (${a.delta > 0 ? '+' : '−'}${formatCurrency(Math.abs(a.annualizedDelta))}/yr)`
+    )
+    .join('\n')
+  // One compact line for all hot categories — phone notifications truncate fast:
+  // "🔥 Groceries +30% · Dining +22%". Tapping the push opens the pace modal.
+  const hotStr = paceAlerts
+    .slice(0, 3)
+    .map((a) => `${a.name} +${a.overPct}%`)
+    .join(' · ')
+  const body = [paceStr, hotStr ? `🔥 ${hotStr}` : '', creepStr, failStr].filter(Boolean).join('\n')
 
-  return { alert, title, body, sync, newSpend, pace, newMerchants, outlier }
+  return { alert, title, body, sync, newSpend, pace, newMerchants, outlier, priceAlerts, paceAlerts }
 }
 
 type PushResult = { sent: number; failed: number; skipped?: boolean }
@@ -300,7 +355,8 @@ export async function runDailyDigestJob(
     // digest. Fires on the first run after new-month data; the per-`ym` dedup
     // row caps it.
     const flows = await loadAllFlows()
-    const ym = completedReportMonth(anchorMonth(flows.filter((t) => t.flow === 'expense')))
+    const anchor = anchorMonth(flows.filter((t) => t.flow === 'expense'))
+    const ym = completedReportMonth(anchor)
     if (ym && availableMonths(flows).includes(ym)) {
       const { report } = await buildMonthReport(ym)
       if (report && pushConfigured()) {
@@ -321,7 +377,12 @@ export async function runDailyDigestJob(
     }
 
     const digest = await buildDigest(now, failedSources)
-    const hasNewData = digest.newSpend.count > 0
+    // Price alerts count as news: newSpend is discretionary-only, so a day whose
+    // only new charge is the repriced subscription would otherwise skip the push.
+    // Pace alerts count too: the first alert of the month can surface without a
+    // discretionary charge in the 24h window (e.g. a goal edit tipped it hot).
+    const hasNewData =
+      digest.newSpend.count > 0 || digest.priceAlerts.length > 0 || digest.paceAlerts.length > 0
 
     // Gate on all sources having a successful run today (UTC date).
     const allSyncsOk = await allSourcesSyncedToday()
@@ -350,9 +411,24 @@ export async function runDailyDigestJob(
         .values({ date: today })
         .onConflictDoNothing()
         .returning()
+      // Tapping a digest that carries pace alerts opens the dashboard pace modal.
+      const url = digest.paceAlerts.length > 0 ? '/?paceAlert=1' : '/'
       push = claimed.length > 0
-        ? await sendPushToAll({ title: digest.title, body: digest.body, url: '/' })
+        ? await sendPushToAll({ title: digest.title, body: digest.body, url })
         : { sent: 0, failed: 0, skipped: true }
+      // Only a push that actually went out advances the hysteresis baseline —
+      // a skipped/deduped run must stay eligible to alert tomorrow.
+      if (claimed.length > 0 && digest.paceAlerts.length > 0 && anchor) {
+        for (const a of digest.paceAlerts) {
+          await db
+            .insert(paceAlertPushes)
+            .values({ ym: anchor, categoryId: a.categoryId, spentAtPush: String(a.spent), overPct: a.overPct })
+            .onConflictDoUpdate({
+              target: [paceAlertPushes.ym, paceAlertPushes.categoryId],
+              set: { spentAtPush: String(a.spent), overPct: a.overPct, sentAt: new Date() },
+            })
+        }
+      }
     }
 
     await recordDigestRun('ok')

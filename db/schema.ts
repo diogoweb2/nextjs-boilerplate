@@ -49,6 +49,11 @@ export const merchants = pgTable('merchants', {
     onDelete: 'set null',
   }),
   defaultRecurring: boolean('default_recurring').notNull().default(false),
+  // true = this subscription bills once a year. Monthly/quarterly cadence is
+  // inferred from history; annual can't be reliably (one data point a year),
+  // so the owner declares it and the watchdog keys its "active" and
+  // price-stability windows off a 12-month gap (§18).
+  recurringAnnual: boolean('recurring_annual').notNull().default(false),
   defaultSpecial: boolean('default_special').notNull().default(false),
   // true = the owner dismissed this merchant as a projected-bill suggestion, so
   // the Settings auto-detector stops proposing it (see projection_rules).
@@ -563,6 +568,29 @@ export const dailyDigestPushes = pgTable('daily_digest_pushes', {
   date: text('date').primaryKey(),
   sentAt: timestamp('sent_at').defaultNow().notNull(),
 })
+
+/**
+ * Hysteresis state for mid-month category pace alerts (§B5). One row per
+ * (month, category) that has been pushed as "running hot". A category is
+ * re-alerted only when its month-to-date spend has grown past `spentAtPush` —
+ * so "Groceries +30%" doesn't nag every day, but a new grocery run that moves
+ * it to +31% alerts again. Rows for past months are inert (keyed by ym).
+ */
+export const paceAlertPushes = pgTable(
+  'pace_alert_pushes',
+  {
+    ym: text('ym').notNull(),
+    categoryId: integer('category_id')
+      .notNull()
+      .references(() => categories.id, { onDelete: 'cascade' }),
+    /** Month-to-date net spend at the moment the alert was pushed. */
+    spentAtPush: numeric('spent_at_push', { precision: 10, scale: 2 }).notNull(),
+    /** Projected overshoot % at push time (for reference/debugging). */
+    overPct: integer('over_pct').notNull(),
+    sentAt: timestamp('sent_at').defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex('pace_alert_pushes_ym_cat').on(t.ym, t.categoryId)]
+)
 
 /**
  * Brute-force throttle for the single shared login password. One row per client

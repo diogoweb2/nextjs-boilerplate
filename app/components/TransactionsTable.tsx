@@ -13,6 +13,7 @@ import {
   unsplitTransaction,
   type SplitPart,
 } from '@/app/actions/transactions'
+import { setMerchantFlags } from '@/app/actions/merchants'
 import {
   addTransactionsToProject,
   createProject,
@@ -33,6 +34,8 @@ export type TxnRow = {
   categoryName: string
   categoryColor: string
   isRecurring: boolean
+  // Merchant-level "bills once a year" declaration (merchants.recurringAnnual).
+  recurringAnnual: boolean
   isSpecial: boolean
   isPayment: boolean
   source: 'master' | 'amex' | 'tangerine' | 'scotia'
@@ -224,6 +227,7 @@ export function TransactionsTable({
             memberships={membershipsByTxn[t.id] ?? []}
             onCategory={(cid) => run(() => setTxnCategory(t.id, t.merchantId, cid))}
             onFlags={(flags) => run(() => setTxnFlags(t.id, flags))}
+            onAnnual={(annual) => run(() => setMerchantFlags(t.merchantId, { recurringAnnual: annual }))}
             onFlow={(flow) => run(() => setTxnFlow(t.id, flow))}
             onNote={(note) => run(() => setTxnNote(t.id, note))}
             onAmountRule={(enable, note) =>
@@ -368,6 +372,7 @@ function TxnRowView({
   memberships,
   onCategory,
   onFlags,
+  onAnnual,
   onFlow,
   onNote,
   onAmountRule,
@@ -383,6 +388,8 @@ function TxnRowView({
   memberships: ProjectPickerItem[]
   onCategory: (categoryId: number | null) => void
   onFlags: (flags: { isRecurring?: boolean | null; isSpecial?: boolean | null }) => void
+  /** Toggle the merchant's yearly-billing declaration (applies to all its txns). */
+  onAnnual: (annual: boolean) => void
   onFlow: (flow: TxnRow['flow']) => void
   onNote: (note: string | null) => void
   onAmountRule: (enable: boolean, note: string | null) => void
@@ -431,7 +438,14 @@ function TxnRowView({
                 ⑂ split origin
               </span>
             )}
-            {t.isRecurring && <span title="Subscription" className="text-xs text-[var(--accent)]">↻</span>}
+            {t.isRecurring && (
+              <span
+                title={t.recurringAnnual ? 'Subscription — bills once a year' : 'Subscription'}
+                className="text-xs text-[var(--accent)]"
+              >
+                ↻{t.recurringAnnual && <span className="ml-0.5 align-middle rounded bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] px-1 text-[9px] font-semibold">1y</span>}
+              </span>
+            )}
             {t.isSpecial && <span title="Special" className="text-xs text-amber-500">★</span>}
             {t.isPayment && (
               <span className="rounded bg-[var(--surface-2)] px-1 text-[10px] text-[var(--muted)]">
@@ -542,6 +556,21 @@ function TxnRowView({
           >
             ↻ Subscription
           </button>
+          {t.isRecurring && (
+            <button
+              onClick={() => onAnnual(!t.recurringAnnual)}
+              title={t.recurringAnnual
+                ? 'Marked as a yearly bill — click if it actually bills more often'
+                : 'Bills once a year? Mark it so a quiet year doesn\'t look like a cancelled subscription'}
+              className={`rounded-md px-2 py-1 text-xs font-medium ${
+                t.recurringAnnual
+                  ? 'bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] text-[var(--accent)]'
+                  : 'text-[var(--muted)] hover:bg-[var(--surface-2)]'
+              }`}
+            >
+              1y yearly
+            </button>
+          )}
           <button
             onClick={() => onFlags({ isSpecial: !t.isSpecial })}
             className={`rounded-md px-2 py-1 text-xs font-medium ${

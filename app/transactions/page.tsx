@@ -56,6 +56,7 @@ export default async function TransactionsPage({
             merchantName: merchants.name,
             merchantCategoryId: merchants.categoryId,
             merchantRecurring: merchants.defaultRecurring,
+            merchantAnnual: merchants.recurringAnnual,
             merchantSpecial: merchants.defaultSpecial,
           })
           .from(transactions)
@@ -95,6 +96,7 @@ export default async function TransactionsPage({
       categoryName: cat?.name ?? NO_CAT.name,
       categoryColor: cat?.color ?? NO_CAT.color,
       isRecurring: r.txnRecurring ?? r.merchantRecurring,
+      recurringAnnual: r.merchantAnnual,
       isSpecial: r.txnSpecial ?? r.merchantSpecial,
       isPayment: r.isPayment,
       source: r.source,
