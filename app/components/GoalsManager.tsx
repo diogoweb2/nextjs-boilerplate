@@ -139,6 +139,7 @@ export function GoalsManager({
   const active = goals.filter((g) => !g.archived)
   const archived = goals.filter((g) => g.archived)
   const savings = active.filter((g) => g.kind === 'savings')
+  const netZeroGoal = active.find((g) => g.kind === 'netzero') ?? null
   const [showArchived, setShowArchived] = useState(false)
   const orderedActive = useReorder(active)
 
@@ -199,6 +200,7 @@ export function GoalsManager({
               asOfYm={asOfYm}
               spendCategories={spendCategories}
               savingsGoals={savings}
+              netZeroGoal={netZeroGoal}
               drag={active.length > 1 ? orderedActive.dragPropsFor(g.id) : undefined}
             />
           ))}
@@ -215,7 +217,7 @@ export function GoalsManager({
           {showArchived && (
             <div className="mt-3 grid grid-cols-1 gap-5 lg:grid-cols-2">
               {archived.map((g) => (
-                <GoalCard key={g.id} goal={g} asOfYm={asOfYm} spendCategories={spendCategories} savingsGoals={savings} />
+                <GoalCard key={g.id} goal={g} asOfYm={asOfYm} spendCategories={spendCategories} savingsGoals={savings} netZeroGoal={netZeroGoal} />
               ))}
             </div>
           )}
@@ -232,12 +234,14 @@ function GoalCard({
   asOfYm,
   spendCategories,
   savingsGoals,
+  netZeroGoal,
   drag,
 }: {
   goal: GoalView
   asOfYm: string
   spendCategories: { id: number; name: string }[]
   savingsGoals: GoalView[]
+  netZeroGoal: GoalView | null
   drag?: DragProps
 }) {
   const router = useRouter()
@@ -254,6 +258,9 @@ function GoalCard({
   const isMortgage = goal.kind === 'mortgage'
   const isNetZero = goal.kind === 'netzero'
   const otherSavings = savingsGoals.filter((g) => g.id !== goal.id && !g.archived)
+  // A savings goal can also send money back to net-zero (books it as recovery income).
+  const transferDestinations =
+    netZeroGoal && goal.kind === 'savings' ? [...otherSavings, netZeroGoal] : otherSavings
 
   const subtitle = isMortgage
     ? 'Balance remaining'
@@ -335,7 +342,7 @@ function GoalCard({
             <button onClick={() => setPanel(panel === 'adjust' ? 'none' : 'adjust')} className={GHOST_BTN}>
               Adjust value
             </button>
-            {otherSavings.length > 0 && (
+            {transferDestinations.length > 0 && (
               <button
                 onClick={() => setPanel(panel === 'transfer' ? 'none' : 'transfer')}
                 disabled={goal.value <= 0}
@@ -386,7 +393,7 @@ function GoalCard({
       {panel === 'transfer' && (
         <TransferPanel
           max={goal.value}
-          destinations={otherSavings}
+          destinations={transferDestinations}
           onSubmit={(toGoalId, amount, borrowed, note) =>
             run(() => transferBetweenGoals({ fromGoalId: goal.id, toGoalId, amount, borrowed, note }))
           }
@@ -432,9 +439,30 @@ function SavingsBody({ goal }: { goal: GoalView }) {
         </div>
       )}
       <p className="text-xs text-[var(--muted)]">{goal.milestone}</p>
-      {goal.series.length > 1 && (
-        <LineChart labels={downsample(goal.series).map((p) => p.ym)} series={[{ color: goal.color, values: downsample(goal.series).map((p) => p.value) }]} height={140} />
-      )}
+      {goal.series.length > 1 && (() => {
+        const pts = downsample(goal.series)
+        const hasIdeal = pts.some((p) => p.ideal !== null)
+        // A dated goal's reference climbs (pace to the deadline); an undated one
+        // is a flat line at the target amount. Name it accordingly.
+        const idealName = goal.targetPace ? 'On track' : 'Goal'
+        // The current line runs through the present only (leading non-null run);
+        // plotting fewer points than labels leaves it stopping mid-chart, while
+        // the reference line spans the full width.
+        const currentValues = pts.filter((p) => p.value !== null).map((p) => p.value as number)
+        return (
+          <LineChart
+            labels={pts.map((p) => p.ym)}
+            series={[
+              ...(hasIdeal
+                ? [{ color: 'var(--muted)', values: pts.map((p) => p.ideal ?? 0), name: idealName }]
+                : []),
+              { color: goal.color, values: currentValues, name: 'Current' },
+            ]}
+            height={140}
+            area={!hasIdeal}
+          />
+        )
+      })()}
       <dl className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-[var(--muted)]">
         <Stat label="Contributed">{formatCurrency(goal.contributed)}</Stat>
         {goal.targetAmount && <Stat label="To go">{formatCurrency(Math.max(0, goal.targetAmount - goal.value))}</Stat>}
@@ -696,6 +724,7 @@ function TransferPanel({
   const [note, setNote] = useState('')
   const n = Number(amount)
   const tooMuch = n > max + 0.005
+  const toNetZero = destinations.find((g) => String(g.id) === toId)?.kind === 'netzero'
   return (
     <Panel column>
       <div className="flex flex-wrap items-center gap-2">
@@ -713,13 +742,17 @@ function TransferPanel({
         </button>
       </div>
       <input type="text" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} className={`${INPUT_CLASS} min-w-0 flex-1`} />
-      <label className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--muted)]">
-        <input type="checkbox" checked={borrowed} onChange={(e) => setBorrowed(e.target.checked)} />
-        Borrow (track repayment — this goal will be owed it back)
-      </label>
+      {toNetZero ? (
+        <p className="text-xs text-[var(--muted)]">Books it as recovery income, moving your net-zero goal closer to zero.</p>
+      ) : (
+        <label className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--muted)]">
+          <input type="checkbox" checked={borrowed} onChange={(e) => setBorrowed(e.target.checked)} />
+          Borrow (track repayment — this goal will be owed it back)
+        </label>
+      )}
       <div className="flex items-center gap-2">
-        <button disabled={!n || tooMuch || !toId} onClick={() => onSubmit(Number(toId), n, borrowed, note)} className={PRIMARY_BTN}>
-          {borrowed ? 'Lend' : 'Move'}
+        <button disabled={!n || tooMuch || !toId} onClick={() => onSubmit(Number(toId), n, toNetZero ? false : borrowed, note)} className={PRIMARY_BTN}>
+          {!toNetZero && borrowed ? 'Lend' : 'Move'}
         </button>
         {tooMuch && <span className="text-xs text-[var(--negative)]">More than this goal holds.</span>}
       </div>

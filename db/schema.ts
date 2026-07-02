@@ -149,7 +149,12 @@ export const transactions = pgTable(
   'transactions',
   {
     id: serial('id').primaryKey(),
-    source: text('source', { enum: ['master', 'amex', 'tangerine', 'scotia'] }).notNull(),
+    // The four import sources, plus 'manual' for app-generated synthetic rows
+    // (goal funding/withdrawal ledger offsets, externalId 'goal:…'). 'manual'
+    // rows belong to no bank account, so every source-whitelisted consumer
+    // (bank balance, cashflow schedule, per-account filters) drops them
+    // structurally instead of via per-query goal:% exclusions.
+    source: text('source', { enum: ['master', 'amex', 'tangerine', 'scotia', 'manual'] }).notNull(),
     // 'expense' = spending, 'income' = money in (salary, etc.), 'transfer' =
     // inter-account / ignored card payments (excluded from both analytics).
     flow: text('flow', { enum: ['expense', 'income', 'transfer'] })
@@ -630,6 +635,10 @@ export const projects = pgTable('projects', {
   notes: text('notes'),
   sortOrder: integer('sort_order').notNull().default(0),
   archived: boolean('archived').notNull().default(false),
+  // Dashboard reminder: a project with dates surfaces on the Overview when its
+  // window is near/current (from ~3 weeks before start through end + 10 days).
+  // Set true when the owner clicks "Dismiss" on that banner so it stops showing.
+  dashboardDismissed: boolean('dashboard_dismissed').notNull().default(false),
   // Auto-fill: when set, all credit-card (master/amex) transactions in the
   // date window for the chosen cardholder(s) are auto-added on project creation
   // and when "Refresh auto-fill" is triggered. Recurring transactions go to
@@ -892,6 +901,21 @@ export const subscriptionRenewalDismissals = pgTable('subscription_renewal_dismi
     .unique()
     .references(() => merchants.id, { onDelete: 'cascade' }),
   renewalYm: text('renewal_ym').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+
+/**
+ * Owner-dismissed "bill due soon" reminders (§19). The bills calendar warns at
+ * the top of the dashboard 2 days before each projected bill's expected day; the
+ * warning clears on its own when the payment posts, or the owner can dismiss it.
+ * One row per bill: `billKey` identifies the bill ('m:<merchantId>' for merchant
+ * bills, 'cc' for the credit-card payment pseudo-bill) and `dueYm` records the
+ * exact cycle dismissed — next month's due date is a new cycle, so it warns again.
+ */
+export const billReminderDismissals = pgTable('bill_reminder_dismissals', {
+  id: serial('id').primaryKey(),
+  billKey: text('bill_key').notNull().unique(),
+  dueYm: text('due_ym').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 })
 

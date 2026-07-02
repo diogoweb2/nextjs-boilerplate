@@ -30,7 +30,7 @@ export type ProjectTxn = {
   amount: number
   categoryName: string
   categoryColor: string
-  source: 'master' | 'amex' | 'tangerine' | 'scotia'
+  source: 'master' | 'amex' | 'tangerine' | 'scotia' | 'manual'
   country: string | null
   person: string
 }
@@ -67,13 +67,33 @@ export type ProjectDetail = {
 
 export type ProjectPickerItem = { id: number; name: string; emoji: string }
 
+export type DashboardProject = {
+  id: number
+  name: string
+  emoji: string
+  color: string
+  startDate: string
+  endDate: string | null
+  total: number
+  count: number
+  /** 'upcoming' (starts in the future), 'active' (in window), 'wrapup' (ended, in the +10d tail). */
+  phase: 'upcoming' | 'active' | 'wrapup'
+  /** Whole days from today to startDate; negative once started. */
+  daysUntilStart: number
+}
+
+// How many days before a project's start it begins showing on the dashboard.
+const DASHBOARD_LEAD_DAYS = 21
+// How many days after a project's end it keeps showing on the dashboard.
+const DASHBOARD_TAIL_DAYS = 10
+
 // The columns we join for an enriched member/candidate row.
 type EnrichInput = {
   id: number
   txnDate: string
   rawDescription: string
   amount: string
-  source: 'master' | 'amex' | 'tangerine' | 'scotia'
+  source: 'master' | 'amex' | 'tangerine' | 'scotia' | 'manual'
   country: string | null
   cardLast4: string | null
   txnCategoryId: number | null
@@ -163,6 +183,89 @@ export async function loadProjects(): Promise<ProjectListItem[]> {
     total: Number(r.total),
     count: Number(r.count),
   }))
+}
+
+/** Add `days` to a YYYY-MM-DD date string, returning YYYY-MM-DD. */
+function shiftDate(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00`)
+  d.setDate(d.getDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
+/** Whole days between two YYYY-MM-DD strings (to - from). */
+function daysBetween(from: string, to: string): number {
+  const a = new Date(`${from}T00:00:00`).getTime()
+  const b = new Date(`${to}T00:00:00`).getTime()
+  return Math.round((b - a) / 86_400_000)
+}
+
+/**
+ * Projects to surface on the Overview: any dated, non-archived, non-dismissed
+ * project whose reminder window is current — from DASHBOARD_LEAD_DAYS before its
+ * start through DASHBOARD_TAIL_DAYS after its end (end defaults to start). The
+ * owner can permanently dismiss one (persisted via `dashboardDismissed`).
+ */
+export async function loadDashboardProjects(): Promise<DashboardProject[]> {
+  if (await isDemoSession()) return []
+  const today = new Date().toISOString().slice(0, 10)
+
+  const rows = await db
+    .select({
+      id: projects.id,
+      name: projects.name,
+      emoji: projects.emoji,
+      color: projects.color,
+      startDate: projects.startDate,
+      endDate: projects.endDate,
+      total: sql<string>`coalesce(sum(${transactions.amount}), 0)`,
+      count: sql<number>`count(${transactions.id})`,
+    })
+    .from(projects)
+    .leftJoin(
+      projectTransactions,
+      and(
+        eq(projectTransactions.projectId, projects.id),
+        eq(projectTransactions.dismissed, false),
+        eq(projectTransactions.needsReview, false)
+      )
+    )
+    .leftJoin(transactions, eq(transactions.id, projectTransactions.transactionId))
+    .where(
+      and(
+        eq(projects.archived, false),
+        eq(projects.dashboardDismissed, false),
+        sql`${projects.startDate} is not null`
+      )
+    )
+    .groupBy(projects.id)
+    .orderBy(projects.startDate)
+
+  const out: DashboardProject[] = []
+  for (const r of rows) {
+    const startDate = r.startDate! // guaranteed by the WHERE
+    const endDate = r.endDate
+    const windowStart = shiftDate(startDate, -DASHBOARD_LEAD_DAYS)
+    const windowEnd = shiftDate(endDate ?? startDate, DASHBOARD_TAIL_DAYS)
+    if (today < windowStart || today > windowEnd) continue
+
+    const daysUntilStart = daysBetween(today, startDate)
+    const ended = today > (endDate ?? startDate)
+    const phase: DashboardProject['phase'] = daysUntilStart > 0 ? 'upcoming' : ended ? 'wrapup' : 'active'
+
+    out.push({
+      id: r.id,
+      name: r.name,
+      emoji: r.emoji,
+      color: r.color,
+      startDate,
+      endDate,
+      total: Number(r.total),
+      count: Number(r.count),
+      phase,
+      daysUntilStart,
+    })
+  }
+  return out
 }
 
 export async function loadProjectDetail(id: number): Promise<ProjectDetail | null> {
@@ -380,6 +483,26 @@ export async function updateProject(id: number, patch: Partial<ProjectInput>): P
   await db.update(projects).set(set).where(eq(projects.id, id))
   revalidatePath('/projects')
   revalidatePath(`/projects/${id}`)
+}
+
+/**
+ * Stop showing a project's reminder on the Overview (persisted, cross-device).
+ * Only allowed once the project is over (past end_date, which defaults to
+ * start_date) — before then the reminder isn't dismissible.
+ */
+export async function dismissProjectFromDashboard(id: number): Promise<void> {
+  await requireAuth()
+  const [p] = await db
+    .select({ startDate: projects.startDate, endDate: projects.endDate })
+    .from(projects)
+    .where(eq(projects.id, id))
+    .limit(1)
+  if (!p) throw new Error('Project not found')
+  const end = p.endDate ?? p.startDate
+  const today = new Date().toISOString().slice(0, 10)
+  if (!end || today <= end) throw new Error('Project is not done yet')
+  await db.update(projects).set({ dashboardDismissed: true }).where(eq(projects.id, id))
+  revalidatePath('/')
 }
 
 export async function deleteProject(id: number): Promise<void> {

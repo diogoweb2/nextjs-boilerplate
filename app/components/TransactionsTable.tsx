@@ -38,7 +38,7 @@ export type TxnRow = {
   recurringAnnual: boolean
   isSpecial: boolean
   isPayment: boolean
-  source: 'master' | 'amex' | 'tangerine' | 'scotia'
+  source: 'master' | 'amex' | 'tangerine' | 'scotia' | 'manual'
   flow: 'expense' | 'income' | 'transfer'
   person: string
   // A peeled-off part of another transaction.

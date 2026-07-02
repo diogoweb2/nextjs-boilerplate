@@ -38,29 +38,73 @@ export function progressPct(value: number, target: number | null): number | null
   return Math.max(0, Math.min(100, (value / target) * 100))
 }
 
+export type SeriesPoint = {
+  ym: string
+  /** Cumulative actual value at this month's end. null for months after
+   *  `asOfYm` — we don't know (or guess) future contributions. */
+  value: number | null
+  /** The reference line the actual value is racing:
+   *   - target amount + future date → the diagonal "on track" pace to hit it on time;
+   *   - target amount, no date      → a flat line at the target (a goal "ceiling");
+   *   - no target                   → null (no reference to draw).
+   *  Anchoring the chart's y-scale to the target keeps a barely-started goal from
+   *  pinning its flat line to the top of the chart. */
+  ideal: number | null
+}
+
 /**
- * Running value bucketed by month, from the first entry's month through `asOfYm`,
- * for the sparkline. Each point is the cumulative value at that month's end.
+ * Two monthly lines for the goal chart, mirroring the mortgage chart's shape:
+ *   1. `value` — the running actual value, from the first entry's month through
+ *      the present (`asOfYm`). It stops there: null in future months, because we
+ *      don't forecast contributions we haven't made.
+ *   2. `ideal` — the reference the value is racing (see SeriesPoint.ideal): a
+ *      diagonal pace line when there's a target date, else a flat line at the
+ *      target amount. Null when there's no target amount at all.
+ * The x-axis spans the first entry's month through whichever is later of `asOfYm`
+ * and (for dated goals) the target month, so a dated ideal reaches its deadline.
  */
-export function valueSeries(entries: EntryLite[], asOfYm: string): { ym: string; value: number }[] {
+export function valueSeries(
+  entries: EntryLite[],
+  asOfYm: string,
+  target: number | null = null,
+  targetDate: string | null = null,
+): SeriesPoint[] {
   const relevant = entries
     .filter(affectsValue)
     .sort((a, b) => (a.occurredAt < b.occurredAt ? -1 : 1))
-  if (relevant.length === 0) return [{ ym: asOfYm, value: 0 }]
 
   const deltaByYm = new Map<string, number>()
   for (const e of relevant) {
     const ym = e.occurredAt.slice(0, 7)
     deltaByYm.set(ym, (deltaByYm.get(ym) ?? 0) + e.amount)
   }
-  const startYm = relevant[0].occurredAt.slice(0, 7)
-  const endYm = monthsBetween(startYm, asOfYm) >= 0 ? asOfYm : startYm
+  const startYm = relevant.length > 0 ? relevant[0].occurredAt.slice(0, 7) : asOfYm
 
-  const out: { ym: string; value: number }[] = []
+  const hasTarget = target !== null && target > 0
+  // A dated goal draws a diagonal pace line to the target month; the date must
+  // be strictly after the start month for the slope to make sense.
+  const targetYm = targetDate ? targetDate.slice(0, 7) : null
+  const span = targetYm ? monthsBetween(startYm, targetYm) : 0
+  const dated = hasTarget && targetYm !== null && span > 0
+
+  // First month's value anchors the diagonal pace line's start.
+  const idealStart = deltaByYm.get(startYm) ?? 0
+
+  const lastYm = monthsBetween(startYm, asOfYm) >= 0 ? asOfYm : startYm
+  const endYm = dated && monthsBetween(lastYm, targetYm!) > 0 ? targetYm! : lastYm
+
+  const out: SeriesPoint[] = []
   let running = 0
   for (let ym = startYm; monthsBetween(ym, endYm) >= 0; ym = addMonths(ym, 1)) {
-    running += deltaByYm.get(ym) ?? 0
-    out.push({ ym, value: round2(running) })
+    // Actual value accumulates through the present only; future stays null.
+    const isFuture = monthsBetween(ym, asOfYm) < 0
+    if (!isFuture) running += deltaByYm.get(ym) ?? 0
+    const ideal = dated
+      ? round2(idealStart + (target! - idealStart) * Math.min(1, monthsBetween(startYm, ym) / span))
+      : hasTarget
+        ? target! // flat "goal ceiling" line for an undated target
+        : null
+    out.push({ ym, value: isFuture ? null : round2(running), ideal })
   }
   return out
 }

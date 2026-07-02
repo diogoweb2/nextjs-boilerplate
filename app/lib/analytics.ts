@@ -4,7 +4,9 @@ import { transactions, merchants, categories } from '@/db/schema'
 import { formatMonth } from '@/app/lib/format'
 import { isDemoSession } from '@/app/lib/demo'
 
-export type ImportSource = 'master' | 'amex' | 'tangerine' | 'scotia'
+/** The four real import sources plus 'manual' for app-generated synthetic rows
+ *  (goal funding/withdrawals) that belong to no bank or card account. */
+export type ImportSource = 'master' | 'amex' | 'tangerine' | 'scotia' | 'manual'
 export type Flow = 'expense' | 'income' | 'transfer'
 
 export type EnrichedTxn = {
@@ -26,6 +28,11 @@ export type EnrichedTxn = {
   isSpecial: boolean
   batchId: number | null
   categorizeDismissed?: boolean
+  /** True for app-generated goal ledger rows (external_id 'goal:…'): contribution
+   *  expenses and goal-spend income offsets. They count toward net/budget like any
+   *  row, but are dated by owner action rather than by an imported statement, so
+   *  they must never advance the "current month" anchor. */
+  synthetic?: boolean
 }
 
 const NO_CATEGORY = { name: 'Uncategorized', color: '#94a3b8' }
@@ -57,6 +64,7 @@ export async function loadAllFlows(): Promise<EnrichedTxn[]> {
       txnSpecial: transactions.isSpecial,
       categorizeDismissed: transactions.categorizeDismissed,
       batchId: transactions.batchId,
+      externalId: transactions.externalId,
       merchantId: merchants.id,
       merchantName: merchants.name,
       merchantCategoryId: merchants.categoryId,
@@ -90,6 +98,7 @@ export async function loadAllFlows(): Promise<EnrichedTxn[]> {
         isSpecial: r.txnSpecial ?? r.merchantSpecial,
         batchId: r.batchId,
         categorizeDismissed: r.categorizeDismissed,
+        synthetic: r.externalId?.startsWith('goal:') ?? false,
       }
     })
 }
@@ -167,8 +176,13 @@ export function availableMonths(txns: EnrichedTxn[]): string[] {
 }
 
 export function anchorMonth(txns: EnrichedTxn[]): string | null {
-  if (txns.length === 0) return null
-  return txns.reduce((max, t) => (t.txnDate > max ? t.txnDate : max), txns[0].txnDate).slice(0, 7)
+  // Synthetic goal rows are dated by owner action, not by an imported statement,
+  // so they don't prove a month has real data — anchor on imported rows only
+  // (falling back to synthetic ones if that's all there is).
+  const real = txns.filter((t) => !t.synthetic)
+  const pool = real.length > 0 ? real : txns
+  if (pool.length === 0) return null
+  return pool.reduce((max, t) => (t.txnDate > max ? t.txnDate : max), pool[0].txnDate).slice(0, 7)
 }
 
 /**

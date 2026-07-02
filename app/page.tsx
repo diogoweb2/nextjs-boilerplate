@@ -21,13 +21,19 @@ import { buildRenewalWarnings } from '@/app/lib/renewal-watch'
 import { RenewalWarningBanner } from '@/app/components/RenewalWarningBanner'
 import { parsePeriodParams } from '@/app/lib/params'
 import { computeBudget, FIXED_CATEGORIES, type CategoryMeta } from '@/app/lib/budget'
-import { computeMonthBurndown, unavoidableMerchantIds, type BurndownData } from '@/app/lib/projection'
+import { computeMonthBurndown, monthlyUnavoidable, unavoidableMerchantIds, type BurndownData } from '@/app/lib/projection'
 import { getBudgetSettings } from '@/app/actions/budget'
 import { loadProjectionRules } from '@/app/actions/projection'
 import { recentCharges } from '@/app/lib/digest'
 import { loadPendingReviews, loadGoalsData } from '@/app/actions/goals'
 import { loadSurplusPrompts } from '@/app/actions/surplus'
+import { loadDashboardProjects } from '@/app/actions/projects'
+import { ProjectReminderBanner } from '@/app/components/ProjectReminderBanner'
 import { loadEmergencyFund } from '@/app/actions/emergency'
+import { loadCcPaymentHistory, loadBillDismissals } from '@/app/actions/bills'
+import { buildBillCalendar, buildBillReminders } from '@/app/lib/bill-calendar'
+import { BillsCalendar } from '@/app/components/BillsCalendar'
+import { BillReminderBanner } from '@/app/components/BillReminderBanner'
 import { isDemoSession } from '@/app/lib/demo'
 import { TransferReview } from '@/app/components/TransferReview'
 import { OtherCategoryBanner } from '@/app/components/OtherCategoryBanner'
@@ -231,10 +237,19 @@ export default async function Home({
     rules,
   })
   const goalByName = new Map(budget.categories.map((c) => [c.name, c.goal]))
-  const monthBudget = budget.monthlyCap - budget.unavoidable.total
+  // Unavoidable must match the month the burndown displays. budget.unavoidable is
+  // the anchor month's; right after a month rolls over the new anchor month has
+  // barely any bills posted/projected yet, so using it while viewing a past month
+  // would inflate that month's discretionary pool (and its pace %).
+  const burndownMonth = exactMonth ?? anchor
+  const burndownUnavoidable =
+    burndownMonth && burndownMonth !== budget.anchor
+      ? monthlyUnavoidable(allFlows, rules, burndownMonth, FIXED_CATEGORIES)
+      : budget.unavoidable
+  const monthBudget = budget.monthlyCap - burndownUnavoidable.total
   let burndown: BurndownData | null = null
-  if (budget.hasData && anchor) {
-    burndown = computeMonthBurndown(allFlows, rules, exactMonth ?? anchor, monthBudget, FIXED_CATEGORIES)
+  if (budget.hasData && burndownMonth) {
+    burndown = computeMonthBurndown(allFlows, rules, burndownMonth, monthBudget, FIXED_CATEGORIES)
   }
   const newCharges = burndown
     ? await recentCharges(Date.now(), unavoidableMerchantIds(allFlows, rules, FIXED_CATEGORIES))
@@ -242,6 +257,19 @@ export default async function Home({
 
   const emergency = await loadEmergencyFund()
   const goalsSummary = await loadGoalsData()
+  const dashboardProjects = demo ? [] : await loadDashboardProjects()
+
+  // Bills & recurring calendar (§19): every projected bill on its expected day,
+  // plus a top-of-page reminder for bills expected within the next 2 days.
+  const todayIso = new Date().toISOString().slice(0, 10)
+  const ccPayments = demo ? [] : await loadCcPaymentHistory()
+  const billCalendar =
+    budget.hasData && exactMonth
+      ? buildBillCalendar(allFlows, rules, exactMonth, FIXED_CATEGORIES, ccPayments, todayIso)
+      : null
+  const billReminders = demo
+    ? []
+    : buildBillReminders(allFlows, rules, FIXED_CATEGORIES, ccPayments, todayIso, await loadBillDismissals())
 
   // Annual-subscription renewal warnings (§18b): declared-yearly subs due to
   // recharge within ~1 month, so the owner can cancel first. Skipped in the demo.
@@ -285,9 +313,21 @@ export default async function Home({
       <YearReportReminder year={reminderReportYear} />
       <ReportReminder month={reminderReportMonth} />
 
+      {billReminders.length > 0 && (
+        <div className="mb-5">
+          <BillReminderBanner reminders={billReminders} />
+        </div>
+      )}
+
       {renewalWarnings.length > 0 && (
         <div className="mb-5">
           <RenewalWarningBanner warnings={renewalWarnings} />
+        </div>
+      )}
+
+      {dashboardProjects.length > 0 && (
+        <div className="mb-5">
+          <ProjectReminderBanner projects={dashboardProjects} />
         </div>
       )}
 
@@ -399,7 +439,7 @@ export default async function Home({
                     data={burndown}
                     periodLabel={ov.periodLabel}
                     newCharges={newCharges}
-                    unavoidableTotal={budget.unavoidable.total}
+                    unavoidableTotal={burndownUnavoidable.total}
                   />
                 </Card>
               )}
@@ -422,6 +462,20 @@ export default async function Home({
                 </Card>
               )}
             </div>
+          )}
+
+          {/* Bills & recurring calendar — what's hitting this month and when */}
+          {billCalendar && (
+            <Card
+              title="Bills calendar"
+              action={
+                <a href="/budget/bills" className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]">
+                  manage bills →
+                </a>
+              }
+            >
+              <BillsCalendar calendar={billCalendar} todayIso={todayIso} />
+            </Card>
           )}
 
           {/* Goals summary — read-only mini view of /accounts */}

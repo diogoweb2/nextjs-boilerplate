@@ -53,6 +53,7 @@ export const FEATURE_INDEX: FeatureEntry[] = [
   { label: 'Overview', page: 'Overview', href: '/', keywords: ['dashboard', 'home'] },
   { label: 'Net trajectory (Month)', page: 'Overview', href: '/#net-trajectory-month', keywords: ['burndown', 'pace'] },
   { label: 'Net trajectory (Year)', page: 'Overview', href: '/#net-trajectory-year', keywords: ['cumulative', 'target', 'december'] },
+  { label: 'Bills calendar', page: 'Overview', href: '/#bills-calendar', keywords: ['recurring', 'due', 'payments', 'subscriptions', 'mortgage', 'payday', 'month grid'] },
   { label: 'Goals summary', page: 'Overview', href: '/#goals', keywords: ['savings'] },
   { label: 'Top insights', page: 'Overview', href: '/', keywords: ['cards', 'highlights'] },
   { label: 'Import a statement', page: 'Manage › Import', href: '/manage/import#import-a-statement', keywords: ['upload', 'csv', 'sync'] },

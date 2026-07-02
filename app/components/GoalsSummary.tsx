@@ -47,6 +47,14 @@ function GoalRow({ goal }: { goal: GoalView }) {
 
   const value = isNetZero && goal.netZero && goal.netZero.value >= -0.005 ? 0 : goal.value
 
+  // For a savings goal with a target date, how much extra to put in this month
+  // to stay on schedule = the on-time monthly need above your learned pace.
+  const pace = goal.targetPace
+  const extra =
+    !isMortgage && !isNetZero && pace && pace.monthsLeft > 0
+      ? Math.max(0, round2(pace.neededPerMonth - (pace.currentPace ?? 0)))
+      : 0
+
   return (
     <li className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
       <span
@@ -64,6 +72,11 @@ function GoalRow({ goal }: { goal: GoalView }) {
         ) : (
           <p className="mt-0.5 truncate text-xs text-[var(--muted)]">{goal.milestone}</p>
         )}
+        {extra > 0 && (
+          <p className="mt-1 truncate text-xs font-medium text-[var(--accent)]">
+            +{formatCurrency(extra)} this month to stay on track
+          </p>
+        )}
       </div>
       <div className="flex shrink-0 flex-col items-end gap-1 text-right">
         <span className="text-sm font-semibold tabular-nums">{formatCurrency(value)}</span>
@@ -71,6 +84,10 @@ function GoalRow({ goal }: { goal: GoalView }) {
       </div>
     </li>
   )
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100
 }
 
 function Badge({ ok, children }: { ok: boolean; children: React.ReactNode }) {

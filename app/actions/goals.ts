@@ -27,6 +27,7 @@ import {
   milestoneMessage,
   type EntryLite,
   type TargetPace,
+  type SeriesPoint,
 } from '@/app/lib/goals'
 import {
   projectMortgage,
@@ -104,7 +105,7 @@ export type GoalView = {
   /** Savings with target amount + date only: on-pace status and needed $/mo. */
   targetPace: TargetPace | null
   milestone: string
-  series: { ym: string; value: number }[]
+  series: SeriesPoint[]
   mortgage: MortgageProjection | null
   netZero: NetZeroView | null
 }
@@ -283,7 +284,7 @@ export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: stri
       projectedCompletionYm: projectedCompletionYm(list, target, asOfYm),
       targetPace: targetPace(list, target, g.targetDate, asOfYm),
       milestone: milestoneMessage(pct),
-      series: valueSeries(list, asOfYm),
+      series: valueSeries(list, asOfYm, target, g.targetDate),
       mortgage: null,
       netZero: null,
     }
@@ -303,7 +304,10 @@ export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: stri
   let lastMonth = 0
   const thisMonthByGoal = new Map<number, number>()
   for (const e of entries) {
-    if (!savingsGoalIds.has(e.goalId) || e.kind !== 'contribution' || Number(e.amount) <= 0) continue
+    // Net contributions: a same-month withdrawal (e.g. moving money back to
+    // net-zero) is a negative entry that should cancel out what was put in, so the
+    // "invested this month" figure reflects the true net for the month.
+    if (!savingsGoalIds.has(e.goalId) || e.kind !== 'contribution') continue
     const ym = new Date(e.createdAt).toISOString().slice(0, 7)
     if (ym === nowYm) {
       thisMonth += Number(e.amount)
@@ -777,11 +781,13 @@ export async function addContribution(input: {
 
   let transactionId: number | null = null
   if (input.asExpense && amount > 0) {
-    const merchantId = await merchantIdByName('Investment (iTrade)', 'Investment')
+    // Dedicated payee (still category Investment, which Savings/50-30-20 key off)
+    // so synthetic contributions don't pollute the real iTrade payee's history.
+    const merchantId = await merchantIdByName('Goal Funding', 'Investment')
     const [txn] = await db
       .insert(transactions)
       .values({
-        source: 'scotia',
+        source: 'manual',
         flow: 'expense',
         externalId: `goal:${goal.id}:manual:${randomUUID().slice(0, 8)}`,
         txnDate: occurredAt,
@@ -844,7 +850,7 @@ export async function spendFromGoal(input: {
     const [txn] = await db
       .insert(transactions)
       .values({
-        source: 'scotia',
+        source: 'manual',
         flow: 'income',
         categoryId,
         externalId: `goal:${goal.id}:spend:${randomUUID().slice(0, 8)}`,
@@ -937,6 +943,20 @@ export async function transferBetweenGoals(input: {
   note?: string
 }): Promise<void> {
   await requireAuth()
+  // Moving "to net-zero" isn't a goal-to-goal ledger move — net-zero has no
+  // balance, its value is the year's cumulative net. The mirror of allocating to a
+  // goal (a synthetic expense that lowers net, §10b) is a synthetic income that
+  // raises net, i.e. spending the source back out as income. So route it there.
+  const [dest] = await db.select().from(goals).where(eq(goals.id, input.toGoalId)).limit(1)
+  if (dest?.kind === 'netzero') {
+    await spendFromGoal({
+      goalId: input.fromGoalId,
+      amount: input.amount,
+      asIncome: true,
+      note: input.note?.trim() || `Returned to ${dest.name}`,
+    })
+    return
+  }
   await moveBetweenGoals(
     input.fromGoalId,
     input.toGoalId,

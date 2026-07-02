@@ -125,7 +125,7 @@ function merchantMonthlyTotals(all: EnrichedTxn[], merchantId: number): Map<stri
 }
 
 /** Median gap (in months) between consecutive occurrence months. */
-function inferGap(occ: string[]): number {
+export function inferGap(occ: string[]): number {
   if (occ.length < 2) return 12
   const diffs: number[] = []
   for (let i = 1; i < occ.length; i++) diffs.push(monthDiff(occ[i - 1], occ[i]))

@@ -21,6 +21,7 @@ import type { EmergencyFundData } from '@/app/actions/emergency'
 import type { CashflowPlan } from '@/app/actions/cashflow'
 import type { ScheduledEvent } from '@/app/lib/cashflow'
 import type { MortgageProjection } from '@/app/lib/mortgage'
+import type { SeriesPoint } from '@/app/lib/goals'
 import type { ReportSeries } from '@/db/schema'
 import { CATEGORY_SEED } from '@/app/lib/seed-data'
 
@@ -56,6 +57,11 @@ function addMonths(ym: string, delta: number): string {
   const [y, m] = ym.split('-').map(Number)
   const total = y * 12 + (m - 1) + delta
   return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, '0')}`
+}
+function monthsBetween(a: string, b: string): number {
+  const [ay, am] = a.split('-').map(Number)
+  const [by, bm] = b.split('-').map(Number)
+  return by * 12 + (bm - 1) - (ay * 12 + (am - 1))
 }
 function monthList(): string[] {
   const out: string[] = []
@@ -565,15 +571,40 @@ export function demoCustomReports(): { id: number; name: string; pinned: boolean
 // ---------------------------------------------------------------------------
 // Goals (hand-built final views — avoids re-deriving the full goals math)
 // ---------------------------------------------------------------------------
-function savingsSeries(months: number, end: number): { ym: string; value: number }[] {
-  const out: { ym: string; value: number }[] = []
+function savingsSeries(
+  months: number,
+  end: number,
+  target?: number,
+  targetDate?: string,
+): SeriesPoint[] {
+  const startYm = addMonths(ANCHOR_YM, -months)
+  const hasTarget = target !== undefined && target > 0
+  const targetYm = targetDate ? targetDate.slice(0, 7) : null
+  const span = targetYm ? monthsBetween(startYm, targetYm) : 0
+  const dated = hasTarget && targetYm !== null && span > 0
+
+  // Build actual (rising to `end` at the anchor).
+  const actual: { ym: string; value: number }[] = []
   let v = Math.max(0, end - months * (end / (months + 2)))
   for (let i = months; i >= 0; i--) {
-    const ym = addMonths(ANCHOR_YM, -i)
-    out.push({ ym, value: Math.round(v) })
+    actual.push({ ym: addMonths(ANCHOR_YM, -i), value: Math.round(v) })
     v += (end - v) / Math.max(1, i)
   }
-  out[out.length - 1] = { ym: ANCHOR_YM, value: end }
+  actual[actual.length - 1] = { ym: ANCHOR_YM, value: end }
+
+  const idealStart = actual[0].value
+  const endYm = dated && monthsBetween(ANCHOR_YM, targetYm!) > 0 ? targetYm! : ANCHOR_YM
+  const out: SeriesPoint[] = []
+  for (let ym = startYm; monthsBetween(ym, endYm) >= 0; ym = addMonths(ym, 1)) {
+    const hit = actual.find((p) => p.ym === ym)
+    const isFuture = monthsBetween(ym, ANCHOR_YM) < 0
+    const ideal = dated
+      ? Math.round(idealStart + (target! - idealStart) * Math.min(1, monthsBetween(startYm, ym) / span))
+      : hasTarget
+        ? target!
+        : null
+    out.push({ ym, value: isFuture ? null : hit ? hit.value : null, ideal })
+  }
   return out
 }
 
@@ -639,7 +670,7 @@ export function demoGoalsData(): {
       projectedCompletionYm: '2026-11',
       targetPace: { monthsLeft: 6, neededPerMonth: 358.33, currentPace: 385, onTrack: true },
       milestone: 'Over halfway there — keep it up! 🎯',
-      series: savingsSeries(10, 3850),
+      series: savingsSeries(10, 3850, 6000, '2026-12-31'),
       mortgage: null,
       netZero: null,
     },
@@ -666,7 +697,7 @@ export function demoGoalsData(): {
       projectedCompletionYm: '2027-08',
       targetPace: null,
       milestone: 'Solid cushion building. 💪',
-      series: savingsSeries(18, 12400),
+      series: savingsSeries(18, 12400, 20000),
       mortgage: null,
       netZero: null,
     },

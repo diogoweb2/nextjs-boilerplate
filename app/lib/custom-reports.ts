@@ -17,8 +17,11 @@ function addMonths(ym: string, delta: number): string {
 }
 
 function anchorMonth(txns: EnrichedTxn[]): string | null {
-  if (txns.length === 0) return null
-  return txns.reduce((max, t) => (t.txnDate > max ? t.txnDate : max), txns[0].txnDate).slice(0, 7)
+  // Synthetic goal rows don't prove a month has real data (see analytics.ts).
+  const real = txns.filter((t) => !t.synthetic)
+  const pool = real.length > 0 ? real : txns
+  if (pool.length === 0) return null
+  return pool.reduce((max, t) => (t.txnDate > max ? t.txnDate : max), pool[0].txnDate).slice(0, 7)
 }
 
 function availableMonths(txns: EnrichedTxn[]): string[] {

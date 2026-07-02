@@ -67,8 +67,11 @@ function addMonths(ym: string, delta: number): string {
   return `${ny}-${String(nm).padStart(2, '0')}`
 }
 function anchorMonth(txns: EnrichedTxn[]): string | null {
-  if (txns.length === 0) return null
-  return txns.reduce((max, t) => (t.txnDate > max ? t.txnDate : max), txns[0].txnDate).slice(0, 7)
+  // Synthetic goal rows don't prove a month has real data (see analytics.ts).
+  const real = txns.filter((t) => !t.synthetic)
+  const pool = real.length > 0 ? real : txns
+  if (pool.length === 0) return null
+  return pool.reduce((max, t) => (t.txnDate > max ? t.txnDate : max), pool[0].txnDate).slice(0, 7)
 }
 function sum(ns: number[]): number {
   return ns.reduce((a, b) => a + b, 0)
@@ -528,7 +531,7 @@ export function computeBudget(
   // extrapolation; near month-end → ≈ actual spend).
   let anchorAsOfDay = 1
   for (const t of all) {
-    if (monthKey(t.txnDate) !== anchor) continue
+    if (t.synthetic || monthKey(t.txnDate) !== anchor) continue
     const day = Number(t.txnDate.slice(8, 10))
     if (day > anchorAsOfDay) anchorAsOfDay = day
   }

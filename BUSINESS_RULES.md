@@ -15,7 +15,15 @@ The user uploads four CSV exports: two **credit cards** (Master, Amex) and two *
 (Tangerine chequing, Scotia chequing). Source is auto-detected from the header row
 (`app/lib/csv.ts` → `detectSource`), and each upload button passes a hint that the server
 validates (mismatch = clear error). Type alias `ImportSource = 'master' | 'amex' |
-'tangerine' | 'scotia'`.
+'tangerine' | 'scotia' | 'manual'`.
+
+**`manual`** is not an import source: it marks **app-generated synthetic rows** — the goal
+funding/withdrawal ledger offsets (§10b, externalId `goal:…`, payees `Goal Funding` /
+`Goal Withdrawal`). These belong to no bank or card account, so every source-whitelisted
+consumer (bank balances / emergency fund, cashflow schedule, per-account filters, card
+outstanding) drops them structurally; the older `externalId NOT LIKE 'goal:%'` exclusions
+remain as belt-and-suspenders. `manual` rows still flow through `loadAllFlows`, so
+budget / analytics / 50-30-20 semantics are unchanged.
 
 ### Master card (RBC-style)
 Header includes `Merchant Category Description` and `Reference Number`.
@@ -256,7 +264,12 @@ as a per-row badge plus a person filter.
 
 ## 5. Periods
 
-- The **anchor** is the latest transaction month present in the data.
+- The **anchor** is the latest transaction month present in the data — **imported rows only**.
+  Synthetic goal-ledger transactions (`external_id` starting `goal:` — contribution expenses
+  and goal-spend income offsets, §10b) are dated by owner action, not by a statement, so they
+  never advance the anchor (nor the anchor month's "as of" day). Otherwise a goal action on
+  e.g. July 2 would flip the app into July before any July statement is imported, marking June
+  complete and inflating the monthly cap.
 - The period selector chooses `months ∈ {1, 3, 6, 12}` (default 3). The **current period** is
   the inclusive window `[anchor-(months-1), anchor]`; the **previous period** is the N months
   immediately before it (used for deltas / "what changed").
@@ -728,6 +741,15 @@ over").
   cleared). So it self-manages forever after the first creation.
 - The value is computed, not from `goal_entries` — there's no Add money / Adjust; the card is
   read-only with a link to `/budget` to plan the gap.
+- **Moving money back to net-zero** (e.g. you over-funded Insurance and want to undo it): the
+  net-zero goal appears as a destination in a savings goal's "Move money" panel. Since net-zero has
+  no balance, `transferBetweenGoals` detects a `netzero` destination and instead spends the source
+  back out via `spendFromGoal({ asIncome: true })` — a synthetic income (the mirror of §10b's
+  synthetic expense) that raises net and thus moves net-zero toward zero. No `goal_transfers` row,
+  no borrow option (net-zero isn't owed back). Because it's a **negative `contribution`** entry (not a
+  `transfer`), a same-month move-back **nets against "invested this month"** — the Goals hero and the
+  per-goal breakdown drop by the amount returned (the monthly figure sums signed contributions, so
+  withdrawals in the same calendar month cancel the matching inflow).
 
 ### Notifications (immediate, per goal)
 When a goal with `notify` on changes value (`addContribution`, `spendFromGoal`, `adjustValue`,
@@ -758,7 +780,9 @@ exactly. Net-Zero is the implicit remainder.
   % to Net-Zero = *do nothing*. The box shows Net-Zero as the auto-computed remainder (`100 − Σ`).
 - **Carving a slice to another goal must reduce net**, or it double-counts against Net-Zero. So each
   carved slice is recorded via `addContribution({ asExpense: true })` (§10) — a synthetic
-  `Investment`/Savings contribution (externalId `goal:…`, excluded from the Emergency Fund, counted
+  `Investment`/Savings contribution booked to the dedicated **`Goal Funding`** payee (not the real
+  `Investment (iTrade)` payee, whose history must stay bank-imports only; the withdrawal mirror is
+  `Goal Withdrawal`) (externalId `goal:…`, excluded from the Emergency Fund, counted
   as Savings in 50/30/20). It lowers the month's net by exactly the carved amount, leaving the rest
   to keep paying down the deficit. A +$2,000 month split 80/10/10 → **no write** for the $1,600
   Net-Zero share + two **$200** Investment/Savings contributions. Total wealth position unchanged.
@@ -979,7 +1003,7 @@ Run after pulling this change: `npm run db:push` (adds `cashflow_config`).
 Answers "how much did one real-world thing cost?" — a trip ("UK 2026"), a renovation, a
 wedding — by **grouping arbitrary transactions**, independent of categories. State is two
 tables (`db/schema.ts`): `projects` (name, emoji, color, optional `cover_image_url`,
-`start_date`/`end_date`, notes, sortOrder, archived) and `project_transactions` (a
+`start_date`/`end_date`, notes, sortOrder, archived, `dashboard_dismissed`) and `project_transactions` (a
 many-to-many join, unique on `(project, transaction)`, cascade on either delete). Logic/loaders
 + actions are in `app/actions/projects.ts`; pages `app/projects/page.tsx` (grid of cards) and
 `app/projects/[id]/page.tsx` (detail); UI `ProjectsManager.tsx` + `ProjectDetail.tsx`.
@@ -1006,6 +1030,18 @@ many-to-many join, unique on `(project, transaction)`, cascade on either delete)
   (per-row or "Dismiss all"). Dismiss writes a `dismissed = true` tombstone row so the txn never
   reappears here; Adding it later flips it back to a real member. This is the manual safety net for
   the country-data gap below.
+
+### Dashboard reminder
+
+A dated project surfaces on the **Overview** (`app/page.tsx`, `ProjectReminderBanner`) while its
+window is near or current: from **21 days before `start_date`** through **10 days after `end_date`**
+(`end_date` defaults to `start_date`). `loadDashboardProjects` classifies each as **upcoming**
+(starts in the future), **active** (in the window), or **wrapup** (ended, in the +10-day tail), and
+shows the member count / total-so-far. The owner can **Dismiss** one **only once it is over** (the
+`wrapup` phase — the button is hidden while upcoming/active, and the action rejects otherwise), which
+sets `projects.dashboard_dismissed = true` (persisted, cross-device) so it never reappears;
+otherwise it clears on its own once the +10-day tail elapses. Undated projects and the demo never
+appear.
 
 ### Auto-fill (trip mode)
 
@@ -1461,3 +1497,47 @@ Because next year's renewal is a different `renewal_ym`, the dismissal is not a 
 warns again each cycle. Load/dismiss server actions live in `app/actions/subscriptions.ts`
 (`loadRenewalDismissals`, `dismissRenewalWarning`); the banner is `RenewalWarningBanner`. Demo
 sessions skip it. This warning is dashboard-only — no digest push.
+
+## 19. Bills & recurring calendar (`app/lib/bill-calendar.ts`)
+
+A dashboard month-calendar (Overview, above the Goals summary) answering *"what's hitting this
+month and when?"*. It is a **new lens over existing data** — no new bill declarations. Pure &
+db-free like projection.ts; the dashboard passes the selected month, so the month dropdown moves
+the calendar too. Desktop renders a 7-column month grid; mobile renders an agenda list.
+
+**What counts as a bill (in order, deduped by merchant):**
+1. **Fixed-category merchants** (`FIXED_CATEGORIES` = Home: Mortgage, Property Tax, Hydro,
+   Water…) — each merchant with ≥2 active months becomes its own bill with a synthetic rule
+   (cadence from the median month-gap; amount mode `seasonal` when monthly with CV > 0.25, else
+   `average` — the same heuristics as rule suggestions). Merchants that also have a real
+   projection rule are skipped (the rule wins).
+2. **Every enabled projection rule** (§8b) — insurance, phone, subscriptions, and manual
+   E-Transfer bills (trailer storage) once the owner confirms them as rules on Budget › Bills.
+3. **"Credit card payment" pseudo-bill** (`billKey: 'cc'`): bank-side `is_payment` rows toward
+   tracked cards are excluded from `loadAllFlows`, so `loadCcPaymentHistory` (app/actions/bills.ts)
+   feeds them in separately. Needs ≥2 past months of payments to project.
+
+**Day & amount.** The exact due date isn't knowable from statements, so each bill sits on its
+**most common posting day-of-month** (mode over the last 12 occurrences, ties to the most
+recent). Amounts come from the projection engine (`projectedAmountForMonth`); once the real
+transaction posts, the **actual total and actual day replace the projection**.
+
+**Status per bill:** `paid` (actual posted this month) · `due` (expected day still ahead of
+today) · `missed` (expected day passed, nothing posted — the per-bill "didn't appear" check).
+Header shows Σ paid and Σ still-to-come — **excluding the CC payment pseudo-bill**, which stays
+on the grid but repays card spending (including card-billed bills above), so counting it would
+double-count. Each bill deep-links to its merchant's transactions.
+
+**Paydays.** Actual income posts are marked (💰) on their real days; monthly income merchants
+(median gap = 1, ≥2 months) not yet posted are projected onto their most common day. Income in
+`EXCLUDED_INCOME_CATEGORIES` (Insurance, Dental — claim payouts) or credited against an
+expense-kind category (a category credit) is never a payday: reimbursements are unpredictable,
+so they don't appear on the calendar at all.
+
+**Due-soon banner (`BillReminderBanner`, real calendar time).** A top-of-dashboard warning for
+bills with status `due` within `BILL_WARN_DAYS` (2) of today, scanning the current **and next**
+month so a bill due on the 1st warns from the 29th/30th. It clears on its own when the payment
+posts. **Dismissal (`bill_reminder_dismissals`)** is DB-persisted (cross-device): one row per
+`bill_key` (`m:<merchantId>` or `cc`) storing the dismissed cycle (`due_ym`) — next month's cycle
+warns again. Server actions in `app/actions/bills.ts`. Demo sessions show the calendar but skip
+the banner. Dashboard-only — no digest push.

@@ -39,10 +39,20 @@ export function completedReportMonth(anchor: string | null | undefined): string 
 }
 
 /**
+ * The Year-in-Review launched mid-2026, so 2025 was only ever partially tracked
+ * and isn't worth a rewind. The first year we recap is 2026 (surfaced once
+ * 2027 data lands). Older completed years are suppressed everywhere.
+ */
+export const FIRST_YEAR_REPORT_YEAR = 2026
+
+/**
  * The most-recently-completed YEAR given the anchor: the year before the
  * anchor's, complete by the same argument as months — a transaction dated in the
- * new year proves every prior-year charge has posted. Null when no anchor yet.
+ * new year proves every prior-year charge has posted. Null when no anchor yet,
+ * or when the completed year predates {@link FIRST_YEAR_REPORT_YEAR}.
  */
 export function completedYearReportYear(anchor: string | null | undefined): string | null {
-  return anchor ? String(Number(anchor.slice(0, 4)) - 1) : null
+  if (!anchor) return null
+  const year = Number(anchor.slice(0, 4)) - 1
+  return year >= FIRST_YEAR_REPORT_YEAR ? String(year) : null
 }
