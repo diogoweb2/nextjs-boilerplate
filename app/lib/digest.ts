@@ -35,9 +35,10 @@ import { formatCurrency } from '@/app/lib/format'
 import { SYNC_SOURCES, syncStale, mostRecentIso } from '@/app/lib/sync'
 import { pushConfigured, sendPushToAll } from '@/app/lib/push'
 import { buildMonthReport, buildReportNotification } from '@/app/lib/monthReport'
+import { buildYearReport, buildYearReportNotification } from '@/app/lib/yearReport'
 import type { PriceAlert } from '@/app/lib/subscription-watch'
 import { computePaceAlerts, type PaceAlert as CategoryPaceAlert } from '@/app/lib/pace-alerts'
-import { completedReportMonth } from '@/app/lib/reportSchedule'
+import { completedReportMonth, completedYearReportYear } from '@/app/lib/reportSchedule'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -293,6 +294,7 @@ export async function buildDigest(now: number = Date.now(), failedSources: strin
 
 type PushResult = { sent: number; failed: number; skipped?: boolean }
 export type DigestRunResult =
+  | { yearReport: true; year: string; note: { title: string; body: string; url?: string }; push: PushResult }
   | { monthReport: true; ym: string; note: { title: string; body: string; url?: string }; push: PushResult }
   | (Digest & { push: PushResult })
 
@@ -357,6 +359,30 @@ export async function runDailyDigestJob(
     // row caps it.
     const flows = await loadAllFlows()
     const anchor = anchorMonth(flows.filter((t) => t.flow === 'expense'))
+
+    // Year in Review (§B1): once new-year data lands, the prior year is final —
+    // push its review first (the "special edition" outranks the December recap;
+    // that recap goes out on the next run since this one returns early). Dedup
+    // reuses month_report_pushes with a bare-YYYY key, which can never collide
+    // with a YYYY-MM month row.
+    const dueYear = completedYearReportYear(anchor)
+    if (dueYear && availableMonths(flows).some((m) => m.slice(0, 4) === dueYear) && pushConfigured()) {
+      const claimedYear = await db
+        .insert(monthReportPushes)
+        .values({ ym: dueYear })
+        .onConflictDoNothing()
+        .returning()
+      if (claimedYear.length > 0) {
+        const { report } = await buildYearReport(dueYear)
+        if (report) {
+          const note = buildYearReportNotification(report)
+          const push = await sendPushToAll({ title: note.title, body: note.body, url: note.url })
+          await recordDigestRun('ok')
+          return { yearReport: true, year: dueYear, note, push }
+        }
+      }
+    }
+
     const ym = completedReportMonth(anchor)
     if (ym && availableMonths(flows).includes(ym)) {
       const { report } = await buildMonthReport(ym)

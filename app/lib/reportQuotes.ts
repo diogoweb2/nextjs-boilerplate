@@ -118,3 +118,13 @@ export function quoteForMonth(ym: string): Quote {
   const idx = (y * 12 + (m - 1)) % QUOTES.length
   return QUOTES[idx]
 }
+
+/**
+ * Deterministic quote for a whole year (the Year in Review). Offset by a prime
+ * stride so it never lands on any of that year's twelve monthly quotes.
+ */
+export function quoteForYear(year: number): Quote {
+  if (QUOTES.length === 0) return { text: '' }
+  const idx = (year * 37 + 11) % QUOTES.length
+  return QUOTES[idx]
+}

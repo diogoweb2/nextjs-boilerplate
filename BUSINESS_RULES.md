@@ -1232,6 +1232,50 @@ cleared. Opening the recap (`ReportClient` writes the key) **or** tapping Dismis
 state is **per device**, not shared via the db. Read with `useSyncExternalStore` (server snapshot
 `null`) so there's no hydration mismatch.
 
+## 15b. Year in Review (`/report/year`)
+
+The annual "special edition" of the monthly recap (§15, consultant report §B1): same 80s theme,
+fully deterministic, built for the dinner-table reveal. Engine: `app/lib/yearReport.ts`
+(`buildYearReport`), page `app/report/year/page.tsx` + `YearReportClient.tsx` (reuses
+`report-theme.css`). Default year = the most recent **completed** year (strictly before the anchor's
+year); any year with data can be viewed via `?year=YYYY` — the in-progress year renders with a
+"YTD, in progress" caveat and its anchor month excluded from best/worst-month picks.
+
+### What it shows (for year `Y`)
+- **Grade F→A+** (`gradeYear`) — five signals × weights (`YEAR_WEIGHTS`), same `letterFor` ladder
+  as months: **year in the black** (25, scaled by `YEAR_NET_LEVEL_SCALE` when negative), **net vs
+  last year** (25, `YEAR_NET_SWING_SCALE`, 0.5 neutral when no prior year), **moved to goals vs last
+  year** (20, same ladder as the month rubric), **discretionary spend YoY** (15), **consistency**
+  (15, share of settled months net-positive).
+- **Money in / out / net** — `netOverRange` semantics summed over the calendar year, each with a
+  YoY delta when the prior year has data.
+- **The twelve rounds** — a per-month net bar strip (each bar deep-links to that month's recap),
+  best month, toughest month, months in the black.
+- **Category wins/slips** — top-3 discretionary YoY drops and rises (year-level version of the
+  month deltas; same `DISCRETIONARY_EXCLUDE`, goal-spend credits netted out).
+- **Top 10 merchants** (deep-link to filtered transactions), **biggest single splurge**
+  (`isExcludedFromBiggest` applies), **subscriptions total** (`isRecurring` purchases),
+  **no-spend days** (days through the last data day of the year with zero expense charges).
+- **Money moved** — goal contributions in `Y` (savings+mortgage), the mortgage-only slice
+  ("principal killed"), and TFSA / RESP contributions (`registered_contributions` where
+  kind='contribution', grouped by account kind). Demo sessions report $0 for all ledger-backed
+  figures (same guard as the month recap).
+- **Net worth** — end-of-`Y` value (anchor month when in progress) and the change vs end of `Y−1`.
+- Deterministic **quote of the year** (`quoteForYear`, prime-stride so it never collides with that
+  year's monthly quotes) and a share one-liner.
+
+### When a year is "done", push & reminder
+Same posting argument as months: a transaction dated in the **new year** proves every prior-year
+charge has posted, so `completedYearReportYear(anchor)` = the year before the anchor's
+(`app/lib/reportSchedule.ts`). The daily digest job (§15) checks the year **before** the month
+recap: on the first run after new-year data lands it pushes `buildYearReportNotification(...)`
+(url `/report/year?year=YYYY`) and returns early (the December recap then goes out on the next
+run). Idempotency reuses `month_report_pushes` with a **bare-YYYY key** — a year key can never
+collide with a YYYY-MM month key. The dashboard banner (`YearReportReminder.tsx`) mirrors
+`ReportReminder`: the due year is computed server-side, and "seen" lives in
+`localStorage[yearReportReminderSeen]` (`YEAR_REPORT_SEEN_KEY`) — **per device**, cleared by opening
+the review or tapping Dismiss.
+
 ## 17. Cash-flow Sankey (`/reports/cashflow`)
 
 A Monarch-style Sankey on the Reports tab: **income sources → one central "Income" node →

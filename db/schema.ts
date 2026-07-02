@@ -553,6 +553,8 @@ export const digestRuns = pgTable('digest_runs', {
  * Idempotency guard for the monthly-report push. One row per reported month
  * (YYYY-MM); the digest endpoint inserts-if-absent before pushing so the daily job
  * firing repeatedly through the post-settle window can't double-send the recap.
+ * Also guards the Year-in-Review push with a bare-YYYY key (app/lib/digest.ts) —
+ * a year key can never collide with a month key, so the two share the table.
  */
 export const monthReportPushes = pgTable('month_report_pushes', {
   ym: text('ym').primaryKey(),

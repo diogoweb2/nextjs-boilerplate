@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server'
 import { ingestTokenOk } from '@/app/lib/apiToken'
 import { buildDigest, runDailyDigestJob } from '@/app/lib/digest'
 import { buildMonthReport } from '@/app/lib/monthReport'
+import { buildYearReport } from '@/app/lib/yearReport'
 
 /**
  * Token-authed daily-digest endpoint for the budget-sync runner.
@@ -36,9 +37,14 @@ export async function GET(request: NextRequest): Promise<Response> {
   const problem = authProblem(request)
   if (problem) return problem
 
-  const month = new URL(request.url).searchParams.get('month')
+  const params = new URL(request.url).searchParams
+  const month = params.get('month')
   if (month) {
     return Response.json(await buildMonthReport(month), { status: 200 })
+  }
+  const year = params.get('year')
+  if (year) {
+    return Response.json(await buildYearReport(year), { status: 200 })
   }
 
   const digest = await buildDigest()

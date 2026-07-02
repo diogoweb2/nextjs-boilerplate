@@ -103,6 +103,7 @@ export const FEATURE_INDEX: FeatureEntry[] = [
 
   // ── Recap ───────────────────────────────────────────────────────────────
   { label: 'Monthly recap', page: 'Recap', href: '/report', keywords: ['80s report', 'month report', 'grade', 'summary'] },
+  { label: 'Year in Review', page: 'Recap', href: '/report/year', keywords: ['annual report', 'yearly', 'wrapped', 'rewind', 'year report', 'grade'] },
 
   // ── Manage ──────────────────────────────────────────────────────────────
   { label: 'Categories', page: 'Manage › Categories', href: '/manage', keywords: ['edit', 'colors', 'buckets', 'kind'] },

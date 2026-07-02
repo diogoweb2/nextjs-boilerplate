@@ -18,6 +18,9 @@
 /** localStorage key holding the YYYY-MM the owner has already seen/dismissed. Device-local. */
 export const REPORT_SEEN_KEY = 'reportReminderSeen'
 
+/** localStorage key holding the YYYY Year-in-Review the owner has seen/dismissed. Device-local. */
+export const YEAR_REPORT_SEEN_KEY = 'yearReportReminderSeen'
+
 /** The month immediately before `ym` (YYYY-MM), handling year rollover. Pure. */
 export function monthBefore(ym: string): string {
   const [y, m] = ym.split('-').map(Number)
@@ -33,4 +36,13 @@ export function monthBefore(ym: string): string {
  */
 export function completedReportMonth(anchor: string | null | undefined): string | null {
   return anchor ? monthBefore(anchor) : null
+}
+
+/**
+ * The most-recently-completed YEAR given the anchor: the year before the
+ * anchor's, complete by the same argument as months — a transaction dated in the
+ * new year proves every prior-year charge has posted. Null when no anchor yet.
+ */
+export function completedYearReportYear(anchor: string | null | undefined): string | null {
+  return anchor ? String(Number(anchor.slice(0, 4)) - 1) : null
 }

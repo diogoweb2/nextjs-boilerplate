@@ -1,0 +1,133 @@
+/*
+ * 90s theme for the Year in Review — Memphis-pattern / MTV-era: flat bold
+ * borders, sticker-style offset shadows and a confetti backdrop, vs the monthly
+ * recap's 80s synthwave neon. Scoped under .report-90s so it never leaks; it
+ * redefines the same class names + CSS vars the recap components use, so the
+ * markup patterns stay interchangeable.
+ */
+.report-90s {
+  /* Same var names as the 80s theme, remapped to a 90s palette. */
+  --neon-pink: #f0459c; /* hot magenta */
+  --neon-cyan: #2dd4bf; /* teal */
+  --neon-purple: #8b5cf6; /* grape */
+  --neon-yellow: #fbbf24; /* sunflower */
+  --lime: #a3e635;
+  --orange: #fb923c;
+  --ink: #f6fbf9;
+  --ink-dim: #96b8b1;
+  min-height: 100vh;
+  color: var(--ink);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  background:
+    radial-gradient(110% 70% at 50% 0%, rgba(45, 212, 191, 0.16) 0%, rgba(6, 18, 26, 0) 60%),
+    linear-gradient(180deg, #0d1f2d 0%, #0a1622 55%, #060e18 100%);
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* Memphis confetti backdrop: scattered dots + diagonal squiggle stripes. */
+.report-90s::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    radial-gradient(rgba(240, 69, 156, 0.5) 2px, transparent 2.5px),
+    radial-gradient(rgba(45, 212, 191, 0.45) 2px, transparent 2.5px),
+    radial-gradient(rgba(251, 191, 36, 0.4) 1.6px, transparent 2.1px),
+    radial-gradient(rgba(163, 230, 53, 0.35) 1.6px, transparent 2.1px),
+    repeating-linear-gradient(
+      -45deg,
+      transparent 0 34px,
+      rgba(139, 92, 246, 0.12) 34px 38px,
+      transparent 38px 72px,
+      rgba(45, 212, 191, 0.09) 72px 76px
+    );
+  background-size:
+    140px 160px,
+    180px 150px,
+    120px 130px,
+    160px 170px,
+    auto;
+  background-position:
+    10px 20px,
+    70px 90px,
+    40px 60px,
+    110px 30px,
+    0 0;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.85), rgba(0, 0, 0, 0.35) 55%, rgba(0, 0, 0, 0.7));
+  pointer-events: none;
+  z-index: 0;
+}
+
+.report-90s > * { position: relative; z-index: 1; }
+
+.report-90s .report-neon-pink { color: var(--neon-pink); }
+.report-90s .report-neon-cyan { color: var(--neon-cyan); }
+.report-90s .report-neon-yellow { color: var(--neon-yellow); }
+
+/* Chunky block-letter title: lime → teal → magenta, slightly tilted like a sticker. */
+.report-90s .report-title {
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: linear-gradient(100deg, var(--lime) 0%, var(--neon-cyan) 45%, var(--neon-pink) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  transform: rotate(-1.5deg);
+  filter: drop-shadow(3px 3px 0 rgba(139, 92, 246, 0.55));
+}
+
+/* Flat bold border + hard offset shadow instead of neon glow. */
+.report-90s .report-card {
+  border: 2px solid rgba(45, 212, 191, 0.55);
+  border-radius: 12px;
+  background: linear-gradient(160deg, rgba(16, 42, 54, 0.88), rgba(9, 24, 36, 0.88));
+  box-shadow: 5px 5px 0 rgba(240, 69, 156, 0.28);
+}
+
+.report-90s .report-grade {
+  font-weight: 900;
+  line-height: 0.9;
+  background: linear-gradient(180deg, #fff, var(--neon-yellow) 40%, var(--orange) 75%, var(--neon-pink));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(6px 6px 0 rgba(45, 212, 191, 0.45));
+  animation: report90-pop 0.7s cubic-bezier(0.18, 1.4, 0.4, 1) both;
+}
+@keyframes report90-pop {
+  0% { transform: scale(0.2) rotate(8deg); opacity: 0; }
+  70% { transform: scale(1.12) rotate(-2deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0); }
+}
+
+.report-90s .report-rise { animation: report90-rise 0.5s ease both; }
+@keyframes report90-rise {
+  from { transform: translateY(14px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.report-90s .report-chip {
+  border: 2px solid var(--neon-yellow);
+  border-radius: 6px;
+  color: var(--neon-yellow);
+  box-shadow: 3px 3px 0 rgba(251, 191, 36, 0.3);
+}
+
+.report-90s .report-btn {
+  border: 2px solid rgba(45, 212, 191, 0.7);
+  border-radius: 8px;
+  color: var(--neon-cyan);
+  box-shadow: 3px 3px 0 rgba(45, 212, 191, 0.25);
+  transition: background 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+.report-90s .report-btn:hover:not(:disabled) {
+  background: rgba(45, 212, 191, 0.14);
+  box-shadow: 1px 1px 0 rgba(45, 212, 191, 0.25);
+  transform: translate(2px, 2px);
+}
+.report-90s .report-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.report-90s .report-good { color: var(--lime); }
+.report-90s .report-bad { color: var(--neon-pink); }

@@ -35,7 +35,7 @@ import { loadNetWorth } from '@/app/actions/networth'
  * Investment (those are savings transfers, not a budget overrun) — so "best/worst"
  * reflects genuine discretionary effort.
  */
-const DISCRETIONARY_EXCLUDE = new Set([
+export const DISCRETIONARY_EXCLUDE = new Set([
   ...FIXED_CATEGORIES,
   'CC Payment',
   'Cash',
@@ -133,7 +133,7 @@ const NET_LEVEL_SCALE = 2000 // how deep in the red zeroes out the "in the black
 const WEIGHTS = { net: 30, trajectory: 25, goals: 20, discretionary: 15, black: 10 }
 
 /** Composite 0–100 → letter. Each threshold is a named edge for easy retuning. */
-function letterFor(score: number): string {
+export function letterFor(score: number): string {
   if (score >= 95) return 'A+'
   if (score >= 88) return 'A'
   if (score >= 82) return 'A-'

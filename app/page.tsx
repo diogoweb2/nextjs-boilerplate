@@ -32,7 +32,8 @@ import { isDemoSession } from '@/app/lib/demo'
 import { TransferReview } from '@/app/components/TransferReview'
 import { OtherCategoryBanner } from '@/app/components/OtherCategoryBanner'
 import { ReportReminder } from '@/app/components/ReportReminder'
-import { completedReportMonth } from '@/app/lib/reportSchedule'
+import { YearReportReminder } from '@/app/components/YearReportReminder'
+import { completedReportMonth, completedYearReportYear } from '@/app/lib/reportSchedule'
 import { SurplusAllocation } from '@/app/components/SurplusAllocation'
 import { GoalsSummary } from '@/app/components/GoalsSummary'
 import { buildBudgetInsights } from '@/app/lib/dashboard-insights'
@@ -152,6 +153,13 @@ export default async function Home({
   const dueReportMonth = completedReportMonth(anchor)
   const reminderReportMonth =
     dueReportMonth && months_available.includes(dueReportMonth) ? dueReportMonth : null
+  // The just-completed YEAR (the one before the anchor's), shown only if it has
+  // data — the device-local Year-in-Review reminder nags until seen/dismissed.
+  const dueReportYear = completedYearReportYear(anchor)
+  const reminderReportYear =
+    dueReportYear && months_available.some((m) => m.slice(0, 4) === dueReportYear)
+      ? dueReportYear
+      : null
   // Dashboard always shows a single month; default to the current (anchor) month.
   const exactMonth = month ?? anchor
 
@@ -274,6 +282,7 @@ export default async function Home({
         </div>
       </div>
 
+      <YearReportReminder year={reminderReportYear} />
       <ReportReminder month={reminderReportMonth} />
 
       {renewalWarnings.length > 0 && (
