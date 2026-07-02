@@ -1,4 +1,5 @@
 import { NavBar } from '@/app/components/NavBar'
+import { slugifyAnchor } from '@/app/lib/search-index'
 
 /** Page chrome: top + bottom nav with a centered, padded content column. */
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -23,7 +24,12 @@ export function Card({
   className?: string
 }) {
   return (
-    <section className={`card p-4 sm:p-5 ${className}`}>
+    // Titled cards get a stable anchor id so global search can deep-link and
+    // scroll to them (see app/lib/search-index.ts).
+    <section
+      id={title ? slugifyAnchor(title) : undefined}
+      className={`card scroll-mt-20 p-4 sm:p-5 ${className}`}
+    >
       {(title || action) && (
         <div className="mb-4 flex items-center justify-between gap-3">
           {title && <h2 className="text-sm font-semibold text-[var(--foreground)]">{title}</h2>}

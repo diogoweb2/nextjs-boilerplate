@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { logout } from '@/app/actions/auth'
+import { GlobalSearch } from '@/app/components/GlobalSearch'
 
 const LINKS = [
   { href: '/', label: 'Overview', icon: '◎' },
@@ -68,6 +69,8 @@ export function NavBar() {
           <span>Family Budget</span>
         </Link>
 
+        <GlobalSearch variant="desktop" />
+
         <nav className="flex flex-1 flex-col gap-0.5">
           {LINKS.map((l) => (
             <Link
@@ -105,14 +108,17 @@ export function NavBar() {
             </span>
             <span>Family Budget</span>
           </Link>
-          <form action={logout}>
-            <button
-              type="submit"
-              className="rounded-lg px-2 py-1 text-xs font-medium text-[var(--muted)]"
-            >
-              Sign out
-            </button>
-          </form>
+          <div className="flex items-center gap-1">
+            <GlobalSearch variant="mobile" />
+            <form action={logout}>
+              <button
+                type="submit"
+                className="rounded-lg px-2 py-1 text-xs font-medium text-[var(--muted)]"
+              >
+                Sign out
+              </button>
+            </form>
+          </div>
         </div>
       </header>
 
