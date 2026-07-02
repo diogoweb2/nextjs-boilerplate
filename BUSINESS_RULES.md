@@ -1214,6 +1214,36 @@ cleared. Opening the recap (`ReportClient` writes the key) **or** tapping Dismis
 state is **per device**, not shared via the db. Read with `useSyncExternalStore` (server snapshot
 `null`) so there's no hydration mismatch.
 
+## 17. Cash-flow Sankey (`/reports/cashflow`)
+
+A Monarch-style Sankey on the Reports tab: **income sources → one central "Income" node →
+spending categories**, answering "where did the money come from and where did it go?" in one
+picture. Pure math in `app/lib/cashflow-sankey.ts` (`buildCashflowSankey`, fed by
+`loadAllFlows()`); page `app/reports/cashflow/page.tsx`; client UI
+`app/components/CashflowCharts.tsx` (URL-driven range + exclude-special filters, IncomeCharts
+pattern) + the pure-SVG `app/components/charts/SankeyChart.tsx` (hover highlight/dim + floating
+tooltip). **Clicking any node or ribbon opens a detail modal** listing that flow's transactions
+(carried on each `SankeyEndpoint.txns`, biggest first; negative rows = refunds/reimbursements
+netting against it), with a "View in Activity" deep-link for category nodes. The synthetic
+Saved / From-savings nodes have no transactions — the modal instead explains they are the
+income−spend gap for the period. Fully deterministic, read-only
+(no new tables); demo mode works via the existing `loadAllFlows` branch.
+
+- **Window**: `ReportRange` (`1|2|3|6|12|ytd|all`, default **3**), months from `monthsForRange`;
+  or an **exact month** (`?month=YYYY-MM`, validated against `availableMonths`) which overrides
+  the range — picked from an "Exact month…" dropdown next to the range buttons (choosing a range
+  clears it).
+- **Income side** = income-flow rows in **income-kind** categories only, grouped by the Income
+  page's source lines (`incomeSourceOf`, now exported — self/partner salary, Family, Insurance,
+  Benefits, Other). The Goal-Spend/reimbursement bucket is a wash, not income (same base as
+  50/30/20 §8d).
+- **Spending side** = per effective category: purchases + refunds netted, minus reimbursement
+  `categoryCredits`, clamped ≥ 0 (matches `buildOverview` netting). Top 10 categories shown;
+  the rest fold into "Other (N categories)". Transfers & card payments excluded as everywhere.
+- **Balance node**: income > spend → a green **Saved** outflow (`#10b981`); spend > income →
+  an amber **From savings** inflow (`#f59e0b`). So both sides always tie out and the headline
+  stat cards (Income / Spending / Saved-or-Overspent, % of income) match the diagram.
+
 ### Digest run tracking, failure banner, retry (`app/lib/digest.ts` → `runDailyDigestJob`)
 The recap-or-digest logic above (plus the daily push gating) lives in `runDailyDigestJob`, shared by
 `POST /api/digest` (token-authed, the launchd runner) and the session-authed `retryDailyDigest` server

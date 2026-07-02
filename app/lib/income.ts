@@ -63,7 +63,7 @@ function sum(ns: number[]) {
  * (Tangerine = self / BGRS-Sirva, Scotia = partner / payroll); the rest group by
  * category. `self`/`partner` are display names from .env (privacy-safe).
  */
-function incomeSourceOf(t: EnrichedTxn, self: string, partner: string): { key: string; name: string; color: string } {
+export function incomeSourceOf(t: EnrichedTxn, self: string, partner: string): { key: string; name: string; color: string } {
   if (t.categoryName === 'Salary') {
     return t.source === 'tangerine'
       ? { key: 'self', name: `${self} salary`, color: SELF_COLOR }

@@ -4,6 +4,7 @@ import { SectionTabs } from '@/app/components/SectionTabs'
 const TABS = [
   { href: '/reports', label: 'Trends', exact: true },
   { href: '/reports/income', label: 'Income' },
+  { href: '/reports/cashflow', label: 'Cash flow' },
   { href: '/reports/custom', label: 'Custom' },
 ]
 
