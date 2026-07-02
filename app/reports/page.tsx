@@ -7,6 +7,7 @@ import { BarList } from '@/app/components/charts/BarList'
 import { WeekdayChart } from '@/app/components/charts/WeekdayChart'
 import { loadEnriched, buildTrends, buildOverview, anchorMonth, availableMonths, loadCategoryCredits } from '@/app/lib/analytics'
 import { buildInsights } from '@/app/lib/insights'
+import { loadAlertDismissals } from '@/app/actions/subscriptions'
 import { parsePeriodParams } from '@/app/lib/params'
 import { formatCurrency, formatCurrencyCompact, formatMonth, formatShortDate } from '@/app/lib/format'
 import { loadNetWorth } from '@/app/actions/networth'
@@ -39,7 +40,7 @@ export default async function ReportsTrendsPage({
   const trends = buildTrends(all, months, excludeSpecial, null, credits)
   const netWorth = await loadNetWorth(trends.months_labels)
   const ov = buildOverview(all, months, excludeSpecial, null, credits)
-  const insights = buildInsights(all, months, excludeSpecial)
+  const insights = buildInsights(all, months, excludeSpecial, null, await loadAlertDismissals())
 
   const totalValues = trends.total.map((t) => t.amount)
   const avg = totalValues.length ? totalValues.reduce((a, b) => a + b, 0) / totalValues.length : 0

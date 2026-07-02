@@ -16,6 +16,9 @@ import { BurndownTrajectory } from '@/app/components/BurndownTrajectory'
 import { NetBudgetTrajectory } from '@/app/components/NetBudgetTrajectory'
 import { loadAllFlows, buildOverview, availableMonths, anchorMonth, categoryCredits } from '@/app/lib/analytics'
 import { buildInsights, type InsightCard as InsightCardData } from '@/app/lib/insights'
+import { loadAlertDismissals, loadRenewalDismissals } from '@/app/actions/subscriptions'
+import { buildRenewalWarnings } from '@/app/lib/renewal-watch'
+import { RenewalWarningBanner } from '@/app/components/RenewalWarningBanner'
 import { parsePeriodParams } from '@/app/lib/params'
 import { computeBudget, FIXED_CATEGORIES, type CategoryMeta } from '@/app/lib/budget'
 import { computeMonthBurndown, unavoidableMerchantIds, type BurndownData } from '@/app/lib/projection'
@@ -161,7 +164,7 @@ export default async function Home({
   ).map((t) => ({ id: t.id, merchantName: t.merchantName, amount: t.amount, txnDate: t.txnDate, category: t.categoryName }))
   const ov = buildOverview(all, 1, excludeSpecial, exactMonth, categoryCredits(allFlows))
 
-  const insights = buildInsights(all, 1, excludeSpecial, exactMonth)
+  const insights = buildInsights(all, 1, excludeSpecial, exactMonth, await loadAlertDismissals())
 
   const spendDiff = ov.gross - ov.prevGross
   const totalSpendHint =
@@ -232,6 +235,16 @@ export default async function Home({
   const emergency = await loadEmergencyFund()
   const goalsSummary = await loadGoalsData()
 
+  // Annual-subscription renewal warnings (§18b): declared-yearly subs due to
+  // recharge within ~1 month, so the owner can cancel first. Skipped in the demo.
+  const renewalWarnings = demo
+    ? []
+    : buildRenewalWarnings(
+        allFlows,
+        new Date().toISOString().slice(0, 10),
+        await loadRenewalDismissals()
+      )
+
   // Tapping a digest push that carried "🔥 running hot" lines lands on
   // /?paceAlert=1 — recompute the live hot list (no hysteresis: the modal shows
   // everything currently hot, even categories already alerted) and open the modal.
@@ -262,6 +275,12 @@ export default async function Home({
       </div>
 
       <ReportReminder month={reminderReportMonth} />
+
+      {renewalWarnings.length > 0 && (
+        <div className="mb-5">
+          <RenewalWarningBanner warnings={renewalWarnings} />
+        </div>
+      )}
 
       {syncFailures.length > 0 && (
         <div className="mb-5">

@@ -28,6 +28,7 @@ export default async function TransactionsPage({
     : null
   const rawMonth = Array.isArray(sp.month) ? sp.month[0] : sp.month
   const rawPeriod = Array.isArray(sp.period) ? sp.period[0] : sp.period
+  const rawQuery = Array.isArray(sp.q) ? sp.q[0] : sp.q
   const rawMonths = Number(Array.isArray(sp.months) ? sp.months[0] : sp.months)
   const monthsWindow = [1, 2, 3, 6, 12].includes(rawMonths) ? rawMonths : null
 
@@ -188,6 +189,7 @@ export default async function TransactionsPage({
           categories={catRows.map((c) => ({ id: c.id, name: c.name, color: c.color }))}
           projects={projectItems}
           membershipsByTxn={memberships}
+          initialQuery={rawQuery ?? ''}
           initialCategoryFilter={
             category
               ? category === NO_CAT.name || category === 'uncategorized'

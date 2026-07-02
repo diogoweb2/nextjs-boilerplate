@@ -3,6 +3,7 @@ import { ProjectionSettings } from '@/app/components/ProjectionSettings'
 import { loadProjectionPanel } from '@/app/actions/projection'
 import { loadAllFlows, anchorMonth } from '@/app/lib/analytics'
 import { buildInsights } from '@/app/lib/insights'
+import { loadAlertDismissals } from '@/app/actions/subscriptions'
 import { isDemoSession } from '@/app/lib/demo'
 import { formatCurrency } from '@/app/lib/format'
 
@@ -22,7 +23,7 @@ export default async function BudgetBillsPage() {
 
   const expenses = allFlows.filter((t) => t.flow === 'expense')
   const anchor = anchorMonth(expenses)
-  const insights = buildInsights(expenses, 3, false, anchor)
+  const insights = buildInsights(expenses, 3, false, anchor, await loadAlertDismissals())
   const { subscriptions } = insights
 
   return (

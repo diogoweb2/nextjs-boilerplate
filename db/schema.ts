@@ -852,6 +852,47 @@ export const feedbackItems = pgTable('feedback_items', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 })
 
+/**
+ * Owner-dismissed subscription price-change alerts (§18). The watchdog fires when
+ * a stable price changes on the latest charge, but a change can be spurious — e.g.
+ * a merchant billed several times in one month because of a payment-schedule quirk,
+ * which inflates that month's total and looks like a price hike. One row per
+ * merchant records the exact change the owner marked "not a real increase":
+ * `sinceYm` (the month the flagged price posted) + `amount` (that flagged total,
+ * cents-exact). The alert is suppressed only while it still matches this signature,
+ * so a genuine LATER price change (different month or amount) alerts again.
+ */
+export const subscriptionAlertDismissals = pgTable('subscription_alert_dismissals', {
+  id: serial('id').primaryKey(),
+  merchantId: integer('merchant_id')
+    .notNull()
+    .unique()
+    .references(() => merchants.id, { onDelete: 'cascade' }),
+  sinceYm: text('since_ym').notNull(),
+  amount: numeric('amount', { precision: 10, scale: 2 }).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+
+/**
+ * Owner-dismissed "annual subscription renews soon" warnings (§18b). The renewal
+ * watchdog surfaces a dashboard banner ~1 month before a declared-annual
+ * subscription's yearly charge is due (renewal = last charge date + 12 months),
+ * so the owner can cancel before being billed again. The banner persists in the
+ * DB (not device-local) so it shows across devices until acknowledged. One row
+ * per merchant records the exact renewal cycle dismissed — `renewalYm` (the
+ * YYYY-MM the renewal falls in). Next year's renewal is a different `renewalYm`,
+ * so it warns again; the dismissal is not a permanent mute.
+ */
+export const subscriptionRenewalDismissals = pgTable('subscription_renewal_dismissals', {
+  id: serial('id').primaryKey(),
+  merchantId: integer('merchant_id')
+    .notNull()
+    .unique()
+    .references(() => merchants.id, { onDelete: 'cascade' }),
+  renewalYm: text('renewal_ym').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+
 export const categoriesRelations = relations(categories, ({ many }) => ({
   merchants: many(merchants),
   transactions: many(transactions),
@@ -971,3 +1012,5 @@ export type EmergencyConfig = typeof emergencyConfig.$inferSelect
 export type TfsaEmergencyMode = 'cash_equivalent' | 'whole' | 'crash_adjusted'
 export type FeedbackItem = typeof feedbackItems.$inferSelect
 export type FeedbackKind = 'bug' | 'idea'
+export type SubscriptionAlertDismissal = typeof subscriptionAlertDismissals.$inferSelect
+export type SubscriptionRenewalDismissal = typeof subscriptionRenewalDismissals.$inferSelect

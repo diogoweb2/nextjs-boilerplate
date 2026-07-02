@@ -209,7 +209,12 @@ idempotent and re-applies automatically each year while the policy stays the sam
   them — so later edits to the merchant still win.
 - **Effective category** = `transaction.category_id ?? merchant.category_id ?? Uncategorized`.
 - **Effective recurring/special** = `coalesce(txn flag, merchant default, false)`.
-  Transaction flags are tri-state (`true` / `false` / `null = inherit`).
+  Transaction flags are tri-state (`true` / `false` / `null = inherit`). Marking or
+  un-marking a transaction as recurring (↻ Subscription, `setTxnFlags`) teaches
+  `merchants.default_recurring` (`true`/`false`) and clears every other transaction's
+  per-txn override for that merchant — like `setTxnCategory` — so the whole merchant
+  flips to/from subscription in one click, not just the clicked row. `isSpecial` has no
+  such teaching shortcut; it stays a pure per-transaction flag.
 - Deleting a category sets referencing merchants/transactions to `null` (Uncategorized).
 
 ### Manual split (`splitTransaction` / `unsplitTransaction`, `app/actions/transactions.ts`)
@@ -1340,9 +1345,23 @@ inferred on purpose (they have plenty of data points).
 - Variable-priced subscriptions (FX-priced, usage-based — no stable streak) therefore **never
   alert**, by design.
 - The alert **clears itself** once the next charge posts: the streak restarts at the new amount,
-  so a confirmed new price is just the new normal. No dismiss state, no table.
+  so a confirmed new price is just the new normal.
 - Alerts are annualized (`delta × charges/year`) — that's the number shown everywhere.
 - Only *active* subscriptions alert (last seen within one cadence gap of the newest data month).
+
+**"Not a real increase" dismissal (`subscription_alert_dismissals`).** Some price "changes" are
+spurious — most commonly a merchant charged twice/thrice in one month because of how a payment is
+scheduled, which inflates that month's per-month total and looks like a hike. The owner can mark an
+alert **"not a real increase"** (a button on the `/reports/subscriptions` review list). This stores
+**one row per merchant** with the exact change dismissed: `since_ym` (the month the flagged price
+posted) + `amount` (that flagged total, cents-exact). The alert is suppressed — dropped from the
+review list, the dashboard card, the digest push, and the "price changes in 12 mo" count — **only
+while it still matches that signature**. Because a genuine *later* change posts in a different month
+(or at a different amount), it produces a new signature and alerts again; the dismissal is not a
+blanket "ignore this merchant" mute. Dismissed changes are listed under **"Ignored price changes"**
+with an **Undo** (deletes the row). `buildSubscriptionWatch(all, dismissals)` takes the rows and
+exposes `row.dismissedAlert` for the suppressed change; the load/dismiss/undo server actions live in
+`app/actions/subscriptions.ts`.
 
 **Surfaces.**
 - **Dashboard**: first insight card (`warn` tone for increases, `good` for drops), linking to
@@ -1360,3 +1379,26 @@ inferred on purpose (they have plenty of data points).
   every recurring merchant — current price, step-line price-history sparkline, monthly/annual
   equivalent, last-charged month, and status (Stable / Variable price / Price increase / Not
   seen). Inactive subs are listed dimmed at the bottom.
+
+## 18b. Annual-subscription renewal warning (`app/lib/renewal-watch.ts`)
+
+A separate, simpler watchdog from the price-creep one above. An owner-declared **yearly**
+subscription (`merchants.recurring_annual`, §18) charges once a year, and it's easy to forget to
+cancel before the renewal hits. This surfaces a **dashboard banner ~1 month before** the yearly
+charge is due so the owner can decide to keep or cancel.
+
+**Rule (deterministic, real calendar time — not the data anchor).** Candidates are recurring,
+declared-annual merchants. The **renewal date = the merchant's latest charge date + 12 months**.
+A warning fires when the renewal is within the next `WINDOW_DAYS` (31), with a `GRACE_DAYS` (7)
+grace on the past side so a just-lapsed renewal whose charge hasn't posted yet still shows. Once
+the yearly charge posts, the latest charge date advances, the renewal jumps ~12 months out, and
+the warning clears on its own. Warnings are sorted soonest-first; the shown amount is the last
+yearly total (same-day split rows summed).
+
+**Dismissal (`subscription_renewal_dismissals`).** The owner can **dismiss** a warning — the
+banner persists in the **DB, not device-local**, so it stays gone across devices. One row per
+merchant stores the dismissed **renewal cycle** (`renewal_ym`, the YYYY-MM the renewal falls in).
+Because next year's renewal is a different `renewal_ym`, the dismissal is not a permanent mute — it
+warns again each cycle. Load/dismiss server actions live in `app/actions/subscriptions.ts`
+(`loadRenewalDismissals`, `dismissRenewalWarning`); the banner is `RenewalWarningBanner`. Demo
+sessions skip it. This warning is dashboard-only — no digest push.

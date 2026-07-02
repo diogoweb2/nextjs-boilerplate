@@ -53,12 +53,14 @@ export function TransactionsTable({
   transactions,
   categories,
   initialCategoryFilter = '',
+  initialQuery = '',
   projects = [],
   membershipsByTxn = {},
 }: {
   transactions: TxnRow[]
   categories: CategoryOption[]
   initialCategoryFilter?: string
+  initialQuery?: string
   projects?: ProjectPickerItem[]
   membershipsByTxn?: Record<number, ProjectPickerItem[]>
 }) {
@@ -66,7 +68,7 @@ export function TransactionsTable({
   const [pending, startTransition] = useTransition()
   const [selectMode, setSelectMode] = useState(false)
   const [selected, setSelected] = useState<Set<number>>(new Set())
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useState(initialQuery)
   const [categoryFilter, setCategoryFilter] = useState<string>(initialCategoryFilter)
   const [hidePayments, setHidePayments] = useState(true)
   const [hideSpecial, setHideSpecial] = useState(false)
@@ -226,7 +228,7 @@ export function TransactionsTable({
             onToggleSelect={() => toggleSelect(t.id)}
             memberships={membershipsByTxn[t.id] ?? []}
             onCategory={(cid) => run(() => setTxnCategory(t.id, t.merchantId, cid))}
-            onFlags={(flags) => run(() => setTxnFlags(t.id, flags))}
+            onFlags={(flags) => run(() => setTxnFlags(t.id, t.merchantId, flags))}
             onAnnual={(annual) => run(() => setMerchantFlags(t.merchantId, { recurringAnnual: annual }))}
             onFlow={(flow) => run(() => setTxnFlow(t.id, flow))}
             onNote={(note) => run(() => setTxnNote(t.id, note))}

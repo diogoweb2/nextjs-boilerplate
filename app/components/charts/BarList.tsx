@@ -5,6 +5,7 @@ export type BarItem = {
   amount: number
   sublabel?: string
   color?: string
+  href?: string
 }
 
 /** Horizontal bar list — great for "top merchants" / rankings, mobile-friendly. */
@@ -15,7 +16,13 @@ export function BarList({ items, accent = 'var(--accent)' }: { items: BarItem[];
       {items.map((item) => (
         <li key={item.label} className="flex flex-col gap-1">
           <div className="flex items-baseline justify-between gap-3 text-sm">
-            <span className="truncate font-medium text-[var(--foreground)]">{item.label}</span>
+            {item.href ? (
+              <a href={item.href} className="truncate font-medium text-[var(--foreground)] hover:underline">
+                {item.label}
+              </a>
+            ) : (
+              <span className="truncate font-medium text-[var(--foreground)]">{item.label}</span>
+            )}
             <span className="shrink-0 tabular-nums font-semibold">
               {formatCurrency(item.amount)}
             </span>

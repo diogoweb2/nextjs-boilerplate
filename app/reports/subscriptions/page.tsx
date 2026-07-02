@@ -5,9 +5,18 @@ import { BarList } from '@/app/components/charts/BarList'
 import { PriceSparkline } from '@/app/components/charts/PriceSparkline'
 import { loadAllFlows } from '@/app/lib/analytics'
 import { buildSubscriptionWatch, type SubscriptionRow } from '@/app/lib/subscription-watch'
+import { loadAlertDismissals } from '@/app/actions/subscriptions'
+import {
+  DismissAlertButton,
+  UndismissAlertButton,
+} from '@/app/components/SubscriptionAlertControls'
 import { formatCurrency, formatMonth } from '@/app/lib/format'
 
 export const dynamic = 'force-dynamic'
+
+function txnHref(name: string) {
+  return `/transactions?period=all&q=${encodeURIComponent(name)}`
+}
 
 const CADENCE_LABEL: Record<SubscriptionRow['cadence'], string> = {
   monthly: 'Monthly',
@@ -60,7 +69,9 @@ function StatusBadge({ row }: { row: SubscriptionRow }) {
 
 export default async function ReportsSubscriptionsPage() {
   const all = await loadAllFlows()
-  const watch = buildSubscriptionWatch(all)
+  const dismissals = await loadAlertDismissals()
+  const watch = buildSubscriptionWatch(all, dismissals)
+  const dismissed = watch.rows.filter((r) => r.dismissedAlert)
 
   if (!watch.hasData) {
     return (
@@ -106,13 +117,15 @@ export default async function ReportsSubscriptionsPage() {
               return (
                 <li key={a.merchantId} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2.5 first:pt-0 last:pb-0">
                   <div className="flex flex-col">
-                    <span className="text-sm font-semibold">{a.name}</span>
+                    <a href={txnHref(a.name)} className="text-sm font-semibold hover:underline">
+                      {a.name}
+                    </a>
                     <span className="text-xs text-[var(--muted)]">
                       {CADENCE_LABEL[a.cadence]} · changed {formatMonth(a.sinceYm)} after a stable{' '}
                       {formatCurrency(a.previous)}
                     </span>
                   </div>
-                  <div className="flex flex-col items-end">
+                  <div className="flex flex-col items-end gap-1">
                     <span className="text-sm tabular-nums">
                       {formatCurrency(a.previous)} →{' '}
                       <span
@@ -133,11 +146,55 @@ export default async function ReportsSubscriptionsPage() {
                       {up ? '+' : '−'}
                       {formatCurrency(Math.abs(a.annualizedDelta))}/yr
                     </span>
+                    <DismissAlertButton
+                      merchantId={a.merchantId}
+                      sinceYm={a.sinceYm}
+                      amount={a.current}
+                    />
                   </div>
                 </li>
               )
             })}
           </ul>
+        </Card>
+      )}
+
+      {dismissed.length > 0 && (
+        <Card className="py-0">
+          <details className="group">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-4 sm:py-5">
+              <h2 className="text-sm font-semibold text-[var(--foreground)]">
+                Ignored price changes{' '}
+                <span className="font-normal text-[var(--muted)]">({dismissed.length})</span>
+              </h2>
+              <span className="text-xs text-[var(--muted)] transition-transform group-open:rotate-180">
+                ▾
+              </span>
+            </summary>
+            <ul className="flex flex-col divide-y divide-[var(--border)] pb-4 sm:pb-5">
+            {dismissed.map((r) => {
+              const a = r.dismissedAlert!
+              return (
+                <li
+                  key={r.merchantId}
+                  className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2.5 first:pt-0 last:pb-0"
+                >
+                  <div className="flex flex-col">
+                    <a href={txnHref(a.name)} className="text-sm font-medium hover:underline">
+                      {a.name}
+                    </a>
+                    <span className="text-xs text-[var(--muted)]">
+                      {CADENCE_LABEL[a.cadence]} · {formatCurrency(a.previous)} →{' '}
+                      {formatCurrency(a.current)} in {formatMonth(a.sinceYm)} — marked not a real
+                      increase
+                    </span>
+                  </div>
+                  <UndismissAlertButton merchantId={r.merchantId} />
+                </li>
+              )
+            })}
+            </ul>
+          </details>
         </Card>
       )}
 
@@ -159,6 +216,7 @@ export default async function ReportsSubscriptionsPage() {
             amount: r.annualCost,
             sublabel: CADENCE_LABEL[r.cadence],
             color: r.color,
+            href: txnHref(r.name),
           }))}
         />
       </Card>
@@ -182,14 +240,17 @@ export default async function ReportsSubscriptionsPage() {
               {[...active, ...inactive].map((r) => (
                 <tr key={r.merchantId} className={r.active ? '' : 'opacity-55'}>
                   <td className="py-2 pr-3">
-                    <span className="flex items-center gap-2 font-medium">
+                    <a
+                      href={txnHref(r.name)}
+                      className="flex items-center gap-2 font-medium hover:underline"
+                    >
                       <span
                         className="inline-block h-2 w-2 shrink-0 rounded-full"
                         style={{ backgroundColor: r.color }}
                         title={r.category}
                       />
                       {r.name}
-                    </span>
+                    </a>
                   </td>
                   <td className="py-2 pr-3 text-xs text-[var(--muted)]">{CADENCE_LABEL[r.cadence]}</td>
                   <td className="py-2 pr-3 text-right tabular-nums font-semibold">

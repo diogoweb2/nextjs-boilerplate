@@ -7,7 +7,11 @@ import {
   isExcludedFromBiggest,
 } from '@/app/lib/analytics'
 import { formatCurrency } from '@/app/lib/format'
-import { buildSubscriptionWatch, type PriceAlert } from '@/app/lib/subscription-watch'
+import {
+  buildSubscriptionWatch,
+  type AlertDismissal,
+  type PriceAlert,
+} from '@/app/lib/subscription-watch'
 
 export type InsightTone = 'good' | 'warn' | 'up' | 'down' | 'neutral'
 export type InsightCard = { title: string; detail: string; tone: InsightTone; href?: string }
@@ -30,7 +34,8 @@ export function buildInsights(
   all: EnrichedTxn[],
   months: number,
   excludeSpecial: boolean,
-  exactMonth?: string | null
+  exactMonth?: string | null,
+  alertDismissals: AlertDismissal[] = []
 ): Insights {
   const anchor = anchorMonth(all)
   if (!anchor) {
@@ -65,7 +70,7 @@ export function buildInsights(
   // Computed on full history (not the period window) so the alert doesn't
   // vanish when the user flips ranges; it clears once the next charge confirms
   // the new price. First card — it's the most actionable warning here.
-  const priceAlerts = buildSubscriptionWatch(data).alerts
+  const priceAlerts = buildSubscriptionWatch(data, alertDismissals).alerts
   if (priceAlerts[0]) {
     const a = priceAlerts[0]
     const up = a.delta > 0

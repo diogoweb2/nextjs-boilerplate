@@ -26,6 +26,7 @@ import {
 } from '@/db/schema'
 import { loadAllFlows, anchorMonth, availableMonths, type EnrichedTxn } from '@/app/lib/analytics'
 import { buildInsights } from '@/app/lib/insights'
+import { loadAlertDismissals } from '@/app/actions/subscriptions'
 import { computeBudget, FIXED_CATEGORIES, type CategoryMeta } from '@/app/lib/budget'
 import { computeMonthBurndown, daysInMonth, pacePercent, unavoidableMerchantIds, type PaceLevel } from '@/app/lib/projection'
 import { getBudgetSettings } from '@/app/actions/budget'
@@ -219,7 +220,7 @@ export async function buildDigest(now: number = Date.now(), failedSources: strin
   }
 
   // 4. New / unusual — first-seen merchants and a larger-than-usual charge this month.
-  const insights = buildInsights(expenses, 1, false, anchor)
+  const insights = buildInsights(expenses, 1, false, anchor, await loadAlertDismissals())
   const newMerchants = insights.newMerchants.map((m) => m.name)
   // 4b. Price-creep watchdog (§18): only alerts whose changed charge was
   // imported in the last ~24h, so the push fires once per price change — the

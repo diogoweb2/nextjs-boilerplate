@@ -14,10 +14,18 @@
  *    Variable-priced subscriptions never build a stable streak, so they never
  *    alert. The alert clears on its own once the next charge confirms the new
  *    price (the streak restarts at the new amount).
+ *
+ * The owner can mark an individual alert "not a real increase" (e.g. a month with
+ * a double/triple charge from a payment-schedule quirk). Such a dismissal is keyed
+ * to the exact change (merchant + since-month + flagged amount), so it suppresses
+ * only that alert; a genuine LATER price change alerts again. See §18.
  */
 import type { EnrichedTxn } from '@/app/lib/analytics'
 
 export type SubCadence = 'monthly' | 'quarterly' | 'annual' | 'periodic'
+
+/** An owner "not a real increase" dismissal (subscription_alert_dismissals row). */
+export type AlertDismissal = { merchantId: number; sinceYm: string; amount: number }
 
 export type PricePoint = { ym: string; amount: number }
 
@@ -60,6 +68,8 @@ export type SubscriptionRow = {
   /** No stable baseline exists (price moves charge-to-charge, e.g. FX-priced). */
   variable: boolean
   alert: PriceAlert | null
+  /** The owner dismissed this exact price change as "not a real increase". */
+  dismissedAlert: PriceAlert | null
 }
 
 export type SubscriptionWatch = {
@@ -137,7 +147,12 @@ function requiredStreak(cadence: SubCadence, priorOccurrences: number): number {
   return 3
 }
 
-export function buildSubscriptionWatch(all: EnrichedTxn[]): SubscriptionWatch {
+export function buildSubscriptionWatch(
+  all: EnrichedTxn[],
+  dismissals: AlertDismissal[] = []
+): SubscriptionWatch {
+  const dismissedBy = new Map<number, AlertDismissal>()
+  for (const d of dismissals) dismissedBy.set(d.merchantId, d)
   // Candidate set: merchants "marked as subscription" — any recurring-flagged
   // expense charge (per-txn override or the merchant's default flag).
   type Agg = {
@@ -201,11 +216,18 @@ export function buildSubscriptionWatch(all: EnrichedTxn[]): SubscriptionWatch {
     const required = requiredStreak(cadence, priorCount)
     const changed =
       baseline !== null && priorCount >= 1 && streak >= required && latest.amount !== baseline
-    // Count price changes even on now-inactive subs for the 12-month stat.
-    if (changed && monthDiff(latest.ym, anchor) < 12) changes12mo++
+
+    // Owner marked this exact change (same month + amount) "not a real increase".
+    const d = dismissedBy.get(merchantId)
+    const dismissed =
+      changed && d !== undefined && d.sinceYm === latest.ym && d.amount === latest.amount
+
+    // Count price changes even on now-inactive subs for the 12-month stat, but
+    // not ones the owner dismissed as spurious.
+    if (changed && !dismissed && monthDiff(latest.ym, anchor) < 12) changes12mo++
 
     const active = monthDiff(latest.ym, anchor) <= gap
-    const alert: PriceAlert | null =
+    const priceAlert: PriceAlert | null =
       changed && active
         ? {
             merchantId,
@@ -219,6 +241,8 @@ export function buildSubscriptionWatch(all: EnrichedTxn[]): SubscriptionWatch {
             sinceYm: latest.ym,
           }
         : null
+    const alert = dismissed ? null : priceAlert
+    const dismissedAlert = dismissed ? priceAlert : null
 
     rows.push({
       merchantId,
@@ -238,6 +262,7 @@ export function buildSubscriptionWatch(all: EnrichedTxn[]): SubscriptionWatch {
       stableStreak: streak,
       variable: priorCount >= 2 && streak < 2,
       alert,
+      dismissedAlert,
     })
   }
 

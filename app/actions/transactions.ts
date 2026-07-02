@@ -81,13 +81,30 @@ export async function setTxnFlow(id: number, flow: 'expense' | 'income' | 'trans
 /**
  * Per-transaction flag overrides. Tri-state: true / false force a value,
  * null clears the override and falls back to the merchant default.
+ *
+ * Marking or un-marking a transaction as recurring (↻ Subscription) teaches
+ * it at the merchant level instead — like `setTxnCategory` — so every other
+ * charge from the same merchant (past and future) flips too, rather than
+ * only the one transaction clicked.
  */
 export async function setTxnFlags(
   id: number,
+  merchantId: number,
   flags: { isRecurring?: boolean | null; isSpecial?: boolean | null }
 ): Promise<void> {
   await requireAuth()
-  await db.update(transactions).set(flags).where(eq(transactions.id, id))
+  if (flags.isRecurring === true || flags.isRecurring === false) {
+    await db
+      .update(merchants)
+      .set({ defaultRecurring: flags.isRecurring })
+      .where(eq(merchants.id, merchantId))
+    await db
+      .update(transactions)
+      .set({ isRecurring: null })
+      .where(eq(transactions.merchantId, merchantId))
+  } else {
+    await db.update(transactions).set(flags).where(eq(transactions.id, id))
+  }
   revalidateAll()
 }
 
