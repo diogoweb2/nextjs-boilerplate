@@ -1234,10 +1234,13 @@ state is **per device**, not shared via the db. Read with `useSyncExternalStore`
 
 ## 15b. Year in Review (`/report/year`)
 
-The annual "special edition" of the monthly recap (§15, consultant report §B1): same 80s theme,
-fully deterministic, built for the dinner-table reveal. Engine: `app/lib/yearReport.ts`
-(`buildYearReport`), page `app/report/year/page.tsx` + `YearReportClient.tsx` (reuses
-`report-theme.css`). Default year = the most recent **completed** year (strictly before the anchor's
+The annual "special edition" of the monthly recap (§15, consultant report §B1): same chassis,
+fully deterministic, built for the dinner-table reveal — but styled **90s Memphis/MTV** (teal /
+hot-magenta / sunflower palette, flat bold borders, sticker-offset shadows, confetti backdrop) to
+set it apart from the recap's 80s synthwave. Engine: `app/lib/yearReport.ts` (`buildYearReport`),
+page `app/report/year/page.tsx` + `YearReportClient.tsx`, theme
+`app/report/year/report-90s-theme.css` (scoped under `.report-90s`, redefines the same class
+names/CSS vars as `report-theme.css` so components stay interchangeable). Default year = the most recent **completed** year (strictly before the anchor's
 year); any year with data can be viewed via `?year=YYYY` — the in-progress year renders with a
 "YTD, in progress" caveat and its anchor month excluded from best/worst-month picks.
 
