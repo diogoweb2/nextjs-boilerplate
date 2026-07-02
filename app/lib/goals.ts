@@ -66,25 +66,15 @@ export function valueSeries(entries: EntryLite[], asOfYm: string): { ym: string;
 }
 
 /**
- * Estimated month the goal is reached, from your monthly contribution pace.
- *
- * Pace = total contributions over the span of COMPLETED months (first
- * contribution month → the month before the in-progress anchor), divided by the
- * number of those months. Excluding the in-progress month stops a partial month
- * skewing it; dividing by the full span (zero months included) stops a single
- * seed deposit implying an unrealistically fast finish. We need ≥2 completed
- * months of history first — otherwise there's no real pattern to project, so we
- * return null and the card says so. It sharpens each month as the pattern grows.
+ * Monthly contribution pace = total contributions over the span of COMPLETED
+ * months (first contribution month → the month before the in-progress anchor),
+ * divided by the number of those months. Excluding the in-progress month stops
+ * a partial month skewing it; dividing by the full span (zero months included)
+ * stops a single seed deposit implying an unrealistically fast finish. We need
+ * ≥2 completed months of history first — otherwise there's no real pattern to
+ * project, so we return null. It sharpens each month as the pattern grows.
  */
-export function projectedCompletionYm(
-  entries: EntryLite[],
-  target: number | null,
-  asOfYm: string,
-): string | null {
-  if (!target || target <= 0) return null
-  const value = savingsValue(entries)
-  if (value >= target) return null
-
+export function contributionPace(entries: EntryLite[], asOfYm: string): number | null {
   const completed = entries.filter(
     (e) => e.kind === 'contribution' && e.amount > 0 && e.occurredAt.slice(0, 7) < asOfYm,
   )
@@ -99,9 +89,59 @@ export function projectedCompletionYm(
   if (monthsElapsed < 2) return null
 
   const pace = completed.reduce((s, e) => s + e.amount, 0) / monthsElapsed
-  if (pace <= 0) return null
+  return pace > 0 ? pace : null
+}
+
+/** Estimated month the goal is reached, from your monthly contribution pace. */
+export function projectedCompletionYm(
+  entries: EntryLite[],
+  target: number | null,
+  asOfYm: string,
+): string | null {
+  if (!target || target <= 0) return null
+  const value = savingsValue(entries)
+  if (value >= target) return null
+
+  const pace = contributionPace(entries, asOfYm)
+  if (pace === null) return null
   const monthsLeft = Math.ceil((target - value) / pace)
   return addMonths(asOfYm, monthsLeft)
+}
+
+export type TargetPace = {
+  /** Whole months from the anchor month to the target-date month (0 if past). */
+  monthsLeft: number
+  /** Contribution needed each remaining month to hit the target on time. */
+  neededPerMonth: number
+  /** Learned monthly pace (see contributionPace); null with <2 months history. */
+  currentPace: number | null
+  /** Pace ≥ needed? null when there's no pace to judge yet. */
+  onTrack: boolean | null
+}
+
+/**
+ * "Am I on pace, and what monthly contribution gets me there?" for a savings
+ * goal with BOTH a target amount and a target date. Null when either is missing
+ * or the goal is already reached. A target date in the past (or this month)
+ * yields monthsLeft 0 and neededPerMonth = the full remaining gap.
+ */
+export function targetPace(
+  entries: EntryLite[],
+  target: number | null,
+  targetDate: string | null,
+  asOfYm: string,
+): TargetPace | null {
+  if (!target || target <= 0 || !targetDate) return null
+  const value = savingsValue(entries)
+  const remaining = round2(target - value)
+  if (remaining <= 0) return null
+
+  const monthsLeft = Math.max(0, monthsBetween(asOfYm, targetDate.slice(0, 7)))
+  const neededPerMonth = round2(monthsLeft > 0 ? remaining / monthsLeft : remaining)
+  const currentPace = contributionPace(entries, asOfYm)
+  const onTrack =
+    monthsLeft === 0 ? false : currentPace === null ? null : currentPace + 0.005 >= neededPerMonth
+  return { monthsLeft, neededPerMonth, currentPace, onTrack }
 }
 
 /** A short, motivational line keyed to a progress percentage. */

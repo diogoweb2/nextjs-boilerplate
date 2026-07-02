@@ -615,6 +615,18 @@ A **savings** goal's value = Σ contribution+adjustment+transfer amounts (a `con
 **negative** — a goal "spend", see below). Budget/analytics impact is carried **only** by the
 underlying transaction's `flow`, so goal contributions never double-count.
 
+### Target-date pace math (`contributionPace` / `targetPace`, `app/lib/goals.ts`)
+The learned **contribution pace** = Σ positive contributions over the span of *completed* months
+(first contribution month → the month before the in-progress anchor) ÷ that span; needs ≥2 completed
+months, else null (the card says an estimate appears later). It drives both the **"On pace for"**
+finish-date estimate (`projectedCompletionYm`, any goal with a target amount) and, for goals with
+**both** `targetAmount` and `targetDate`, the **`targetPace`** figures on the card — the same
+treatment as the mortgage: an **On pace ✓ / Behind pace** badge (pace vs needed; hidden while pace is
+null), **Needed** = remaining ÷ whole months left to the target month (`$X/mo`; a past/current-month
+target date shows the full remaining gap and is always Behind pace), and **Your pace** = the learned
+$/mo. Null once the target is reached. The "needed/mo" figure is intended to feed auto-contribute
+defaults (§10b).
+
 ### Transfers & borrows between goals (`transferBetweenGoals` / `repayGoalBorrow`, `app/actions/goals.ts`)
 The owner can move money from one savings goal to another (e.g. Trip → Insurance) from the goal
 card's **Move money** panel. A plain **transfer** just rebalances; ticking **Borrow** records a debt

@@ -408,10 +408,22 @@ function GoalCard({
 
 function SavingsBody({ goal }: { goal: GoalView }) {
   const pct = goal.progressPct
+  const pace = goal.targetPace
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-end justify-between gap-3">
-        <span className="tabular-nums text-2xl font-bold">{formatCurrency(goal.value)}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="tabular-nums text-2xl font-bold">{formatCurrency(goal.value)}</span>
+          {pace && pace.onTrack !== null && (
+            <span
+              className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                pace.onTrack ? 'bg-[var(--positive)]/15 text-[var(--positive)]' : 'bg-[var(--negative)]/15 text-[var(--negative)]'
+              }`}
+            >
+              {pace.onTrack ? 'On pace ✓' : 'Behind pace'}
+            </span>
+          )}
+        </div>
         {pct !== null && <Ring pct={pct} color={goal.color} />}
       </div>
       {goal.targetAmount && pct !== null && (
@@ -427,6 +439,13 @@ function SavingsBody({ goal }: { goal: GoalView }) {
         <Stat label="Contributed">{formatCurrency(goal.contributed)}</Stat>
         {goal.targetAmount && <Stat label="To go">{formatCurrency(Math.max(0, goal.targetAmount - goal.value))}</Stat>}
         {goal.projectedCompletionYm && <Stat label="On pace for">{formatMonth(goal.projectedCompletionYm)}</Stat>}
+        {pace && goal.targetDate && <Stat label="Target date">{formatMonth(goal.targetDate.slice(0, 7))}</Stat>}
+        {pace && (
+          <Stat label="Needed">
+            {pace.monthsLeft > 0 ? `${formatCurrency(pace.neededPerMonth)}/mo` : formatCurrency(pace.neededPerMonth)}
+          </Stat>
+        )}
+        {pace && pace.currentPace !== null && <Stat label="Your pace">{formatCurrency(pace.currentPace)}/mo</Stat>}
         {goal.owedToThis > 0 && (
           <div className="flex flex-col">
             <dt className="text-[10px] uppercase tracking-wide">Owed back</dt>

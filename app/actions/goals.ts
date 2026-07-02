@@ -23,8 +23,10 @@ import {
   progressPct,
   valueSeries,
   projectedCompletionYm,
+  targetPace,
   milestoneMessage,
   type EntryLite,
+  type TargetPace,
 } from '@/app/lib/goals'
 import {
   projectMortgage,
@@ -99,6 +101,8 @@ export type GoalView = {
   owesTo: { goalId: number; amount: number }[]
   progressPct: number | null
   projectedCompletionYm: string | null
+  /** Savings with target amount + date only: on-pace status and needed $/mo. */
+  targetPace: TargetPace | null
   milestone: string
   series: { ym: string; value: number }[]
   mortgage: MortgageProjection | null
@@ -243,6 +247,7 @@ export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: stri
         contributedThisMonth: 0,
         progressPct: null,
         projectedCompletionYm: null,
+        targetPace: null,
         milestone: mortgageMessage(proj),
         series: [],
         mortgage: proj,
@@ -259,6 +264,7 @@ export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: stri
         contributedThisMonth: 0,
         progressPct: null,
         projectedCompletionYm: null,
+        targetPace: null,
         milestone: netZeroMessage(nz),
         series: [],
         mortgage: null,
@@ -275,6 +281,7 @@ export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: stri
       contributedThisMonth: 0,
       progressPct: pct,
       projectedCompletionYm: projectedCompletionYm(list, target, asOfYm),
+      targetPace: targetPace(list, target, g.targetDate, asOfYm),
       milestone: milestoneMessage(pct),
       series: valueSeries(list, asOfYm),
       mortgage: null,
