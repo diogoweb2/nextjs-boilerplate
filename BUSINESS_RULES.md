@@ -21,7 +21,8 @@ validates (mismatch = clear error). Type alias `ImportSource = 'master' | 'amex'
 funding/withdrawal ledger offsets (§10b, externalId `goal:…`, payees `Goal Funding` /
 `Goal Withdrawal`). These belong to no bank or card account, so every source-whitelisted
 consumer (bank balances / emergency fund, cashflow schedule, per-account filters, card
-outstanding) drops them structurally; the older `externalId NOT LIKE 'goal:%'` exclusions
+outstanding, **and the daily digest's "$X new" charge window — `recentCharges`**) drops
+them structurally; the older `externalId NOT LIKE 'goal:%'` exclusions
 remain as belt-and-suspenders. `manual` rows still flow through `loadAllFlows`, so
 budget / analytics / 50-30-20 semantics are unchanged.
 

@@ -10,7 +10,7 @@
  *
  * Served by GET /api/digest (token-authed, app/api/digest/route.ts).
  */
-import { and, desc, eq, gte } from 'drizzle-orm'
+import { and, desc, eq, gte, ne } from 'drizzle-orm'
 import { db } from '@/db'
 import {
   importBatches,
@@ -117,7 +117,12 @@ export async function recentCharges(
       and(
         gte(transactions.createdAt, since),
         eq(transactions.flow, 'expense'),
-        eq(transactions.isPayment, false)
+        eq(transactions.isPayment, false),
+        // Synthetic goal ledger rows (`source='manual'`, payee "Goal Funding",
+        // externalId `goal:…`) are deliberate savings moves, not synced card/bank
+        // charges — like every other source-whitelisted consumer, drop them so a
+        // lump goal contribution can't inflate the "$X new" nudge. See BUSINESS_RULES.md.
+        ne(transactions.source, 'manual')
       )
     )
   return recent
