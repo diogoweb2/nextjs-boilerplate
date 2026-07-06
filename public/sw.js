@@ -42,6 +42,39 @@ self.addEventListener('push', (event) => {
   )
 })
 
+// Mobile browsers rotate/expire the push subscription on their own (memory
+// pressure, browser updates, GCM key rotation) — far more often than tablets.
+// When that happens the server prunes the dead endpoint (410) and the device
+// would go silent forever. Re-subscribe transparently: grab the VAPID public
+// key from the app, subscribe again, and store the fresh subscription.
+function urlBase64ToUint8Array(base64) {
+  const padding = '='.repeat((4 - (base64.length % 4)) % 4)
+  const normalized = (base64 + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const raw = atob(normalized)
+  const out = new Uint8Array(raw.length)
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i)
+  return out
+}
+
+self.addEventListener('pushsubscriptionchange', (event) => {
+  event.waitUntil(
+    (async () => {
+      const res = await fetch('/api/push-resubscribe')
+      const { publicKey } = await res.json()
+      if (!publicKey) return
+      const sub = await self.registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
+      })
+      await fetch('/api/push-resubscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sub.toJSON()),
+      })
+    })()
+  )
+})
+
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
   const url = (event.notification.data && event.notification.data.url) || '/'

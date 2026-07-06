@@ -44,7 +44,14 @@ export async function sendPushToAll(payload: PushPayload): Promise<{ sent: numbe
       try {
         await webpush.sendNotification(
           { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
-          json
+          json,
+          // Phones aggressively Doze/battery-save; normal-priority pushes get
+          // batched or dropped by FCM/APNs while idle (tablets, less prone to
+          // Doze, still deliver — which is why they seemed "reliable"). High
+          // urgency asks the push service to deliver promptly, and a 12h TTL
+          // lets it hold the digest until the phone next wakes rather than
+          // discarding it after the default window.
+          { urgency: 'high', TTL: 12 * 60 * 60 }
         )
         sent++
       } catch (err) {
