@@ -801,9 +801,11 @@ exactly. Net-Zero is the implicit remainder.
   goals are eligible.
 
 ### Behaviour
-- **Dating:** carved contributions are dated to the **completed source month** (its last day), so the
-  month you click "allocate" shows no new spend; the source month's net drops and gains a
-  Savings/Investment line (accurate — it was that month's surplus).
+- **Dating:** carved contributions are dated (`occurredAt`) to the **completed source month** (its
+  last day), so the month you click "allocate" shows no new spend; the source month's net drops and
+  gains a Savings/Investment line (accurate — it was that month's surplus). This same `occurredAt` is
+  what the Goals hero's **"invested this/last month"** counts by (§10), so a surplus allocation shows
+  as savings in its source month there *and* in the 50/30/20 card — never in the month you clicked.
 - **Start floor:** the feature begins with **June 2026** (`SURPLUS_START_MONTH`) — the first month
   whose surplus is allocated (when July's data lands). Anything before it is ignored entirely (no
   prompt, no auto-file).

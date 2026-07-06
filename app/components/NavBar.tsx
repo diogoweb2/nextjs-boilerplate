@@ -5,6 +5,7 @@ import { usePathname, useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { logout } from '@/app/actions/auth'
 import { GlobalSearch } from '@/app/components/GlobalSearch'
+import { PwaBackButton } from '@/app/components/PwaBackButton'
 
 const LINKS = [
   { href: '/', label: 'Overview', icon: '◎' },
@@ -59,15 +60,18 @@ export function NavBar() {
     <>
       {/* Desktop sidebar */}
       <aside className="hidden sm:flex sm:w-52 sm:flex-none sm:flex-col sm:sticky sm:top-0 sm:h-screen sm:border-r sm:border-[var(--border)] sm:bg-[var(--background)] sm:px-3 sm:py-5">
-        <Link
-          href={navHref('/')}
-          className="mb-6 flex items-center gap-2 px-2 font-bold tracking-tight"
-        >
+        <div className="mb-6 flex items-center gap-1 px-2">
+          <PwaBackButton />
+          <Link
+            href={navHref('/')}
+            className="flex items-center gap-2 font-bold tracking-tight"
+          >
           <span className="grid h-7 w-7 flex-none place-items-center rounded-lg bg-[var(--accent)] text-sm text-[var(--accent-fg)]">
             $
           </span>
           <span>Family Budget</span>
-        </Link>
+          </Link>
+        </div>
 
         <GlobalSearch variant="desktop" />
 
@@ -102,12 +106,15 @@ export function NavBar() {
       {/* Mobile top bar */}
       <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[color-mix(in_srgb,var(--background)_85%,transparent)] backdrop-blur sm:hidden">
         <div className="flex items-center justify-between px-4 py-3">
-          <Link href={navHref('/')} className="flex items-center gap-2 font-bold tracking-tight">
+          <div className="flex items-center gap-1">
+            <PwaBackButton />
+            <Link href={navHref('/')} className="flex items-center gap-2 font-bold tracking-tight">
             <span className="grid h-7 w-7 place-items-center rounded-lg bg-[var(--accent)] text-sm text-[var(--accent-fg)]">
               $
             </span>
             <span>Family Budget</span>
-          </Link>
+            </Link>
+          </div>
           <div className="flex items-center gap-1">
             <GlobalSearch variant="mobile" />
             <form action={logout}>

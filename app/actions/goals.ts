@@ -295,9 +295,10 @@ export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: stri
   const suggestNetZero = !goalRows.some((g) => g.kind === 'netzero') && currentYearNet < -0.005
 
   const savingsGoalIds = new Set(goalRows.filter((g) => g.kind === 'savings' || g.kind === 'mortgage').map((g) => g.id))
-  // "Invested this/last month" tracks the real calendar month the money was moved
-  // (createdAt), not the surplus's backdated source month (occurredAt) or the
-  // latest-expense anchor — so a contribution made today always counts as "this month".
+  // "Invested this/last month" tracks the contribution's `occurredAt` (source)
+  // month — the same basis the 50/30/20 rule uses — so a surplus allocation drawn
+  // from a past month counts there, not in the month you happened to click. A plain
+  // "Add money" defaults occurredAt to today, so it still lands in the current month.
   const nowYm = todayIso().slice(0, 7)
   const prevYm = prevMonth(nowYm)
   let thisMonth = 0
@@ -308,7 +309,7 @@ export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: stri
     // net-zero) is a negative entry that should cancel out what was put in, so the
     // "invested this month" figure reflects the true net for the month.
     if (!savingsGoalIds.has(e.goalId) || e.kind !== 'contribution') continue
-    const ym = new Date(e.createdAt).toISOString().slice(0, 7)
+    const ym = e.occurredAt.slice(0, 7)
     if (ym === nowYm) {
       thisMonth += Number(e.amount)
       thisMonthByGoal.set(e.goalId, (thisMonthByGoal.get(e.goalId) ?? 0) + Number(e.amount))
