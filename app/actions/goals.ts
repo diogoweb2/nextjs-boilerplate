@@ -2,7 +2,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { revalidatePath } from 'next/cache'
-import { and, asc, desc, eq, ilike, inArray, isNull } from 'drizzle-orm'
+import { and, asc, desc, eq, ilike, inArray, isNull, or } from 'drizzle-orm'
 import { db } from '@/db'
 import {
   goals,
@@ -572,12 +572,17 @@ export async function loadPendingReviews(): Promise<PendingReview[]> {
 }
 
 /**
- * Manual "extra" savings-goal contributions — those with NO backing transaction
- * (transactionId IS NULL) on a savings goal. These don't appear in any
- * transaction flow, so the 50/30/20 rule counts them as Savings explicitly.
- * Contributions that DO have a transaction (transfers tagged to a goal, or
- * `asExpense` deposits) already land in the Investment category, so they are
- * counted there instead — excluding txn-backed ones here avoids double counting.
+ * Savings-goal contributions the 50/30/20 rule must count as Savings **explicitly**
+ * because they land in no consumption/savings transaction flow. Two cases:
+ *  - **No backing transaction** (`transactionId IS NULL`) — plain "extra" deposits.
+ *  - **A `transfer`-flow backing transaction** — a contribution tagged onto a
+ *    "neutral"/better-interest move (e.g. cash parked in a high-interest account
+ *    for an Insurance sinking fund). It's flow `transfer`, so `computeBudgetRule`
+ *    ignores it, and it never reaches the Investment category — so without this it
+ *    would count as Savings nowhere.
+ * Contributions backed by an **Investment expense** (`asExpense`/outbound review)
+ * already net into the Savings bucket via that category, and `Goal Spend` income
+ * withdrawals are negative — both are excluded here to avoid double counting.
  */
 export async function loadManualSavingsContributions(): Promise<{ occurredAt: string; amount: number }[]> {
   if (await isDemoSession()) {
@@ -588,11 +593,12 @@ export async function loadManualSavingsContributions(): Promise<{ occurredAt: st
     .select({ amount: goalEntries.amount, occurredAt: goalEntries.occurredAt })
     .from(goalEntries)
     .innerJoin(goals, eq(goalEntries.goalId, goals.id))
+    .leftJoin(transactions, eq(goalEntries.transactionId, transactions.id))
     .where(
       and(
         eq(goals.kind, 'savings'),
         eq(goalEntries.kind, 'contribution'),
-        isNull(goalEntries.transactionId),
+        or(isNull(goalEntries.transactionId), eq(transactions.flow, 'transfer')),
       ),
     )
   return rows

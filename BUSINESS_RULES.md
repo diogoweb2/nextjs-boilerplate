@@ -562,10 +562,13 @@ scoped to the **selected period** (same window as the rest of the Overview). Log
 - **Extra mortgage → Savings:** the voluntary extra mortgage prepayment (`isExtraMortgagePayment`,
   `app/lib/mortgage.ts`) is moved out of Needs and counted as **Savings** (principal paydown builds
   equity). The contractual mortgage payment stays in Needs.
-- **Savings** = the `Investment`-bucket category net (covers transfers tagged to goals and
-  `asExpense` goal deposits, since both create an `Investment` expense) **+** the extra mortgage
-  principal **+** manual savings-goal contributions with **no backing transaction**
-  (`loadManualSavingsContributions` — txn-backed ones are excluded to avoid double-counting).
+- **Savings** = the `Investment`-bucket category net (covers `asExpense`/outbound-review goal
+  deposits, since both create an `Investment` expense) **+** the extra mortgage principal **+**
+  savings-goal contributions that land in no flow (`loadManualSavingsContributions`): those with
+  **no backing transaction**, plus those backed by a **`transfer`-flow transaction** (a contribution
+  tagged onto a "neutral"/better-interest move, e.g. an Insurance sinking fund parked in a
+  high-interest account — flow `transfer` so it's not in any bucket and never hits `Investment`).
+  Contributions backed by an `Investment` expense are excluded here to avoid double-counting.
 - Each bucket shows actual % of income, the target (50/30/20) and the signed difference (points +
   dollars). Run after the schema change: `npm run db:push` and re-run `npm run db:seed` to backfill
   bucket defaults (the seed only fills buckets still set to `none`, never clobbering owner edits).
