@@ -1,6 +1,6 @@
 import { desc, eq } from 'drizzle-orm'
 import { db } from '@/db'
-import { importBatches, categories, budgetGoals, syncRuns, backupRuns, digestRuns } from '@/db/schema'
+import { importBatches, categories, budgetGoals, syncRuns, backupRuns, digestRuns, dailyDigestPushes } from '@/db/schema'
 import { AppShell, Card, EmptyHint } from '@/app/components/AppShell'
 import { UploadDialog } from '@/app/components/UploadDialog'
 import { PeriodSelector } from '@/app/components/PeriodSelector'
@@ -86,6 +86,16 @@ export default async function Home({
       .limit(1)
       .then((rows) => rows[0] ?? null)
 
+  // Last daily notification actually pushed (dailyDigestPushes only gets a row
+  // when a push goes out, so this is a true "last notified" timestamp).
+  const lastDigestPushQuery = () =>
+    db
+      .select({ sentAt: dailyDigestPushes.sentAt })
+      .from(dailyDigestPushes)
+      .orderBy(desc(dailyDigestPushes.sentAt))
+      .limit(1)
+      .then((rows) => rows[0]?.sentAt?.toISOString() ?? null)
+
   const demo = await isDemoSession()
   const [
     allFlows,
@@ -99,6 +109,7 @@ export default async function Home({
     backupLastSuccess,
     surplusPrompts,
     lastDigestRun,
+    lastDigestPush,
   ] = demo
     ? await (async () => {
         const d = await import('@/app/lib/demo-data')
@@ -114,6 +125,7 @@ export default async function Home({
           null as string | null,
           d.demoSurplusPrompts(),
           null as { status: string; lastRunAt: Date; error: string | null } | null,
+          null as string | null,
         ] as const
       })()
     : await Promise.all([
@@ -128,6 +140,7 @@ export default async function Home({
         lastBackupQuery(),
         loadSurplusPrompts(),
         lastDigestRunQuery(),
+        lastDigestPushQuery(),
       ])
 
   const syncFailures: SyncFailure[] = SYNC_SOURCES.flatMap((s) => {
@@ -301,7 +314,7 @@ export default async function Home({
           </p>
         </div>
         <div className="flex flex-col items-end gap-2">
-          <SyncStatusBar entries={syncEntries} />
+          <SyncStatusBar entries={syncEntries} lastNotified={lastDigestPush} />
           <PeriodSelector
             monthDropdownOnly
             currentMonthDefault
