@@ -317,6 +317,23 @@ export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: stri
     }
   }
 
+  // Extra mortgage principal is real money the owner *chose* to move toward the
+  // Mortgage Freedom goal, so it counts as a contribution in the "invested
+  // this/last month" hero — even though it lives as a Home/Mortgage transaction
+  // (reducing the projected balance), not a goal_entry. Keyed by txn month, like
+  // the projection's own split. It never double-counts: the balance projection
+  // and this hero read the same payments but drive different displays.
+  const mortgageGoal = goalRows.find((g) => g.kind === 'mortgage')
+  if (mortgageGoal) {
+    const extraThis = payments.find((p) => p.ym === nowYm)?.extra ?? 0
+    const extraPrev = payments.find((p) => p.ym === prevYm)?.extra ?? 0
+    if (extraThis > 0) {
+      thisMonth += extraThis
+      thisMonthByGoal.set(mortgageGoal.id, (thisMonthByGoal.get(mortgageGoal.id) ?? 0) + extraThis)
+    }
+    lastMonth += extraPrev
+  }
+
   // Borrow ledger: how much each goal is owed back (lender) / still owes (borrower).
   const transferRows = goalIds.length
     ? await db

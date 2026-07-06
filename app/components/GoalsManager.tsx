@@ -150,7 +150,7 @@ export function GoalsManager({
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
             <h1 className="text-xl font-bold tracking-tight">Your Goals 🎯</h1>
-            {savings.length > 0 ? (
+            {savings.length > 0 || monthStats.thisMonth > 0 ? (
               <>
                 <div className="mt-1 flex items-baseline gap-2">
                   <span className="text-2xl font-bold tabular-nums">{formatCurrency(monthStats.thisMonth)}</span>

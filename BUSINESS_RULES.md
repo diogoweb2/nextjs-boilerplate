@@ -718,7 +718,14 @@ turns **50**. `projectMortgage` walks the real Home/`Mortgage` payments month-by
 **regular** payment ("mortgage payment") vs the voluntary **extra** prepayment (the "customer
 transfer" top-ups). The card surfaces them separately and, crucially, the **"Extra needed"** figure
 is just the prepayment required *on top of the regular payment* (`requiredMonthly − regularPayment`),
-not the total — so the owner sees exactly what to set their extra payment to. The chart shows the
+not the total — so the owner sees exactly what to set their extra payment to. The card also shows
+**"Extra this month"** — `projectMortgage.extraThisMonth`, the *actual* extra paid in the anchor
+month (not the completed-months average), so a fresh prepayment is visible before the month
+completes. Because extra principal is money the owner deliberately moves toward this goal, it also
+counts as a **contribution to Mortgage Freedom in the Goals hero** ("invested this/last month" and
+the per-goal breakdown, `loadGoalsData`): the hero reads the same `mortgagePayments` split, keyed by
+txn month. It only drives that motivational display — the projected balance already reflects the
+payment, so nothing double-counts. The chart shows the
 balance line vs a straight **pace** line to $0 by 50, an on-track/behind badge, and (when behind) the
 extra bump to add. "Update balance" records a
 `balance` entry and **back-solves the implied annual rate** (`inferRate`, bisection) from the prior
