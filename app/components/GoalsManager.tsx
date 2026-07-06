@@ -532,6 +532,7 @@ function MortgageBody({ goal }: { goal: GoalView }) {
         <Stat label="Regular payment">{formatCurrency(m.regularPayment)}/mo</Stat>
         <Stat label="Extra needed">{formatCurrency(m.recommendedExtra)}/mo</Stat>
         <Stat label="You pay extra">{formatCurrency(m.extraPayment)}/mo</Stat>
+        {m.extraThisMonth > 0 && <Stat label="Extra this month">{formatCurrency(m.extraThisMonth)}</Stat>}
         <Stat label="Projected payoff">{m.projectedPayoffYm ? formatMonth(m.projectedPayoffYm) : '—'}</Stat>
       </dl>
     </div>

@@ -114,6 +114,9 @@ export type MortgageProjection = {
   regularPayment: number
   /** Recent voluntary prepayment ("customer transfer"), avg of last 3. */
   extraPayment: number
+  /** The extra prepayment made in the in-progress anchor month (actual, not
+   *  averaged) — so a fresh prepayment is visible before the month completes. */
+  extraThisMonth: number
   /** Total recent outflow = regularPayment + extraPayment. */
   recentPayment: number
   /** Total monthly outflow needed to hit $0 by the deadline. */
@@ -170,6 +173,7 @@ export function projectMortgage(input: MortgageInput): MortgageProjection {
   const regularPayment = avg((p) => p.regular)
   const extraPayment = avg((p) => p.extra)
   const recentPayment = regularPayment + extraPayment
+  const extraThisMonth = payments.find((p) => p.ym === asOfYm)?.extra ?? 0
   const monthsToTarget = Math.max(0, monthsBetween(asOfYm, targetYm))
   const need = requiredMonthly(currentBalance, annualRate, monthsToTarget)
   // The extra payment that, on top of the regular payment, clears it on time;
@@ -236,6 +240,7 @@ export function projectMortgage(input: MortgageInput): MortgageProjection {
     monthsToTarget,
     regularPayment,
     extraPayment,
+    extraThisMonth,
     recentPayment,
     requiredMonthly: need,
     recommendedExtra,

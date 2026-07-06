@@ -630,6 +630,7 @@ function demoMortgageProjection(): MortgageProjection {
     monthsToTarget: 63,
     regularPayment: 2150,
     extraPayment: 1100,
+    extraThisMonth: 1100,
     recentPayment: 3250,
     requiredMonthly: 3980,
     recommendedExtra: 1830,
