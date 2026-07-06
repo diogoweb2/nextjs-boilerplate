@@ -32,7 +32,7 @@ import { computeMonthBurndown, daysInMonth, pacePercent, unavoidableMerchantIds,
 import { getBudgetSettings } from '@/app/actions/budget'
 import { loadProjectionRules } from '@/app/actions/projection'
 import { formatCurrency } from '@/app/lib/format'
-import { SYNC_SOURCES, syncStale, mostRecentIso } from '@/app/lib/sync'
+import { SYNC_SOURCES, DIGEST_REQUIRED_SOURCES, syncStale, mostRecentIso } from '@/app/lib/sync'
 import { pushConfigured, sendPushToAll } from '@/app/lib/push'
 import { buildMonthReport, buildReportNotification } from '@/app/lib/monthReport'
 import { buildYearReport, buildYearReportNotification } from '@/app/lib/yearReport'
@@ -308,10 +308,11 @@ async function recordDigestRun(status: 'ok' | 'fail', error?: string): Promise<v
 }
 
 /**
- * True once every SYNC_SOURCES entry has a successful run today (UTC date).
- * Requires status='ok' AND lastRunAt on today's UTC calendar date so that
- * yesterday's stale 'ok' doesn't count as today's sync being done. Shared by
- * the daily push gate below and by `maybeTriggerDigest`'s early-fire check.
+ * True once every digest-required source (Master + Amex) has a successful run
+ * today (UTC date). Requires status='ok' AND lastRunAt on today's UTC calendar
+ * date so that yesterday's stale 'ok' doesn't count as today's sync being done.
+ * The slower accounts (Scotia/Tangerine) don't gate the push. Shared by the
+ * daily push gate below and by `maybeTriggerDigest`'s early-fire check.
  */
 export async function allSourcesSyncedToday(): Promise<boolean> {
   const todayUtc = new Date()
@@ -319,7 +320,7 @@ export async function allSourcesSyncedToday(): Promise<boolean> {
   const rows = await db
     .select({ source: syncRuns.source, status: syncRuns.status, lastRunAt: syncRuns.lastRunAt })
     .from(syncRuns)
-  return SYNC_SOURCES.every(({ source }) => {
+  return DIGEST_REQUIRED_SOURCES.every(({ source }) => {
     const row = rows.find((r) => r.source === source)
     return row?.status === 'ok' && row.lastRunAt != null && row.lastRunAt >= todayUtc
   })
@@ -329,8 +330,8 @@ export async function allSourcesSyncedToday(): Promise<boolean> {
  * Event-triggered digest: called (via `after()`, so it never blocks the
  * response) right after a sync source reports 'ok' — either the automated
  * runner (POST /api/sync-status) or a manual CSV upload clearing a failed
- * source (importCsv). Fires `runDailyDigestJob` the moment the *last* of the
- * four sources syncs clean for the day, instead of waiting for the 11:15
+ * source (importCsv). Fires `runDailyDigestJob` the moment the last of the
+ * digest-required sources (Master + Amex) syncs clean for the day, instead of waiting for the 11:15
  * launchd job — so "upload the one bank that failed automatically" also
  * triggers it right away. Cheap no-op the rest of the day: `dailyDigestPushes`
  * dedup means at most one of these (or the 11:15 fallback) actually pushes.

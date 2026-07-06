@@ -1365,7 +1365,13 @@ discretionary to report). But if the *previous* `digest_runs` row is `status: 'f
 bypassed — a run right after a failure pushes regardless of new spend, so a stale pipeline doesn't
 compound into "also no notification today" once it's back up. This is also what makes Retry actually
 send a push: the failed run it's reacting to *is* the previous row. (`allSyncsOk` and `pushConfigured()`
-are **not** bypassed — an incomplete sync or missing VAPID keys still skips.)
+are **not** bypassed — a missing required sync or missing VAPID keys still skips.)
+
+**Which syncs gate the push:** only the **digest-required** sources — **Master** and **Amex** — need to
+be 'ok'-today for the notification to fire (`DIGEST_REQUIRED_SOURCES` in `app/lib/sync.ts`, the
+`requiredForDigest` subset of `SYNC_SOURCES`). The slower bank accounts (Scotia, Tangerine) don't gate it —
+they carry little daily spend, so waiting on them would delay or drop the notification. Flip a source's
+`requiredForDigest` flag to change the gate.
 
 ### Event-triggered digest — don't wait for 11:15 (`maybeTriggerDigest`)
 The 11:15 launchd job is a fallback now, not the only trigger. `maybeTriggerDigest` (`app/lib/digest.ts`)
@@ -1376,9 +1382,9 @@ places a source can turn 'ok' in `sync_runs`:
 - `importCsv` (`app/actions/import.ts`), after a manual CSV upload's `clearSyncFailure` — this is what
   makes hand-fixing the one bank that failed automatically also trigger it, same day, no waiting.
 
-`maybeTriggerDigest` first checks `allSourcesSyncedToday()` (the same all-four-sources-'ok'-today check
-`runDailyDigestJob` gates on) and only calls `runDailyDigestJob` once that's true — so the three earlier
-syncs each morning are a cheap no-op, not four full digest computations. Because `dailyDigestPushes` dedups
+`maybeTriggerDigest` first checks `allSourcesSyncedToday()` (the same Master+Amex-'ok'-today check
+`runDailyDigestJob` gates on) and only calls `runDailyDigestJob` once that's true — so the earlier
+syncs each morning are a cheap no-op, not repeated full digest computations. Because `dailyDigestPushes` dedups
 per UTC date, whichever of these fires first each day (an event trigger, or the 11:15 fallback) is the one
 that actually pushes; the rest just record another `digest_runs` row. Errors are swallowed at the call site
 — `runDailyDigestJob`'s own try/catch already logs them to `digest_runs` for the dashboard banner.

@@ -4,7 +4,17 @@
  * staleness threshold so the two never drift.
  */
 
-export type SyncSource = { source: 'amex' | 'master' | 'scotia' | 'tangerine'; label: string }
+export type SyncSource = {
+  source: 'amex' | 'master' | 'scotia' | 'tangerine'
+  label: string
+  /**
+   * Sources that gate the daily digest notification. The push fires once all
+   * of these have synced today, even if the others (scotia/tangerine) haven't —
+   * Master and Amex carry the bulk of daily spend, so waiting on the slower
+   * accounts would delay (or drop) the notification.
+   */
+  requiredForDigest?: boolean
+}
 
 /**
  * Auto-synced sources, in display order. Each maps to an `import_batches`
@@ -12,11 +22,14 @@ export type SyncSource = { source: 'amex' | 'master' | 'scotia' | 'tangerine'; l
  * entries automatically.
  */
 export const SYNC_SOURCES: SyncSource[] = [
-  { source: 'amex', label: 'Amex' },
-  { source: 'master', label: 'Master' },
+  { source: 'amex', label: 'Amex', requiredForDigest: true },
+  { source: 'master', label: 'Master', requiredForDigest: true },
   { source: 'scotia', label: 'Scotia' },
   { source: 'tangerine', label: 'Tangerine' },
 ]
+
+/** The subset of sources whose sync gates the daily digest push. */
+export const DIGEST_REQUIRED_SOURCES = SYNC_SOURCES.filter((s) => s.requiredForDigest)
 
 /** A sync older than this is "stale" — shown in red and flagged in the digest. */
 export const SYNC_STALE_MS = 3 * 24 * 60 * 60 * 1000
