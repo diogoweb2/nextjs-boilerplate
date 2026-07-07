@@ -25,7 +25,7 @@ import { computeMonthBurndown, monthlyUnavoidable, unavoidableMerchantIds, type 
 import { getBudgetSettings } from '@/app/actions/budget'
 import { loadProjectionRules } from '@/app/actions/projection'
 import { recentCharges } from '@/app/lib/digest'
-import { loadPendingReviews, loadGoalsData } from '@/app/actions/goals'
+import { loadPendingReviews, loadGoalsData, mortgageSyncHealth } from '@/app/actions/goals'
 import { loadSurplusPrompts } from '@/app/actions/surplus'
 import { loadDashboardProjects } from '@/app/actions/projects'
 import { ProjectReminderBanner } from '@/app/components/ProjectReminderBanner'
@@ -153,6 +153,44 @@ export default async function Home({
       failureCount: run.failureCount,
     }]
   })
+  // Partial-failure warning: the Scotia sync exported its CSV fine (status 'ok')
+  // but the mortgage balance scrape came up empty, so the latest balance snapshot
+  // lags behind the run. Detected by comparing the newest snapshot date to
+  // Scotia's last success — no extra plumbing. Only warns once a balance has been
+  // recorded before (so it never fires for a mortgage that was never synced).
+  const scotiaRun = syncRunRows.find((r) => r.source === 'scotia')
+  const scotiaOk = scotiaRun?.status === 'ok' && scotiaRun.lastSuccessAt
+  const mortgageHealth = demo ? { balanceDate: null, rateCheckedAt: null } : await mortgageSyncHealth()
+  const syncWarnings: string[] = []
+  if (
+    scotiaOk &&
+    mortgageHealth.balanceDate &&
+    mortgageHealth.balanceDate < scotiaRun!.lastSuccessAt!.toISOString().slice(0, 10)
+  ) {
+    syncWarnings.push(
+      `Scotia synced OK but the mortgage balance didn't update (last read ${mortgageHealth.balanceDate}). ` +
+        `The transaction CSV imported; only the mortgage scrape is failing.`,
+    )
+  }
+  // Rate is scraped monthly and retries daily until it works, so a rateCheckedAt
+  // older than ~5 weeks (or never, while a balance is being tracked) means the
+  // rate scrape is broken even though Scotia otherwise syncs.
+  if (scotiaOk && mortgageHealth.balanceDate) {
+    const RATE_STALE_MS = 38 * 864e5
+    const ageMs = mortgageHealth.rateCheckedAt
+      ? Date.now() - new Date(mortgageHealth.rateCheckedAt).getTime()
+      : Infinity
+    if (ageMs > RATE_STALE_MS) {
+      const last = mortgageHealth.rateCheckedAt
+        ? `last succeeded ${mortgageHealth.rateCheckedAt.slice(0, 10)}`
+        : 'has never succeeded'
+      syncWarnings.push(
+        `Scotia's mortgage interest-rate check ${last} — the monthly rate scrape may be broken ` +
+          `(it retries daily until it works).`,
+      )
+    }
+  }
+
   const failedLabels = new Set(syncFailures.map((f) => f.label))
   const syncEntries = SYNC_SOURCES.map((s, i) => {
     const run = syncRunRows.find((r) => r.source === s.source)
@@ -344,9 +382,9 @@ export default async function Home({
         </div>
       )}
 
-      {syncFailures.length > 0 && (
+      {(syncFailures.length > 0 || syncWarnings.length > 0) && (
         <div className="mb-5">
-          <SyncErrorBanner failures={syncFailures} />
+          <SyncErrorBanner failures={syncFailures} warnings={syncWarnings} />
         </div>
       )}
 

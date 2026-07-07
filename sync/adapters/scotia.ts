@@ -1,7 +1,8 @@
 import type { Page } from 'playwright'
 import { join } from 'path'
-import { downloadDir } from '../lib/profile'
+import { downloadDir, readMarker, writeMarker } from '../lib/profile'
 import { HARDENED_LAUNCH } from '../lib/stealth'
+import { parseScotiaMortgageBalance, parseScotiaMortgageRate } from '../../app/lib/mortgage'
 import type { Adapter, Credentials, DateRange } from './types'
 
 /**
@@ -141,6 +142,92 @@ async function exportCsv(page: Page, _range: DateRange): Promise<string> {
   return dest
 }
 
+/**
+ * Read the exact Scotia mortgage balance from the my-accounts landing page, run
+ * right after login and BEFORE `exportCsv` clicks into chequing (which leaves
+ * this page). The mortgage row carries a stable `data-bc` attribute
+ * (`…ScotiaMortgage`); its styled-component CSS classes are build-time hashes
+ * that rotate every deploy, so we anchor on `data-bc`, never the classes. We read
+ * the row's full text (via textContent, which includes the visually-hidden
+ * screen-reader label "…balance is CA$175,221.22") and hand it to the shared
+ * `parseScotiaMortgageBalance` — one parser for both this scrape and the manual
+ * paste box in the app. Soft-fails to null (no mortgage / layout drift) so it
+ * never aborts the transaction sync.
+ */
+async function captureMortgageBalance(page: Page): Promise<number | null> {
+  const row = () => page.locator('[data-bc*="ScotiaMortgage"]').first()
+  const read = async (timeout: number): Promise<number | null> => {
+    try {
+      await row().waitFor({ state: 'attached', timeout })
+    } catch {
+      return null
+    }
+    const text = (await row().textContent().catch(() => '')) ?? ''
+    return parseScotiaMortgageBalance(text)
+  }
+
+  // First try wherever we already are (the automated flow lands on my-accounts).
+  const here = await read(8_000)
+  if (here !== null) return here
+
+  // Not found — we may still be on the public homepage (this happens in --manual
+  // mode, which skips login()). Enter online banking the same WAF-safe way login()
+  // does: goto the online host, which redirects a trusted session straight to the
+  // my-accounts summary where the mortgage row lives. Then read once more.
+  if (!page.url().includes('secure.scotiabank.com')) {
+    await page.goto(ONLINE_URL, { waitUntil: 'domcontentloaded' }).catch(() => {})
+    await page.waitForLoadState('networkidle').catch(() => {})
+  }
+  return read(15_000)
+}
+
+/**
+ * Once a month, read the mortgage's current interest rate from its account page
+ * so the payoff projection uses the real rate instead of the back-solved estimate.
+ *
+ * Throttled to one check per calendar month via a persistent marker (the rate
+ * barely moves, and this costs an extra navigation) — returns null on the other
+ * daily runs. The marker is only stamped on a SUCCESSFUL read, so a failed scrape
+ * retries on the next daily run rather than skipping the whole month.
+ *
+ * Navigation is WAF-safe and token-rotation-proof: we re-enter online banking via
+ * the online host (which redirects to the my-accounts summary), then CLICK the
+ * mortgage account by its stable `/accounts/mortgage/` href — never a cold goto to
+ * the opaque deep link. On the account page we anchor on the stable "Interest
+ * rate" label (styled-component classes are hashed and rotate each deploy) and read
+ * its info-line value. Soft-fails to null so it never disrupts the CSV sync.
+ */
+async function captureMortgageRate(page: Page): Promise<number | null> {
+  const month = new Date().toISOString().slice(0, 7)
+  if (readMarker('scotia', 'rate-checked') === month) return null // already this month
+
+  // Land on the my-accounts summary (WAF-safe entry), then open the mortgage.
+  await page.goto(ONLINE_URL, { waitUntil: 'domcontentloaded' }).catch(() => {})
+  await page.waitForLoadState('networkidle').catch(() => {})
+  const link = page.locator('a[href*="/accounts/mortgage/"]').first()
+  try {
+    await link.waitFor({ state: 'visible', timeout: 15_000 })
+    await link.click()
+  } catch {
+    return null
+  }
+  await page.waitForLoadState('networkidle').catch(() => {})
+
+  // Anchor on the stable "Interest rate" label; its info-line parent holds the
+  // "3.55%" value. textContent of that parent → "Interest rate3.55%".
+  const label = page.getByText('Interest rate', { exact: true }).first()
+  try {
+    await label.waitFor({ state: 'attached', timeout: 15_000 })
+  } catch {
+    return null
+  }
+  const lineText = (await label.locator('xpath=..').textContent().catch(() => '')) ?? ''
+  const rate = parseScotiaMortgageRate(lineText)
+  if (rate === null) return null // leave the marker unset → retry next daily run
+  writeMarker('scotia', 'rate-checked', month)
+  return rate
+}
+
 export const scotia: Adapter = {
   importSource: 'scotia',
   loginUrl: HOME_URL,
@@ -151,4 +238,6 @@ export const scotia: Adapter = {
   login,
   isMfaChallenge,
   exportCsv,
+  captureMortgageBalance,
+  captureMortgageRate,
 }

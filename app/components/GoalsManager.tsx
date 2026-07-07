@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Card, EmptyHint } from '@/app/components/AppShell'
 import { LineChart } from '@/app/components/charts/LineChart'
 import { formatCurrency, formatCurrencyCompact, formatMonth } from '@/app/lib/format'
+import { parseScotiaMortgageBalance } from '@/app/lib/mortgage'
 import {
   createGoal,
   createNetZeroGoal,
@@ -834,13 +835,47 @@ function AdjustPanel({ current, onSubmit }: { current: number; onSubmit: (newVal
 
 function BalancePanel({ current, onSubmit }: { current: number; onSubmit: (newBalance: number) => void }) {
   const [value, setValue] = useState(String(Math.round(current * 100) / 100))
+  const [pasteHint, setPasteHint] = useState<'idle' | 'ok' | 'fail'>('idle')
+  // When the owner copies the Scotia mortgage row (or its balance text) off the
+  // logged-in home page, pull the exact balance out of it — deterministic parse,
+  // no class-name coupling. Falls through to manual entry if nothing is found.
+  function onPaste(e: React.ClipboardEvent<HTMLInputElement>) {
+    const text =
+      e.clipboardData.getData('text/html') || e.clipboardData.getData('text/plain')
+    const parsed = parseScotiaMortgageBalance(text)
+    if (parsed !== null) {
+      e.preventDefault()
+      setValue(String(parsed))
+      setPasteHint('ok')
+    } else {
+      setPasteHint('fail')
+    }
+  }
   return (
-    <Panel>
-      <span className="text-xs text-[var(--muted)]">Balance from statement</span>
-      <input type="number" value={value} onChange={(e) => setValue(e.target.value)} className={`${INPUT_CLASS} w-36`} />
-      <button disabled={!Number(value) && Number(value) !== 0} onClick={() => onSubmit(Number(value))} className={PRIMARY_BTN}>
-        Save
-      </button>
+    <Panel column>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-[var(--muted)]">Balance from statement</span>
+        <input
+          type="number"
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value)
+            setPasteHint('idle')
+          }}
+          onPaste={onPaste}
+          className={`${INPUT_CLASS} w-36`}
+        />
+        <button disabled={!Number(value) && Number(value) !== 0} onClick={() => onSubmit(Number(value))} className={PRIMARY_BTN}>
+          Save
+        </button>
+      </div>
+      <span className="text-xs text-[var(--muted)]">
+        {pasteHint === 'ok'
+          ? '✓ Pulled the exact balance from your Scotia paste.'
+          : pasteHint === 'fail'
+            ? "Couldn't read a balance from that paste — type it in."
+            : 'Tip: on Scotiabank, copy the Scotia Mortgage row (or its amount) and paste it here for the exact balance.'}
+      </span>
     </Panel>
   )
 }

@@ -15,7 +15,7 @@ import { chromium, type BrowserContext, type Page } from 'playwright'
 import { join } from 'path'
 import { readCredentials } from './keychain'
 import { profileDir, logsDir } from './profile'
-import { postCsv } from './ingest'
+import { postCsv, postMortgageBalance, postMortgageRate } from './ingest'
 import { notify } from './notify'
 import { reportSyncStatus } from './status'
 import { applyStealth } from './stealth'
@@ -93,6 +93,14 @@ export async function runSync(
         await page.waitForTimeout(2000)
       }
       console.log(`→ no longer on a login screen (url: ${page.url()})`)
+      if (adapter.captureMortgageBalance) {
+        try {
+          const balance = await adapter.captureMortgageBalance(page)
+          console.log(`→ mortgage balance read from home page: ${balance ?? '(none found)'}`)
+        } catch (err) {
+          console.error('→ mortgage balance capture failed:', err instanceof Error ? err.message : String(err))
+        }
+      }
       console.log('→ attempting CSV export so you can see where it breaks…')
       try {
         const file = await adapter.exportCsv(page, {
@@ -102,6 +110,16 @@ export async function runSync(
         console.log(`✓ downloaded: ${file}`)
       } catch (err) {
         console.error('✗ export failed:', err instanceof Error ? err.message : String(err))
+      }
+      if (adapter.captureMortgageRate) {
+        try {
+          const rate = await adapter.captureMortgageRate(page)
+          console.log(
+            `→ mortgage rate read: ${rate !== null ? `${(rate * 100).toFixed(2)}%` : '(none / not due this month)'}`
+          )
+        } catch (err) {
+          console.error('→ mortgage rate capture failed:', err instanceof Error ? err.message : String(err))
+        }
       }
       console.log('\n=== Browser left OPEN for inspection. Press Ctrl+C in this terminal to quit. ===')
       await new Promise(() => {}) // keep the process (and browser) alive
@@ -125,6 +143,31 @@ export async function runSync(
       console.log('→ MFA approved, continuing…')
     }
 
+    // Capture any landing-page balance (e.g. Scotia's mortgage) while we're still
+    // on the accounts home — exportCsv navigates away next. Best-effort: a missing
+    // balance or a scrape error must never abort the transaction sync.
+    if (adapter.captureMortgageBalance) {
+      try {
+        const balance = await adapter.captureMortgageBalance(page)
+        if (balance !== null) {
+          const res = await postMortgageBalance(balance)
+          if (res.ok) {
+            console.log(
+              `✓ mortgage balance ${res.balance.toFixed(2)}${res.changed ? '' : ' (unchanged)'}`
+            )
+          } else {
+            console.warn(`  mortgage balance not recorded: ${res.error}`)
+          }
+        } else {
+          console.log('→ no mortgage balance found on the home page (skipping)')
+        }
+      } catch (err) {
+        console.warn(
+          `  mortgage balance capture failed (continuing): ${err instanceof Error ? err.message : String(err)}`
+        )
+      }
+    }
+
     console.log('→ exporting current transactions…')
     const file = await adapter.exportCsv(page, {
       from: new Date(Date.now() - 30 * 864e5),
@@ -139,6 +182,29 @@ export async function runSync(
     }
     const summary = `${result.inserted} inserted, ${result.skipped} skipped (${result.period})`
     console.log(`✓ ingested "${result.source}": ${summary}`)
+
+    // Monthly (self-throttled): read the mortgage interest rate. Runs LAST because
+    // it navigates into the mortgage account page. Best-effort — never fails the run.
+    if (adapter.captureMortgageRate) {
+      try {
+        const rate = await adapter.captureMortgageRate(page)
+        if (rate !== null) {
+          const res = await postMortgageRate(rate)
+          if (res.ok) {
+            console.log(
+              `✓ mortgage rate ${(res.rate * 100).toFixed(2)}%${res.changed ? '' : ' (unchanged)'}`
+            )
+          } else {
+            console.warn(`  mortgage rate not recorded: ${res.error}`)
+          }
+        }
+      } catch (err) {
+        console.warn(
+          `  mortgage rate capture failed (continuing): ${err instanceof Error ? err.message : String(err)}`
+        )
+      }
+    }
+
     notify(`Budget sync — ${label} ✓`, summary)
     // Record success on the server so the dashboard clears any prior failure.
     await reportSyncStatus(adapter.importSource, 'ok')

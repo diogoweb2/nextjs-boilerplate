@@ -323,6 +323,11 @@ export const goals = pgTable('goals', {
   // Mortgage only: current interest estimate, refined when the owner overrides
   // the real balance (see app/lib/mortgage.ts → inferRate).
   annualRate: numeric('annual_rate', { precision: 6, scale: 4 }),
+  // Mortgage only: when the real interest rate was last read from Scotia by the
+  // monthly sync scrape (setMortgageRate). null = never scraped. The dashboard
+  // warns when this goes stale (>~5 weeks) while Scotia otherwise syncs OK — i.e.
+  // the rate scrape is failing even though the CSV/balance work.
+  rateCheckedAt: timestamp('rate_checked_at'),
   // Savings only: a fixed monthly auto-contribute amount. When set, the monthly
   // surplus-allocation prompt (§10b) pre-fills exactly this much for the goal (in
   // goal priority order, capped at the surplus left). null/0 = no rule.

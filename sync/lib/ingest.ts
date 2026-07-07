@@ -36,6 +36,56 @@ export async function postCsv(filePath: string, source: string): Promise<IngestR
   return json
 }
 
+export type MortgageIngestResult =
+  | { ok: true; balance: number; changed: boolean }
+  | { ok: false; error: string }
+
+/**
+ * POST the exact mortgage balance scraped off Scotia's home page to
+ * /api/ingest-mortgage. Same bearer token as postCsv; the URL is derived from
+ * INGEST_URL's host (swapping /api/ingest → /api/ingest-mortgage) so there's no
+ * extra env to set. The endpoint is idempotent per day.
+ */
+export async function postMortgageBalance(balance: number): Promise<MortgageIngestResult> {
+  const token = readSecret('budget-sync-ingest', 'ingest')
+  const ingest = process.env.INGEST_URL ?? 'http://localhost:3000/api/ingest'
+  const base = ingest.replace(/\/api\/ingest\b.*$/, '/api/ingest-mortgage')
+  const url = `${base}?balance=${encodeURIComponent(balance)}`
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+
+  const json = (await res.json().catch(() => null)) as MortgageIngestResult | null
+  if (!json) {
+    throw new Error(`Mortgage ingest endpoint returned ${res.status} with a non-JSON body.`)
+  }
+  return json
+}
+
+export type MortgageRateResult =
+  | { ok: true; rate: number; changed: boolean }
+  | { ok: false; error: string }
+
+/**
+ * POST the monthly-scraped mortgage interest rate (a fraction, e.g. 0.0355) to
+ * /api/ingest-mortgage. Same token/URL derivation as postMortgageBalance.
+ */
+export async function postMortgageRate(rate: number): Promise<MortgageRateResult> {
+  const token = readSecret('budget-sync-ingest', 'ingest')
+  const ingest = process.env.INGEST_URL ?? 'http://localhost:3000/api/ingest'
+  const base = ingest.replace(/\/api\/ingest\b.*$/, '/api/ingest-mortgage')
+  const url = `${base}?rate=${encodeURIComponent(rate)}`
+
+  const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+  const json = (await res.json().catch(() => null)) as { rate?: MortgageRateResult } | null
+  if (!json?.rate) {
+    throw new Error(`Mortgage rate ingest returned ${res.status} with an unexpected body.`)
+  }
+  return json.rate
+}
+
 export type HoldingsIngestResult =
   | { ok: true; positions: number; totalValueCad: number; fxUsdCad: number; fxLive: boolean }
   | { ok: false; error: string }

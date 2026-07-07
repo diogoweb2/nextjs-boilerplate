@@ -734,6 +734,24 @@ extra bump to add. "Update balance" records a
 `balance` entry and **back-solves the implied annual rate** (`inferRate`, bisection) from the prior
 snapshot + payments since, sharpening the next projection.
 
+**Automated Scotia sync (`sync/adapters/scotia.ts`).** The daily Scotia run also scrapes two mortgage
+figures off the logged-in account pages and POSTs them to `POST /api/ingest-mortgage`
+(token-authed, same bearer as `/api/ingest`):
+- **Balance** — read from the my-accounts summary each run (before the CSV export navigates away),
+  anchored on the stable `data-bc="…ScotiaMortgage"` attribute / the screen-reader "balance is CA$…"
+  label (never the hashed styled-component classes). `ingestMortgageBalance` is **idempotent per day**
+  (updates today's `balance` snapshot in place) and only re-infers the rate / notifies when the balance
+  actually moves. If a run exports the CSV but the balance scrape comes up empty, the dashboard shows a
+  soft warning (the newest snapshot lags `sync_runs.scotia.lastSuccessAt`).
+- **Interest rate** — read **once a month** (self-throttled via a marker in the profile dir), from the
+  mortgage account page's "Interest rate" info line. `setMortgageRate` writes `goals.annualRate`
+  directly; the **real posted rate OVERRIDES the `inferRate` back-solve** (it's authoritative). The
+  monthly marker is stamped only on a *successful* read, so a failed scrape **retries every daily run
+  until it works**. Each success also stamps `goals.rateCheckedAt` (even when the value is unchanged) —
+  a heartbeat the dashboard reads to warn when the rate scrape has been failing (`rateCheckedAt` older
+  than ~5 weeks, or never, while Scotia otherwise syncs OK). Parsers (`parseScotiaMortgageBalance`,
+  `parseScotiaMortgageRate`) are pure and shared with the app's manual paste box.
+
 ### Net-zero recovery goal (`kind = 'netzero'`)
 A persistent, **multi-year** tracker for "get the year's net back to zero", distinct from the
 `/budget` planner (which is forward-looking and resets each year with no memory of shortfalls).

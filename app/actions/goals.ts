@@ -161,6 +161,37 @@ async function ensureMortgageGoal(): Promise<void> {
 }
 
 /**
+ * Freshness signals the dashboard uses to warn when the Scotia sync's mortgage
+ * scrapes stop working while the rest of the sync (CSV) still succeeds:
+ *  - `balanceDate`   — YYYY-MM-DD of the newest balance snapshot (lags behind the
+ *    last run when the daily balance scrape fails).
+ *  - `rateCheckedAt` — ISO of the last successful monthly rate scrape (goes stale
+ *    when the rate scrape fails; it retries daily until it works).
+ * Both null when the mortgage goal has no data yet. Cheap: one row + one lookup.
+ */
+export async function mortgageSyncHealth(): Promise<{
+  balanceDate: string | null
+  rateCheckedAt: string | null
+}> {
+  const [goal] = await db
+    .select({ id: goals.id, rateCheckedAt: goals.rateCheckedAt })
+    .from(goals)
+    .where(eq(goals.kind, 'mortgage'))
+    .limit(1)
+  if (!goal) return { balanceDate: null, rateCheckedAt: null }
+  const [row] = await db
+    .select({ occurredAt: goalEntries.occurredAt })
+    .from(goalEntries)
+    .where(and(eq(goalEntries.goalId, goal.id), eq(goalEntries.kind, 'balance')))
+    .orderBy(desc(goalEntries.occurredAt))
+    .limit(1)
+  return {
+    balanceDate: row?.occurredAt.slice(0, 10) ?? null,
+    rateCheckedAt: goal.rateCheckedAt?.toISOString() ?? null,
+  }
+}
+
+/**
  * Lean mortgage projection for the dashboard net-worth card (reuses the same
  * inputs as loadGoalsData's mortgage goal). Returns null when no balance has been
  * recorded yet. Not demo-guarded — the net-worth loader handles demo itself.
@@ -1079,6 +1110,105 @@ export async function updateMortgageBalance(input: {
     await notifyGoalChange(goal, Number(prev.amount), newBalance)
   }
   revalidateGoals()
+}
+
+/**
+ * Record the exact mortgage balance scraped by the daily Scotia sync (the number
+ * shown on Scotia's home page after login). Unlike `updateMortgageBalance` (a
+ * manual, always-append action), this is built for an UNATTENDED daily run:
+ *
+ *  - It auto-creates the mortgage goal if missing (privacy-seeded, like the UI).
+ *  - It is idempotent per day: re-running the sync updates today's snapshot in
+ *    place instead of piling up a new row every run.
+ *  - It only back-solves the rate and fires a notification when the balance
+ *    actually MOVES from the last distinct snapshot — so daily no-change syncs
+ *    stay silent.
+ *
+ * Returns whether anything changed, for the sync log. Not auth-gated by
+ * `requireAuth` — the caller is the token-authed /api/ingest-mortgage endpoint.
+ */
+export async function ingestMortgageBalance(
+  balance: number,
+): Promise<{ ok: boolean; balance: number; changed: boolean; error?: string }> {
+  const rounded = Math.round(balance * 100) / 100
+  if (!Number.isFinite(rounded) || rounded < 0) {
+    return { ok: false, balance, changed: false, error: 'Invalid balance.' }
+  }
+  await ensureMortgageGoal()
+  const [goal] = await db.select().from(goals).where(eq(goals.kind, 'mortgage')).limit(1)
+  if (!goal) return { ok: false, balance: rounded, changed: false, error: 'No mortgage goal.' }
+
+  const today = todayIso()
+  const prior = await db
+    .select({ id: goalEntries.id, amount: goalEntries.amount, occurredAt: goalEntries.occurredAt })
+    .from(goalEntries)
+    .where(and(eq(goalEntries.goalId, goal.id), eq(goalEntries.kind, 'balance')))
+    .orderBy(asc(goalEntries.occurredAt))
+
+  const todays = prior.find((e) => e.occurredAt.slice(0, 10) === today)
+  // Last snapshot that isn't today's — the baseline for change detection.
+  const baseline = [...prior].reverse().find((e) => e.occurredAt.slice(0, 10) !== today)
+
+  // Idempotent: today's snapshot already carries this exact figure → nothing to do.
+  if (todays && Number(todays.amount) === rounded) {
+    return { ok: true, balance: rounded, changed: false }
+  }
+
+  if (todays) {
+    await db.update(goalEntries).set({ amount: rounded.toFixed(2) }).where(eq(goalEntries.id, todays.id))
+  } else {
+    await db.insert(goalEntries).values({
+      goalId: goal.id,
+      kind: 'balance',
+      amount: rounded.toFixed(2),
+      occurredAt: today,
+      note: 'Scotia sync',
+    })
+  }
+
+  // Only re-infer the rate / notify when the balance moved off the last distinct
+  // snapshot — keeps unattended daily runs from re-notifying on an unchanged value.
+  if (baseline && Number(baseline.amount) !== rounded) {
+    const flows = await loadAllFlows()
+    const between = mortgagePayments(flows)
+      .filter((p) => p.ym > baseline.occurredAt.slice(0, 7) && p.ym <= today.slice(0, 7))
+      .map((p) => p.regular + p.extra)
+    const rate = inferRate(Number(baseline.amount), rounded, between)
+    if (rate !== null) await db.update(goals).set({ annualRate: rate.toFixed(4) }).where(eq(goals.id, goal.id))
+    await notifyGoalChange(goal, Number(baseline.amount), rounded)
+  }
+
+  revalidateGoals()
+  return { ok: true, balance: rounded, changed: true }
+}
+
+/**
+ * Set the mortgage's interest rate from the monthly Scotia scrape (a FRACTION,
+ * e.g. 0.0355 for 3.55%). The real posted rate is authoritative — it OVERRIDES
+ * the rate `updateMortgageBalance`/`ingestMortgageBalance` back-solve from balance
+ * moves (see BUSINESS_RULES §10). Idempotent: no write when unchanged. Token-authed
+ * caller (/api/ingest-mortgage), so not `requireAuth`-gated.
+ */
+export async function setMortgageRate(
+  rate: number,
+): Promise<{ ok: boolean; rate: number; changed: boolean; error?: string }> {
+  const rounded = Math.round(rate * 10000) / 10000
+  if (!Number.isFinite(rounded) || rounded <= 0 || rounded > 0.3) {
+    return { ok: false, rate, changed: false, error: 'Rate out of range.' }
+  }
+  await ensureMortgageGoal()
+  const [goal] = await db.select().from(goals).where(eq(goals.kind, 'mortgage')).limit(1)
+  if (!goal) return { ok: false, rate: rounded, changed: false, error: 'No mortgage goal.' }
+
+  const changed = goal.annualRate === null || Number(goal.annualRate) !== rounded
+  // Always stamp rateCheckedAt (even when unchanged) — it's the "the scrape still
+  // works" heartbeat the dashboard staleness warning reads.
+  await db
+    .update(goals)
+    .set({ ...(changed ? { annualRate: rounded.toFixed(4) } : {}), rateCheckedAt: new Date() })
+    .where(eq(goals.id, goal.id))
+  if (changed) revalidateGoals()
+  return { ok: true, rate: rounded, changed }
 }
 
 export type ReviewAllocation = { goalId: number; amount: number }

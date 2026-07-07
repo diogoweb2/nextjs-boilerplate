@@ -14,9 +14,18 @@ export type SyncFailure = {
  * failed bank(s) and when each last worked, so a broken pipeline is obvious at a
  * glance instead of only surfacing 3 days later as "stale". Cleared automatically
  * once a source's next run reports success (see /api/sync-status).
+ *
+ * `warnings` are softer, partial-failure messages (e.g. Scotia's CSV imported but
+ * the mortgage balance scrape failed) — rendered below the hard failures.
  */
-export function SyncErrorBanner({ failures }: { failures: SyncFailure[] }) {
-  if (failures.length === 0) return null
+export function SyncErrorBanner({
+  failures,
+  warnings = [],
+}: {
+  failures: SyncFailure[]
+  warnings?: string[]
+}) {
+  if (failures.length === 0 && warnings.length === 0) return null
 
   const banks =
     failures.length === 1
@@ -28,24 +37,37 @@ export function SyncErrorBanner({ failures }: { failures: SyncFailure[] }) {
       role="alert"
       className="rounded-lg border border-[var(--negative)]/40 bg-[var(--negative)]/10 px-4 py-3"
     >
-      <p className="text-sm font-semibold text-[var(--negative)]">⚠️ {banks}</p>
-      <ul className="mt-1.5 space-y-1">
-        {failures.map((f) => (
-          <li key={f.label} className="text-xs text-[var(--muted)]">
-            <span className="font-medium text-[var(--foreground)]">{f.label}</span>
-            {' — last worked '}
-            {f.lastSuccessAt ? (
-              <span title={new Date(f.lastSuccessAt).toLocaleString()}>
-                {formatSyncAge(f.lastSuccessAt)} ago
-              </span>
-            ) : (
-              'never'
-            )}
-            {f.failureCount > 1 && ` · failed ${f.failureCount}×`}
-            {f.error && <span className="block text-[var(--muted)]/80">{f.error}</span>}
-          </li>
-        ))}
-      </ul>
+      {failures.length > 0 && (
+        <>
+          <p className="text-sm font-semibold text-[var(--negative)]">⚠️ {banks}</p>
+          <ul className="mt-1.5 space-y-1">
+            {failures.map((f) => (
+              <li key={f.label} className="text-xs text-[var(--muted)]">
+                <span className="font-medium text-[var(--foreground)]">{f.label}</span>
+                {' — last worked '}
+                {f.lastSuccessAt ? (
+                  <span title={new Date(f.lastSuccessAt).toLocaleString()}>
+                    {formatSyncAge(f.lastSuccessAt)} ago
+                  </span>
+                ) : (
+                  'never'
+                )}
+                {f.failureCount > 1 && ` · failed ${f.failureCount}×`}
+                {f.error && <span className="block text-[var(--muted)]/80">{f.error}</span>}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {warnings.length > 0 && (
+        <ul className={`space-y-1 ${failures.length > 0 ? 'mt-2' : ''}`}>
+          {warnings.map((w) => (
+            <li key={w} className="text-xs text-[var(--foreground)]">
+              ⚠️ {w}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }

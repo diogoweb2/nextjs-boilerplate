@@ -48,6 +48,76 @@ export function isExtraMortgagePayment(t: {
   )
 }
 
+/**
+ * Extract the exact Scotia mortgage balance from text copied off Scotiabank's
+ * logged-in home page — either the raw HTML of the account row or the plain
+ * text the browser copies from it. Returns null when no balance is found (the
+ * caller keeps the manual/projected value as a fallback).
+ *
+ * Scotia's markup uses styled-components, so every CSS class is a build-time
+ * hash (`foDwEq`, `eVqiMq`, …) that changes on each deploy — we must NOT match
+ * on classes. Instead we anchor on stable, semantic signals, in order:
+ *   1. The screen-reader label "… balance is CA$175,221.22" (most robust: it is
+ *      accessibility copy tied to the account, not styling).
+ *   2. Any CA$/$ amount near the stable `data-bc="…ScotiaMortgage"` attribute.
+ *   3. As a last resort in plain-text copies, an amount following "Mortgage".
+ */
+export function parseScotiaMortgageBalance(input: string): number | null {
+  if (!input) return null
+  const amount = (s: string): number | null => {
+    // Currency amount like 175,221.22 or 1,234 — require thousands/decimals so
+    // we don't grab an account number like (3677088).
+    const m = s.match(/(\d{1,3}(?:,\d{3})+(?:\.\d{2})?|\d+\.\d{2})/)
+    if (!m) return null
+    const n = Number(m[1].replace(/,/g, ''))
+    return Number.isFinite(n) && n > 0 ? n : null
+  }
+
+  // 1. Screen-reader label: "…, balance is CA$175,221.22"
+  const sr = input.match(/balance is\s*(?:CA)?\$?\s*(\d[\d,]*(?:\.\d{2})?)/i)
+  if (sr) {
+    const n = Number(sr[1].replace(/,/g, ''))
+    if (Number.isFinite(n) && n > 0) return n
+  }
+
+  // 2. Amount near the stable data-bc mortgage anchor.
+  const anchor = input.search(/data-bc="[^"]*ScotiaMortgage[^"]*"/i)
+  if (anchor >= 0) {
+    // Search the tail after the anchor for the first currency amount.
+    const near = amount(input.slice(anchor))
+    if (near !== null) return near
+  }
+
+  // 3. Plain-text fallback: an amount somewhere after the word "Mortgage".
+  const mi = input.search(/mortgage/i)
+  if (mi >= 0) {
+    const after = amount(input.slice(mi))
+    if (after !== null) return after
+  }
+
+  return null
+}
+
+/**
+ * Extract the mortgage interest rate from text copied off Scotia's mortgage
+ * account page (the "Interest rate 3.55%" info line). Returns a FRACTION
+ * (3.55% → 0.0355) to match how `annualRate` is stored, or null when no sane
+ * percentage is present. Sanity-bounded to (0, 30%] so a stray "0%" or a huge
+ * unrelated percentage elsewhere on the page can't set a nonsense rate.
+ *
+ * Pass the text of just the "Interest rate" line item when possible (the caller
+ * anchors on the stable label, not the hashed styled-component classes); the
+ * first percentage in it is the rate.
+ */
+export function parseScotiaMortgageRate(input: string): number | null {
+  if (!input) return null
+  const m = input.match(/(\d+(?:\.\d+)?)\s*%/)
+  if (!m) return null
+  const pct = Number(m[1])
+  if (!Number.isFinite(pct) || pct <= 0 || pct > 30) return null
+  return Math.round((pct / 100) * 10000) / 10000
+}
+
 /** Whole months from `a` to `b` (b − a). Negative if b precedes a. */
 export function monthsBetween(a: string, b: string): number {
   const [ay, am] = a.split('-').map(Number)
