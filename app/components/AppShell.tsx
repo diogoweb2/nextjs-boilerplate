@@ -32,7 +32,15 @@ export function Card({
     >
       {(title || action) && (
         <div className="mb-4 flex items-center justify-between gap-3">
-          {title && <h2 className="text-sm font-semibold text-[var(--foreground)]">{title}</h2>}
+          {title && (
+            <h2 className="flex items-center gap-2 text-sm font-semibold tracking-tight text-[var(--foreground)]">
+              <span
+                aria-hidden="true"
+                className="h-3.5 w-1 flex-none rounded-full bg-[var(--accent)]"
+              />
+              {title}
+            </h2>
+          )}
           {action}
         </div>
       )}
@@ -41,9 +49,36 @@ export function Card({
   )
 }
 
-/** Empty-state placeholder. */
+// Every empty state gets a house-brand epitaph. Picked by hashing the hint text
+// so it's stable across renders (server components — no hydration surprises).
+const EMPTY_QUIPS = [
+  'Suspiciously quiet in here.',
+  'No money was harmed in this view. Yet.',
+  'Emptier than the account after Costco.',
+  'Nothing here. The money saw you coming.',
+  'Zero records. If only the credit card felt the same.',
+  'All clear — a rare sight in this family.',
+]
+
+function quipFor(children: React.ReactNode): string {
+  const s = typeof children === 'string' ? children : JSON.stringify(children ?? '')
+  let h = 0
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
+  return EMPTY_QUIPS[Math.abs(h) % EMPTY_QUIPS.length]
+}
+
+/** Empty-state placeholder with a rotating deadpan one-liner. */
 export function EmptyHint({ children }: { children: React.ReactNode }) {
   return (
-    <div className="py-8 text-center text-sm text-[var(--muted)]">{children}</div>
+    <div className="flex flex-col items-center gap-1 py-8 text-center text-sm text-[var(--muted)]">
+      <span
+        aria-hidden="true"
+        className="mb-1 grid h-9 w-9 place-items-center rounded-full bg-[var(--surface-2)] text-base"
+      >
+        🪙
+      </span>
+      <div>{children}</div>
+      <div className="text-xs italic opacity-70">{quipFor(children)}</div>
+    </div>
   )
 }

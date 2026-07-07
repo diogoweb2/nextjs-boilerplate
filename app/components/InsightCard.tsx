@@ -32,7 +32,11 @@ export function InsightCard({ card }: { card: InsightCardData }) {
   const s = TONE_STYLES[card.tone]
   const inner = (
     <div className="flex items-start gap-2.5">
-      <span className={`mt-0.5 text-sm font-bold ${s.chip}`}>{s.icon}</span>
+      <span
+        className={`mt-0.5 grid h-6 w-6 flex-none place-items-center rounded-full bg-[var(--surface-2)] text-xs font-bold ${s.chip}`}
+      >
+        {s.icon}
+      </span>
       <div className="flex flex-col gap-0.5">
         <span className="text-sm font-semibold leading-snug">{card.title}</span>
         <span className="text-xs leading-relaxed text-[var(--muted)]">{card.detail}</span>

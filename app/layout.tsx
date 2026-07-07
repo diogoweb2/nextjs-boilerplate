@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { DemoBanner } from "@/app/components/DemoBanner";
 import { SwRegister } from "@/app/components/SwRegister";
@@ -15,13 +15,20 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// Display face for headings, the wordmark, and big money numbers.
+const spaceGrotesk = Space_Grotesk({
+  variable: "--font-display",
+  subsets: ["latin"],
+});
+
 export const metadata: Metadata = {
-  title: "Family Budget",
-  description: "Private spending insights from your card statements.",
+  title: "Pereira Lope$",
+  description:
+    "The family fortune, live — watch it grow wings and fly away in real time.",
   robots: { index: false, follow: false },
   appleWebApp: {
     capable: true,
-    title: "Budget",
+    title: "Lope$",
     statusBarStyle: "black-translucent",
   },
 };
@@ -30,8 +37,8 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f6f7f9" },
-    { media: "(prefers-color-scheme: dark)", color: "#0b0d10" },
+    { media: "(prefers-color-scheme: light)", color: "#f5f8f6" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0f0c" },
   ],
 };
 
@@ -43,9 +50,17 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} h-full antialiased`}
     >
       <body className="min-h-full">
+        {/* Per-device theme (Manage › Appearance). Resolves the stored choice
+            (light/dark/system) to data-theme on <html> before first paint, and
+            follows OS changes live while in "system" mode. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var m=matchMedia('(prefers-color-scheme: dark)');function a(){var t=localStorage.getItem('theme');var d=t==='dark'||(t!=='light'&&m.matches);document.documentElement.dataset.theme=d?'dark':'light'}a();m.addEventListener('change',a);window.addEventListener('storage',a)}catch(e){}})()`,
+          }}
+        />
         <SwRegister />
         <PushPrompt />
         <DemoBanner />

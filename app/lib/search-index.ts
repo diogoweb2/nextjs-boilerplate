@@ -112,4 +112,5 @@ export const FEATURE_INDEX: FeatureEntry[] = [
   { label: 'Projects', page: 'Manage › Projects', href: '/manage/projects', keywords: ['trip', 'reno', 'group', 'overlay'] },
   { label: 'Notifications', page: 'Manage › Notifications', href: '/manage/notifications#notifications', keywords: ['push', 'digest', 'alerts'] },
   { label: 'Feedback tracker', page: 'Manage › Feedback', href: '/manage/feedback', keywords: ['bugs', 'ideas', 'todo'] },
+  { label: 'Appearance', page: 'Manage › Appearance', href: '/manage/appearance#appearance', keywords: ['theme', 'dark', 'light', 'mode', 'system', 'dark mode'] },
 ]

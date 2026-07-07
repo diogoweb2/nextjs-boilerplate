@@ -6,15 +6,96 @@ import { useEffect, useState } from 'react'
 import { logout } from '@/app/actions/auth'
 import { GlobalSearch } from '@/app/components/GlobalSearch'
 import { PwaBackButton } from '@/app/components/PwaBackButton'
+import { LogoMark, LogoWordmark } from '@/app/components/Logo'
+
+// Stroke icon paths (24×24 grid, lucide-style) — crisper than the old unicode
+// glyphs and they inherit currentColor like everything else.
+const ICON_PATHS: Record<string, React.ReactNode> = {
+  overview: (
+    <>
+      <rect x="3" y="3" width="7" height="9" rx="1" />
+      <rect x="14" y="3" width="7" height="5" rx="1" />
+      <rect x="14" y="12" width="7" height="9" rx="1" />
+      <rect x="3" y="16" width="7" height="5" rx="1" />
+    </>
+  ),
+  budget: (
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <circle cx="12" cy="12" r="6" />
+      <circle cx="12" cy="12" r="2" />
+    </>
+  ),
+  activity: (
+    <>
+      <path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z" />
+      <path d="M14 8H8" />
+      <path d="M16 12H8" />
+      <path d="M13 16H8" />
+    </>
+  ),
+  accounts: (
+    <>
+      <path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1" />
+      <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4" />
+    </>
+  ),
+  reports: (
+    <>
+      <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
+      <polyline points="16 7 22 7 22 13" />
+    </>
+  ),
+  recap: (
+    <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+  ),
+  manage: (
+    <>
+      <line x1="21" x2="14" y1="4" y2="4" />
+      <line x1="10" x2="3" y1="4" y2="4" />
+      <line x1="21" x2="12" y1="12" y2="12" />
+      <line x1="8" x2="3" y1="12" y2="12" />
+      <line x1="21" x2="16" y1="20" y2="20" />
+      <line x1="12" x2="3" y1="20" y2="20" />
+      <line x1="14" x2="14" y1="2" y2="6" />
+      <line x1="8" x2="8" y1="10" y2="14" />
+      <line x1="16" x2="16" y1="18" y2="22" />
+    </>
+  ),
+  logout: (
+    <>
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <polyline points="16 17 21 12 16 7" />
+      <line x1="21" x2="9" y1="12" y2="12" />
+    </>
+  ),
+}
+
+function NavIcon({ name, className = 'h-[18px] w-[18px]' }: { name: string; className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={`flex-none ${className}`}
+      aria-hidden="true"
+    >
+      {ICON_PATHS[name]}
+    </svg>
+  )
+}
 
 const LINKS = [
-  { href: '/', label: 'Overview', icon: '◎' },
-  { href: '/budget', label: 'Budget', icon: '◇' },
-  { href: '/transactions', label: 'Activity', icon: '≣' },
-  { href: '/accounts', label: 'Accounts', icon: '◔' },
-  { href: '/reports', label: 'Reports', icon: '↗' },
-  { href: '/report', label: 'Recap', icon: '★' },
-  { href: '/manage', label: 'Manage', icon: '⚙' },
+  { href: '/', label: 'Overview', icon: 'overview' },
+  { href: '/budget', label: 'Budget', icon: 'budget' },
+  { href: '/transactions', label: 'Activity', icon: 'activity' },
+  { href: '/accounts', label: 'Accounts', icon: 'accounts' },
+  { href: '/reports', label: 'Reports', icon: 'reports' },
+  { href: '/report', label: 'Recap', icon: 'recap' },
+  { href: '/manage', label: 'Manage', icon: 'manage' },
 ]
 
 // On mobile only the first few links live in the bottom bar; the rest collapse
@@ -64,40 +145,46 @@ export function NavBar() {
           <PwaBackButton />
           <Link
             href={navHref('/')}
-            className="flex items-center gap-2 font-bold tracking-tight"
+            className="flex items-center gap-2"
           >
-          <span className="grid h-7 w-7 flex-none place-items-center rounded-lg bg-[var(--accent)] text-sm text-[var(--accent-fg)]">
-            $
-          </span>
-          <span>Family Budget</span>
+          <LogoMark className="h-8 w-10 flex-none" />
+          <LogoWordmark className="text-[15px]" />
           </Link>
         </div>
 
         <GlobalSearch variant="desktop" />
 
         <nav className="flex flex-1 flex-col gap-0.5">
-          {LINKS.map((l) => (
-            <Link
-              key={l.href}
-              href={navHref(l.href)}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                isActive(pathname, l.href)
-                  ? 'bg-[var(--surface-2)] text-[var(--foreground)]'
-                  : 'text-[var(--muted)] hover:text-[var(--foreground)]'
-              }`}
-            >
-              <span className="text-base leading-none">{l.icon}</span>
-              {l.label}
-            </Link>
-          ))}
+          {LINKS.map((l) => {
+            const active = isActive(pathname, l.href)
+            return (
+              <Link
+                key={l.href}
+                href={navHref(l.href)}
+                className={`flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-all ${
+                  active
+                    ? 'bg-[color-mix(in_srgb,var(--accent)_13%,transparent)] text-[var(--accent)] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--accent)_25%,transparent)]'
+                    : 'text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--foreground)]'
+                }`}
+              >
+                <NavIcon name={l.icon} />
+                {l.label}
+              </Link>
+            )
+          })}
         </nav>
 
+        <p className="px-3 pb-2 text-[10px] leading-relaxed text-[var(--muted)] opacity-70">
+          Family funds under 24/7 surveillance.
+          <br />
+          The money knows.
+        </p>
         <form action={logout}>
           <button
             type="submit"
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-[var(--muted)] transition-colors hover:text-[var(--negative)]"
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-[var(--muted)] transition-colors hover:text-[var(--negative)]"
           >
-            <span className="text-base leading-none">⏏</span>
+            <NavIcon name="logout" />
             Sign out
           </button>
         </form>
@@ -108,11 +195,9 @@ export function NavBar() {
         <div className="flex items-center justify-between px-4 py-3">
           <div className="flex items-center gap-1">
             <PwaBackButton />
-            <Link href={navHref('/')} className="flex items-center gap-2 font-bold tracking-tight">
-            <span className="grid h-7 w-7 place-items-center rounded-lg bg-[var(--accent)] text-sm text-[var(--accent-fg)]">
-              $
-            </span>
-            <span>Family Budget</span>
+            <Link href={navHref('/')} className="flex items-center gap-2">
+            <LogoMark className="h-7 w-9 flex-none" />
+            <LogoWordmark className="text-[15px]" />
             </Link>
           </div>
           <div className="flex items-center gap-1">
@@ -146,11 +231,11 @@ export function NavBar() {
                     href={navHref(l.href)}
                     className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium ${
                       active
-                        ? 'bg-[var(--surface-2)] text-[var(--accent)]'
+                        ? 'bg-[color-mix(in_srgb,var(--accent)_13%,transparent)] text-[var(--accent)]'
                         : 'text-[var(--foreground)]'
                     }`}
                   >
-                    <span className="text-base leading-none">{l.icon}</span>
+                    <NavIcon name={l.icon} />
                     {l.label}
                   </Link>
                 )
@@ -161,7 +246,7 @@ export function NavBar() {
                 type="submit"
                 className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium text-[var(--negative)]"
               >
-                <span className="text-base leading-none">⏏</span>
+                <NavIcon name="logout" />
                 Sign out
               </button>
             </form>
@@ -177,11 +262,11 @@ export function NavBar() {
             <Link
               key={l.href}
               href={navHref(l.href)}
-              className={`flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium ${
+              className={`flex flex-col items-center gap-1 py-2.5 text-[11px] font-medium ${
                 active ? 'text-[var(--accent)]' : 'text-[var(--muted)]'
               }`}
             >
-              <span className="text-base leading-none">{l.icon}</span>
+              <NavIcon name={l.icon} className="h-[19px] w-[19px]" />
               {l.label}
             </Link>
           )

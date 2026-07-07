@@ -308,7 +308,7 @@ export default async function Home({
       {showPaceModal && <PaceAlertModal alerts={paceAlerts} />}
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-bold tracking-tight">Overview</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Overview</h1>
           <p className="text-sm text-[var(--muted)]">
             {ov.anchor ? ov.periodLabel : 'Upload a statement to begin'}
           </p>
@@ -413,6 +413,7 @@ export default async function Home({
           {/* Total spend + per-category quick tiles */}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatCard
+              hero
               label="Total spend"
               value={formatCurrency(ov.gross)}
               current={ov.gross}

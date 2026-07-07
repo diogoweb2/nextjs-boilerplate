@@ -1,4 +1,5 @@
 import { formatPercentDelta, formatCurrency } from '@/app/lib/format'
+import { LogoMark } from '@/app/components/Logo'
 
 /** Headline KPI tile with optional period-over-period delta badge. */
 export function StatCard({
@@ -12,6 +13,7 @@ export function StatCard({
   accent,
   budget,
   reportHref,
+  hero = false,
 }: {
   label: string
   value: string
@@ -35,6 +37,8 @@ export function StatCard({
    * never nest (valid HTML, no event handlers needed).
    */
   reportHref?: string
+  /** Vault-green headline tile with the winged-bill watermark. */
+  hero?: boolean
 }) {
   const delta =
     current !== undefined && previous !== undefined
@@ -47,6 +51,41 @@ export function StatCard({
     badgeClass = isBad
       ? 'text-[var(--negative)] bg-[color-mix(in_srgb,var(--negative)_12%,transparent)]'
       : 'text-[var(--positive)] bg-[color-mix(in_srgb,var(--positive)_14%,transparent)]'
+  }
+
+  // Hero tile: the headline number, set into the vault with the brand mark
+  // ghosted in the corner. Deltas re-tint for the dark green background.
+  if (hero) {
+    const isBad = delta && delta.direction !== 'flat' && (invertColors ? delta.direction === 'up' : delta.direction === 'down')
+    const heroBadge =
+      delta && delta.direction !== 'flat'
+        ? isBad
+          ? 'bg-[rgba(255,120,130,0.18)] text-[#ffb3bb]'
+          : 'bg-[rgba(120,255,180,0.16)] text-[#8df0b8]'
+        : 'bg-[rgba(255,255,255,0.1)] text-[#9ed8b5]'
+    return (
+      <div className="hero-stat col-span-2 flex flex-col gap-1.5 p-5">
+        <LogoMark className="hero-watermark" />
+        <span className="hero-muted text-xs font-medium uppercase tracking-widest">{label}</span>
+        <span className="font-display text-4xl font-bold tabular-nums tracking-tight leading-none">
+          {value}
+        </span>
+        <div className="flex items-center gap-2">
+          {delta && (
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${heroBadge}`}>
+              {delta.direction === 'up' ? '↑' : delta.direction === 'down' ? '↓' : ''}
+              {delta.text}
+            </span>
+          )}
+          {delta && (
+            <span className="hero-muted text-[11px]">
+              vs previous period – {formatCurrency(previous!)}
+            </span>
+          )}
+        </div>
+        {hint && <span className="hero-muted relative z-10 text-xs">{hint}</span>}
+      </div>
+    )
   }
 
   // Budget progress: green under 85%, amber up to 100%, red over budget.
@@ -97,7 +136,7 @@ export function StatCard({
         </span>
         {/* Rest of content — pointer-events-none so clicks pass through to the full-coverage link */}
         <div className="relative z-10 flex flex-col gap-1 pointer-events-none">
-          <span className="text-2xl font-bold tabular-nums tracking-tight leading-none">{value}</span>
+          <span className="font-display text-2xl font-bold tabular-nums tracking-tight leading-none">{value}</span>
           {delta && (
             <span className={`self-start rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${badgeClass}`}>
               {delta.direction === 'up' ? '↑' : delta.direction === 'down' ? '↓' : ''}{delta.text}
@@ -121,7 +160,7 @@ export function StatCard({
               </div>
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--surface-2)]">
                 <div
-                  className="h-full rounded-full transition-all"
+                  className={`h-full rounded-full transition-all ${ratio >= 0.85 ? 'bar-sheen' : ''}`}
                   style={{ width: `${Math.min(100, ratio * 100)}%`, backgroundColor: barColor }}
                 />
               </div>
@@ -130,7 +169,7 @@ export function StatCard({
                 {ratio < 1 ? (
                   <span style={{ color: barColor }}>{formatCurrency(budget - current!)} left</span>
                 ) : (
-                  <span style={{ color: barColor }}>{formatCurrency(current! - budget)} over</span>
+                  <span style={{ color: barColor }}>{formatCurrency(current! - budget)} over 💀</span>
                 )}
               </div>
             </div>
@@ -151,7 +190,7 @@ export function StatCard({
         )}
         {label}
       </span>
-      <span className="text-2xl font-bold tabular-nums tracking-tight leading-none">{value}</span>
+      <span className="font-display text-2xl font-bold tabular-nums tracking-tight leading-none">{value}</span>
       {delta && (
         <span className={`self-start rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${badgeClass}`}>
           {delta.direction === 'up' ? '↑' : delta.direction === 'down' ? '↓' : ''}{delta.text}
@@ -175,7 +214,7 @@ export function StatCard({
           </div>
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--surface-2)]">
             <div
-              className="h-full rounded-full transition-all"
+              className={`h-full rounded-full transition-all ${ratio >= 0.85 ? 'bar-sheen' : ''}`}
               style={{ width: `${Math.min(100, ratio * 100)}%`, backgroundColor: barColor }}
             />
           </div>
@@ -184,7 +223,7 @@ export function StatCard({
             {ratio < 1 ? (
               <span style={{ color: barColor }}>{formatCurrency(budget - current!)} left</span>
             ) : (
-              <span style={{ color: barColor }}>{formatCurrency(current! - budget)} over</span>
+              <span style={{ color: barColor }}>{formatCurrency(current! - budget)} over 💀</span>
             )}
           </div>
         </div>

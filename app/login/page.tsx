@@ -2,22 +2,42 @@
 
 import { useActionState, useState } from 'react'
 import { login, enterDemo, type LoginState } from '@/app/actions/auth'
+import { LogoMark, LogoWordmark } from '@/app/components/Logo'
+
+// One per day, deterministically — the family's daily dose of financial realism.
+const TAGLINES = [
+  'The money was right here a minute ago.',
+  'Tracking every dollar on its way out.',
+  'Where the Pereira Lopes fortune goes to say goodbye.',
+  'Our net worth, live and unflinching.',
+  'Spoiler: it was groceries again.',
+  'Money can fly. We have charts to prove it.',
+  'A loving home for brief visits from our salary.',
+]
 
 export default function LoginPage() {
   const [state, action, pending] = useActionState<LoginState, FormData>(login, undefined)
   const [showPassword, setShowPassword] = useState(false)
+  const dayOfYear = Math.floor(
+    (Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000
+  )
+  const tagline = TAGLINES[dayOfYear % TAGLINES.length]
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-900">
-      <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-md dark:bg-zinc-800">
-        <h1 className="mb-6 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-          Sign in
-        </h1>
+    <div className="flex min-h-screen items-center justify-center px-4">
+      <div className="logo-hover card w-full max-w-sm p-8">
+        <div className="mb-6 flex flex-col items-center text-center">
+          <LogoMark className="h-16 w-20" />
+          <h1 className="mt-2 text-2xl text-[var(--foreground)]">
+            <LogoWordmark />
+          </h1>
+          <p className="mt-1 text-xs text-[var(--muted)]">{tagline}</p>
+        </div>
         <form action={action} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1">
             <label
               htmlFor="password"
-              className="text-sm font-medium text-zinc-700 dark:text-zinc-300"
+              className="text-sm font-medium text-[var(--foreground)]"
             >
               Password
             </label>
@@ -28,13 +48,13 @@ export default function LoginPage() {
                 type={showPassword ? 'text' : 'password'}
                 required
                 autoComplete="current-password"
-                className="w-full rounded-lg border border-zinc-300 px-3 py-2 pr-10 text-sm outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 dark:border-zinc-600 dark:bg-zinc-700 dark:text-zinc-50"
+                className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 pr-10 text-sm text-[var(--foreground)] outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)]"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword((v) => !v)}
                 aria-label={showPassword ? 'Hide password' : 'Show password'}
-                className="absolute inset-y-0 right-0 flex items-center px-3 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                className="absolute inset-y-0 right-0 flex items-center px-3 text-[var(--muted)] hover:text-[var(--foreground)]"
               >
                 {showPassword ? (
                   <svg
@@ -78,26 +98,26 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={pending}
-            className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-fg)] transition-opacity hover:opacity-90 disabled:opacity-50"
           >
-            {pending ? 'Signing in…' : 'Sign in'}
+            {pending ? 'Opening the vault…' : 'Open the vault'}
           </button>
         </form>
 
-        <div className="my-5 flex items-center gap-3 text-xs text-zinc-400">
-          <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+        <div className="my-5 flex items-center gap-3 text-xs text-[var(--muted)]">
+          <span className="h-px flex-1 bg-[var(--border)]" />
           or
-          <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+          <span className="h-px flex-1 bg-[var(--border)]" />
         </div>
 
         <form action={enterDemo}>
           <button
             type="submit"
-            className="w-full rounded-lg border border-dashed border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:border-zinc-500 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-700/50"
+            className="w-full rounded-lg border border-dashed border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--foreground)] transition-colors hover:border-[var(--accent)] hover:bg-[var(--surface-2)]"
           >
             🔍 Explore the demo
           </button>
-          <p className="mt-2 text-center text-xs text-zinc-400">
+          <p className="mt-2 text-center text-xs text-[var(--muted)]">
             Sample data, no sign-in — view every feature, nothing is editable.
           </p>
         </form>
