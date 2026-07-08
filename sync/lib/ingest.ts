@@ -57,11 +57,17 @@ export async function postMortgageBalance(balance: number): Promise<MortgageInge
     headers: { Authorization: `Bearer ${token}` },
   })
 
-  const json = (await res.json().catch(() => null)) as MortgageIngestResult | null
-  if (!json) {
-    throw new Error(`Mortgage ingest endpoint returned ${res.status} with a non-JSON body.`)
+  // The endpoint nests the result under `balance` ({ ok, balance: {...} }),
+  // mirroring how the rate result is nested under `rate`.
+  const json = (await res.json().catch(() => null)) as
+    | { balance?: MortgageIngestResult; error?: string }
+    | null
+  if (!json?.balance) {
+    throw new Error(
+      `Mortgage ingest endpoint returned ${res.status}${json?.error ? `: ${json.error}` : ' with an unexpected body.'}`
+    )
   }
-  return json
+  return json.balance
 }
 
 export type MortgageRateResult =

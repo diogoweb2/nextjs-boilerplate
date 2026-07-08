@@ -189,6 +189,8 @@ async function captureMortgageBalance(page: Page): Promise<number | null> {
  * barely moves, and this costs an extra navigation) — returns null on the other
  * daily runs. The marker is only stamped on a SUCCESSFUL read, so a failed scrape
  * retries on the next daily run rather than skipping the whole month.
+ * Manual terminal runs (stdout is a TTY; launchd logs to a file) bypass the
+ * throttle so `npm run sync:scotia` always reads and posts the rate.
  *
  * Navigation is WAF-safe and token-rotation-proof: we re-enter online banking via
  * the online host (which redirects to the my-accounts summary), then CLICK the
@@ -199,7 +201,8 @@ async function captureMortgageBalance(page: Page): Promise<number | null> {
  */
 async function captureMortgageRate(page: Page): Promise<number | null> {
   const month = new Date().toISOString().slice(0, 7)
-  if (readMarker('scotia', 'rate-checked') === month) return null // already this month
+  const manualRun = process.stdout.isTTY === true
+  if (!manualRun && readMarker('scotia', 'rate-checked') === month) return null // already this month
 
   // Land on the my-accounts summary (WAF-safe entry), then open the mortgage.
   await page.goto(ONLINE_URL, { waitUntil: 'domcontentloaded' }).catch(() => {})

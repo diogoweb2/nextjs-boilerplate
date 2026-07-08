@@ -197,6 +197,8 @@ export async function runSync(
           } else {
             console.warn(`  mortgage rate not recorded: ${res.error}`)
           }
+        } else {
+          console.log('→ mortgage rate: skipped (already checked this month, or not found on the page)')
         }
       } catch (err) {
         console.warn(
