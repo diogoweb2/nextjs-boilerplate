@@ -364,6 +364,17 @@ function FilterChip({
   )
 }
 
+/**
+ * Stable per-person avatar color. Names live only in env (public repo), so we
+ * hash the name into a small palette instead of hardcoding name->color.
+ */
+const PERSON_COLORS = ['#f59e0b', '#38bdf8', '#22c55e', '#f43f5e', '#a855f7']
+function personColor(name: string): string {
+  let h = 0
+  for (let i = 0; i < name.length; i++) h = (h * 33 + name.charCodeAt(i)) >>> 0
+  return PERSON_COLORS[h % PERSON_COLORS.length]
+}
+
 function TxnRowView({
   t,
   categories,
@@ -478,7 +489,8 @@ function TxnRowView({
             </span>
             <span className="inline-flex items-center gap-1 rounded-full bg-[var(--surface-2)] px-1.5 py-0.5 font-medium text-[var(--foreground)]">
               <span
-                className="grid h-3.5 w-3.5 place-items-center rounded-full bg-[var(--accent)] text-[8px] font-bold text-[var(--accent-fg)]"
+                className="grid h-3.5 w-3.5 place-items-center rounded-full text-[8px] font-bold text-black"
+                style={{ background: personColor(t.person) }}
                 aria-hidden
               >
                 {t.person.charAt(0).toUpperCase()}
