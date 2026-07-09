@@ -112,18 +112,20 @@ async function isMfaChallenge(page: Page): Promise<boolean> {
  * the same cycle every day is harmless.
  *
  * After login we're already on my-accounts, so we navigate by CLICKING the
- * chequing account from the list (matching the link's href, `/accounts/chequing/`,
- * not the account number) rather than another cold goto — both to keep nothing
- * account-specific in this PUBLIC repo and because the deep-link goto trips the
- * WAF. (Matching the href also survives Scotia rotating the opaque per-account
- * path token in the URL.) The download is then a two-step UI: click the Download
+ * chequing account from the list (matching the link's href on the `/chequing/`
+ * path segment, not the account number) rather than another cold goto — both to
+ * keep nothing account-specific in this PUBLIC repo and because the deep-link goto
+ * trips the WAF. Match only the type segment, never the prefix: Scotia moved these
+ * links from `/accounts/chequing/…` to `/my-accounts/chequing/…` and a prefixed
+ * selector silently stopped matching. The trailing token is opaque and rotates, so
+ * it can't be matched either. The download is then a two-step UI: click the Download
  * kebab to open a menu, then click "Download as CSV", which triggers a native save
  * we capture.
  */
 async function exportCsv(page: Page, _range: DateRange): Promise<string> {
   // No goto — login left us on my-accounts. Open the chequing account by clicking
   // its link in the accounts list (a real navigation the WAF accepts).
-  const account = page.locator('a[href*="/accounts/chequing/"]').first()
+  const account = page.locator('a[href*="/chequing/"]').first()
   await account.waitFor({ state: 'visible', timeout: 20_000 })
   await account.click()
 
@@ -194,8 +196,9 @@ async function captureMortgageBalance(page: Page): Promise<number | null> {
  *
  * Navigation is WAF-safe and token-rotation-proof: we re-enter online banking via
  * the online host (which redirects to the my-accounts summary), then CLICK the
- * mortgage account by its stable `/accounts/mortgage/` href — never a cold goto to
- * the opaque deep link. On the account page we anchor on the stable "Interest
+ * mortgage account by its `/mortgage/` href segment — never a cold goto to the
+ * opaque deep link, and never matching the path prefix (Scotia has already moved
+ * it once). On the account page we anchor on the stable "Interest
  * rate" label (styled-component classes are hashed and rotate each deploy) and read
  * its info-line value. Soft-fails to null so it never disrupts the CSV sync.
  */
@@ -207,7 +210,7 @@ async function captureMortgageRate(page: Page): Promise<number | null> {
   // Land on the my-accounts summary (WAF-safe entry), then open the mortgage.
   await page.goto(ONLINE_URL, { waitUntil: 'domcontentloaded' }).catch(() => {})
   await page.waitForLoadState('networkidle').catch(() => {})
-  const link = page.locator('a[href*="/accounts/mortgage/"]').first()
+  const link = page.locator('a[href*="/mortgage/"]').first()
   try {
     await link.waitFor({ state: 'visible', timeout: 15_000 })
     await link.click()

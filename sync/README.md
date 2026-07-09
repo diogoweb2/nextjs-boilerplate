@@ -172,9 +172,11 @@ source key differ. The app already parses the Scotia CSV (`source: 'scotia'` in
 The logged-out login form lives on a one-time `oauth_key` URL we can't hardcode, so the adapter
 sends the trusted session straight to `secure.scotiabank.com/my-accounts` and lets Scotia bounce
 an expired session to a freshly-keyed login screen. To reach the chequing statement it then
-clicks the account from that list by matching the link's `href` (`/accounts/chequing/`) — so no
-account number lands in this **public** repo, and it survives Scotia rotating the opaque
-per-account path token.
+clicks the account from that list by matching the link's `href` on the type segment alone
+(`/chequing/`) — so no account number lands in this **public** repo, and it survives Scotia
+rotating the opaque per-account path token. Match the segment, not the prefix: Scotia moved
+these links from `/accounts/chequing/…` to `/my-accounts/chequing/…` in mid-2026 and a
+prefix-anchored selector fails as a silent 20s timeout on the my-accounts page.
 
 One-time Keychain items (same shape as Rogers/Amex — just credentials):
 
