@@ -195,17 +195,27 @@ export function BudgetPlanner({ data, autoPropose = true }: { data: BudgetData; 
               <span className="font-medium">Year-end net goal</span>
               <span className="tabular-nums font-semibold">{formatCurrency(targetNet)}</span>
             </div>
-            <input
-              type="range"
-              min={-5000}
-              max={10000}
-              step={250}
-              value={targetNet}
-              onChange={(e) => setTargetNet(Number(e.target.value))}
-              onPointerUp={() => persistTarget(targetNet)}
-              onKeyUp={() => persistTarget(targetNet)}
-              className="w-full accent-[var(--accent)]"
-            />
+            <div className="flex items-center gap-3">
+              <input
+                type="range"
+                min={-5000}
+                max={10000}
+                step={100}
+                value={targetNet}
+                onChange={(e) => setTargetNet(Number(e.target.value))}
+                onPointerUp={() => persistTarget(targetNet)}
+                onKeyUp={() => persistTarget(targetNet)}
+                className="w-full accent-[var(--accent)]"
+              />
+              <input
+                type="number"
+                step={100}
+                value={targetNet}
+                onChange={(e) => setTargetNet(Number(e.target.value))}
+                onBlur={() => persistTarget(targetNet)}
+                className="w-24 rounded-lg border border-[var(--border)] bg-transparent px-2 py-1 text-right text-sm tabular-nums"
+              />
+            </div>
             <div className="flex justify-between text-[11px] text-[var(--muted)]">
               <span>-$5,000</span>
               <span>break even</span>
@@ -413,7 +423,12 @@ export function BudgetPlanner({ data, autoPropose = true }: { data: BudgetData; 
             {data.categories.map((c) => {
               const goal = goals[c.categoryId] ?? 0
               const avg = avgOf(c)
-              const sliderMax = Math.max(100, Math.ceil((Math.max(avg, goal, c.currentMonthActual) * 2) / 50) * 50)
+              // Max derives from spending data only — never from the live goal,
+              // otherwise dragging right grows the max and the value runs away.
+              const sliderMax = Math.max(
+                100,
+                Math.ceil((Math.max(avg, c.currentMonthActual, c.suggestedGoal) * 2) / 50) * 50
+              )
               const step = sliderMax > 2000 ? 50 : 10
               const pct = goal > 0 ? c.currentMonthActual / goal : c.currentMonthActual > 0 ? 1.5 : 0
               const over = c.currentMonthActual > goal + 0.5
@@ -432,6 +447,19 @@ export function BudgetPlanner({ data, autoPropose = true }: { data: BudgetData; 
                         <span className="rounded-full bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
                           Fixed
                         </span>
+                      )}
+                      {over && (
+                        <button
+                          onClick={() => {
+                            const adjusted = Math.ceil((c.currentMonthActual * 1.1) / 10) * 10
+                            setGoals((g) => ({ ...g, [c.categoryId]: adjusted }))
+                            persistGoal(c.categoryId, adjusted)
+                          }}
+                          title={`Set goal to 10% above current spent (${formatCurrency(Math.ceil((c.currentMonthActual * 1.1) / 10) * 10)})`}
+                          className="rounded-lg border border-[var(--border)] px-2 py-0.5 text-[10px] font-medium text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--foreground)]"
+                        >
+                          Adjust for this month
+                        </button>
                       )}
                     </span>
                     <span
