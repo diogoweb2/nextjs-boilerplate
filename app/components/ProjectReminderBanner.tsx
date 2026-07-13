@@ -43,9 +43,32 @@ function DismissButton({ id }: { id: number }) {
   )
 }
 
+function ProjectLine({ p }: { p: DashboardProject }) {
+  return (
+    <span className="text-sm text-[var(--muted)]">
+      <a href={`/projects/${p.id}`} className="font-medium text-[var(--foreground)] hover:underline">
+        {p.emoji} {p.name}
+      </a>{' '}
+      {phrase(p)} ({dateRange(p)})
+      {p.count > 0 && ` — ${formatCurrency(p.total)} so far`}.
+    </span>
+  )
+}
+
 export function ProjectReminderBanner({ projects }: { projects: DashboardProject[] }) {
   const [open, setOpen] = useState(false)
   if (projects.length === 0) return null
+
+  // A single project doesn't need the collapsed header — show its line directly.
+  if (projects.length === 1) {
+    const p = projects[0]
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3">
+        <ProjectLine p={p} />
+        {p.phase === 'wrapup' && <DismissButton id={p.id} />}
+      </div>
+    )
+  }
 
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3">
@@ -66,13 +89,7 @@ export function ProjectReminderBanner({ projects }: { projects: DashboardProject
       <ul className="mt-2 flex flex-col gap-2">
         {projects.map((p) => (
           <li key={p.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-            <span className="text-sm text-[var(--muted)]">
-              <a href={`/projects/${p.id}`} className="font-medium text-[var(--foreground)] hover:underline">
-                {p.emoji} {p.name}
-              </a>{' '}
-              {phrase(p)} ({dateRange(p)})
-              {p.count > 0 && ` — ${formatCurrency(p.total)} so far`}.
-            </span>
+            <ProjectLine p={p} />
             {p.phase === 'wrapup' && <DismissButton id={p.id} />}
           </li>
         ))}
