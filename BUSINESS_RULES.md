@@ -892,7 +892,11 @@ mortgage uses. Sources are listed in `ACCOUNT_SOURCES` with an `autoTracked` fla
 
 - **Seed + self-tracking:** the first snapshot per account is the owner-entered **starting
   balance**; thereafter the balance updates from imported bank flows. **Current balance** = latest
-  snapshot + Σ of real bank flows since it (`balanceAsOf`). **Fund total** = Σ over all accounts.
+  snapshot + Σ of real bank flows since it (`balanceAsOf`). When the daily sync scrapes the bank's
+  own balance (`/api/ingest-balance` → `ingestLiveBalance`) it writes a fresh snapshot (note
+  `'sync'`, idempotent per day), so the model **re-anchors on the real figure daily** and any
+  drift is absorbed automatically; the flow-projection remains the fallback between/without
+  scrapes. **Fund total** = Σ over all accounts.
 - **Same-day boundary (causality, not date alone):** a flow dated on the snapshot's *own* day counts
   only if it was imported **after** the snapshot was recorded (`flow.createdAt > snapshot.createdAt`).
   So a transfer imported the same day you seed/enter a balance still moves the fund, while a manual
@@ -964,8 +968,11 @@ Pure math in `app/lib/runway.ts` (`computeRunwayInputs` + `buildScenarios`), cli
   - (Both losing pay at once is omitted — treated as not a realistic case.)
   - When remaining income ≥ burn the runway is **∞** (income covers expenses).
 - **Available cash** (the fund the runway divides by) = emergency-fund total (§12) **−
-  outstanding credit-card balance** (`loadOutstandingCardBalance`: net of all master/amex rows —
-  charges +, payments/refunds −, clamped ≥ 0). A big recent card purchase (e.g. a $10k car) drops
+  outstanding credit-card balance** (`loadOutstandingCardBalance`). Per card the preferred figure
+  is the **live balance scraped by the daily sync** (`live_balances` — the card site's own "Current
+  balance", used while ≤ `SYNC_STALE_MS` old); when the scrape has been failing it **falls back**
+  to the transaction-derived estimate (unpaid-cycle sum: charges +, payments/refunds −, clamped
+  ≥ 0, since the last `is_payment` row). A big recent card purchase (e.g. a $10k car) drops
   the runway immediately, before the statement is even paid; paying it later just moves the money
   from "card balance due" to a real bank outflow, so available cash — and the runway — stay
   consistent. This nets out **only in the runway**; the Emergency Fund card (§12) is unaffected.

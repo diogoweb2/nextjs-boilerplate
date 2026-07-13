@@ -45,6 +45,15 @@ export type Adapter = {
   /** Navigate to the export UI, request `range`, capture the CSV → file path. */
   exportCsv(page: Page, range: DateRange): Promise<string>
   /**
+   * Optional: read the source's own current balance (a card's "Current balance"
+   * / a chequing account's balance) from the post-login page, run right after
+   * login/MFA and BEFORE `exportCsv` navigates away. Returns null when not found
+   * (soft-fail — a missing balance must never abort the transaction sync; the
+   * dashboard warns when it lags behind a successful run). The runner posts a
+   * non-null result to /api/ingest-balance tagged with `importSource`.
+   */
+  captureAccountBalance?(page: Page): Promise<number | null>
+  /**
    * Optional: read an account balance shown on the post-login landing page
    * (e.g. Scotia's mortgage balance on my-accounts) BEFORE `exportCsv` navigates
    * away. Returns null when the balance isn't present (soft-fail — a missing

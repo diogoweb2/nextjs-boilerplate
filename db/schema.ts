@@ -460,6 +460,24 @@ export const accountSnapshots = pgTable(
 )
 
 /**
+ * Latest balance scraped off each bank/card site by the daily sync (one row per
+ * source, upserted). For the cards (master/amex) this is the authoritative
+ * "Current balance" — consumers prefer it over the transaction-derived estimate
+ * while it's fresh (≤ SYNC_STALE_MS) and fall back to the computed value when
+ * the scrape has been failing. For the banks (tangerine/scotia) the same ingest
+ * ALSO writes an account_snapshots row, re-anchoring the emergency-fund model;
+ * this row then only feeds the "balance didn't update" dashboard warning.
+ */
+export const liveBalances = pgTable('live_balances', {
+  id: serial('id').primaryKey(),
+  source: text('source', { enum: ['master', 'amex', 'tangerine', 'scotia'] })
+    .notNull()
+    .unique(),
+  balance: numeric('balance', { precision: 12, scale: 2 }).notNull(),
+  capturedAt: timestamp('captured_at').defaultNow().notNull(),
+})
+
+/**
  * History of the Emergency-runway widget (dashboard). One point per day the
  * worst-case runway (the higher earner losing their job, trips included) changes,
  * starting the first day it's viewed. Lets the chart show whether the runway is

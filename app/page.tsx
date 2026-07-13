@@ -1,6 +1,6 @@
 import { desc, eq } from 'drizzle-orm'
 import { db } from '@/db'
-import { importBatches, categories, budgetGoals, syncRuns, backupRuns, digestRuns, dailyDigestPushes } from '@/db/schema'
+import { importBatches, categories, budgetGoals, syncRuns, backupRuns, digestRuns, dailyDigestPushes, liveBalances } from '@/db/schema'
 import { AppShell, Card, EmptyHint } from '@/app/components/AppShell'
 import { UploadDialog } from '@/app/components/UploadDialog'
 import { PeriodSelector } from '@/app/components/PeriodSelector'
@@ -187,6 +187,25 @@ export default async function Home({
       syncWarnings.push(
         `Scotia's mortgage interest-rate check ${last} — the monthly rate scrape may be broken ` +
           `(it retries daily until it works).`,
+      )
+    }
+  }
+
+  // Same partial-failure pattern for the per-source live balance scrape (§12/§14):
+  // the run reported OK (login + CSV worked) but the balance captured is older
+  // than that success → the scrape itself is failing, and every consumer is
+  // silently on its computed fallback. Only warns once a balance has been
+  // recorded before, so it never fires for a source whose scrape isn't built yet.
+  const liveBalanceRows = demo ? [] : await db.select().from(liveBalances)
+  for (const s of SYNC_SOURCES) {
+    const run = syncRunRows.find((r) => r.source === s.source)
+    if (run?.status !== 'ok' || !run.lastSuccessAt) continue
+    const live = liveBalanceRows.find((r) => r.source === s.source)
+    if (live && live.capturedAt < run.lastSuccessAt) {
+      syncWarnings.push(
+        `${s.label} synced OK but its account balance didn't update (last read ` +
+          `${live.capturedAt.toISOString().slice(0, 10)}). Balance-based numbers fall back to ` +
+          `estimates until the scrape works again.`,
       )
     }
   }

@@ -70,6 +70,34 @@ export async function postMortgageBalance(balance: number): Promise<MortgageInge
   return json.balance
 }
 
+export type BalanceIngestResult =
+  | { ok: true; balance: number; changed: boolean }
+  | { ok: false; error: string }
+
+/**
+ * POST an account balance scraped off a bank/card site (the source's "Current
+ * balance") to /api/ingest-balance. Same token/URL derivation as
+ * postMortgageBalance. The endpoint upserts the per-source live balance; for
+ * chequing accounts it also re-anchors the emergency-fund snapshots.
+ */
+export async function postAccountBalance(source: string, balance: number): Promise<BalanceIngestResult> {
+  const token = readSecret('budget-sync-ingest', 'ingest')
+  const ingest = process.env.INGEST_URL ?? 'http://localhost:3000/api/ingest'
+  const base = ingest.replace(/\/api\/ingest\b.*$/, '/api/ingest-balance')
+  const url = `${base}?source=${encodeURIComponent(source)}&balance=${encodeURIComponent(balance)}`
+
+  const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+  const json = (await res.json().catch(() => null)) as
+    | { balance?: BalanceIngestResult; error?: string }
+    | null
+  if (!json?.balance) {
+    throw new Error(
+      `Balance ingest endpoint returned ${res.status}${json?.error ? `: ${json.error}` : ' with an unexpected body.'}`
+    )
+  }
+  return json.balance
+}
+
 export type MortgageRateResult =
   | { ok: true; rate: number; changed: boolean }
   | { ok: false; error: string }

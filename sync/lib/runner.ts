@@ -15,7 +15,7 @@ import { chromium, type BrowserContext, type Page } from 'playwright'
 import { join } from 'path'
 import { readCredentials } from './keychain'
 import { profileDir, logsDir } from './profile'
-import { postCsv, postMortgageBalance, postMortgageRate } from './ingest'
+import { postCsv, postAccountBalance, postMortgageBalance, postMortgageRate } from './ingest'
 import { notify } from './notify'
 import { reportSyncStatus } from './status'
 import { applyStealth } from './stealth'
@@ -93,6 +93,14 @@ export async function runSync(
         await page.waitForTimeout(2000)
       }
       console.log(`→ no longer on a login screen (url: ${page.url()})`)
+      if (adapter.captureAccountBalance) {
+        try {
+          const balance = await adapter.captureAccountBalance(page)
+          console.log(`→ account balance read: ${balance ?? '(none found)'}`)
+        } catch (err) {
+          console.error('→ account balance capture failed:', err instanceof Error ? err.message : String(err))
+        }
+      }
       if (adapter.captureMortgageBalance) {
         try {
           const balance = await adapter.captureMortgageBalance(page)
@@ -141,6 +149,30 @@ export async function runSync(
       await page.bringToFront()
       await waitForMfaApproval(adapter, page)
       console.log('→ MFA approved, continuing…')
+    }
+
+    // Capture the source's own current balance (card "Current balance" /
+    // chequing balance) while we're on the post-login page. Best-effort: a
+    // failed scrape must never abort the transaction sync — the dashboard
+    // notices the balance lagging behind a successful run and warns there.
+    if (adapter.captureAccountBalance) {
+      try {
+        const balance = await adapter.captureAccountBalance(page)
+        if (balance !== null) {
+          const res = await postAccountBalance(adapter.importSource, balance)
+          if (res.ok) {
+            console.log(`✓ account balance ${res.balance.toFixed(2)}${res.changed ? '' : ' (unchanged)'}`)
+          } else {
+            console.warn(`  account balance not recorded: ${res.error}`)
+          }
+        } else {
+          console.log('→ no account balance found on the page (skipping)')
+        }
+      } catch (err) {
+        console.warn(
+          `  account balance capture failed (continuing): ${err instanceof Error ? err.message : String(err)}`
+        )
+      }
     }
 
     // Capture any landing-page balance (e.g. Scotia's mortgage) while we're still

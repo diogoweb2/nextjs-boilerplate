@@ -5,6 +5,7 @@ import { and, asc, eq, inArray, notLike } from 'drizzle-orm'
 import { db } from '@/db'
 import {
   accountSnapshots,
+  liveBalances,
   runwaySnapshots,
   transactions,
   holdingSnapshots,
@@ -15,6 +16,7 @@ import {
 } from '@/db/schema'
 import { requireAuth } from '@/app/lib/auth-guard'
 import { isDemoSession } from '@/app/lib/demo'
+import { SYNC_STALE_MS } from '@/app/lib/sync'
 import {
   accountBalances,
   fundTotal,
@@ -193,17 +195,33 @@ export async function setEmergencyTfsaHaircut(pct: number): Promise<void> {
  * statement is paid (and re-adjusts once it's paid). The Emergency Fund card (§12)
  * ignores this — only the runway nets it out.
  *
- * Per card (master, amex) we sum the **charges since the most recent payment**
- * (the current unpaid cycle): non-payment rows — charges +, refunds − — dated
- * after the last `is_payment` row. This avoids the all-time-net pitfall where
- * payments for pre-tracking charges leave a misleading negative baseline. With no
- * payment on record yet, the whole charge history counts. Summed, clamped ≥ 0.
+ * Preferred source: the **live balance scraped by the daily sync** (live_balances,
+ * the card site's own "Current balance"), used while fresh (≤ SYNC_STALE_MS).
+ * When the scrape has been failing — no row, or one older than the threshold —
+ * we fall back to the transaction-derived estimate below.
+ *
+ * Fallback: per card (master, amex) we sum the **charges since the most recent
+ * payment** (the current unpaid cycle): non-payment rows — charges +, refunds − —
+ * dated after the last `is_payment` row. This avoids the all-time-net pitfall
+ * where payments for pre-tracking charges leave a misleading negative baseline.
+ * With no payment on record yet, the whole charge history counts. Summed,
+ * clamped ≥ 0.
  */
 export async function loadOutstandingByCard(): Promise<{ master: number; amex: number }> {
   if (await isDemoSession()) {
     const { demoOutstandingByCard } = await import('@/app/lib/demo-data')
     return demoOutstandingByCard()
   }
+  const live = await db
+    .select()
+    .from(liveBalances)
+    .where(inArray(liveBalances.source, ['master', 'amex']))
+  const scraped = (card: 'master' | 'amex'): number | null => {
+    const row = live.find((r) => r.source === card)
+    if (!row || Date.now() - row.capturedAt.getTime() > SYNC_STALE_MS) return null
+    return Math.max(0, Math.round(Number(row.balance) * 100) / 100)
+  }
+
   const rows = await db
     .select({
       source: transactions.source,
@@ -224,7 +242,64 @@ export async function loadOutstandingByCard(): Promise<{ master: number; amex: n
       .reduce((s, r) => s + Number(r.amount), 0)
     return Math.max(0, Math.round(unpaid * 100) / 100)
   }
-  return { master: perCard('master'), amex: perCard('amex') }
+  return {
+    master: scraped('master') ?? perCard('master'),
+    amex: scraped('amex') ?? perCard('amex'),
+  }
+}
+
+/**
+ * Record a balance scraped off a bank/card site by the daily sync (called by the
+ * token-authed /api/ingest-balance endpoint — not requireAuth-gated). Upserts the
+ * per-source live_balances row; for the chequing accounts it ALSO writes an
+ * account_snapshots row (idempotent per day, like the mortgage ingest) so the
+ * emergency-fund model re-anchors on the real balance and absorbs any drift.
+ */
+export async function ingestLiveBalance(
+  source: 'master' | 'amex' | 'tangerine' | 'scotia',
+  balance: number,
+): Promise<{ ok: boolean; balance: number; changed: boolean; error?: string }> {
+  const rounded = Math.round(balance * 100) / 100
+  if (!Number.isFinite(rounded) || rounded < 0) {
+    return { ok: false, balance, changed: false, error: 'Invalid balance.' }
+  }
+  const now = new Date()
+  const [prior] = await db.select().from(liveBalances).where(eq(liveBalances.source, source)).limit(1)
+  const changed = !prior || Number(prior.balance) !== rounded
+  await db
+    .insert(liveBalances)
+    .values({ source, balance: rounded.toFixed(2), capturedAt: now })
+    .onConflictDoUpdate({
+      target: liveBalances.source,
+      set: { balance: rounded.toFixed(2), capturedAt: now },
+    })
+
+  if (source === 'tangerine' || source === 'scotia') {
+    const today = todayIso()
+    const [todays] = await db
+      .select()
+      .from(accountSnapshots)
+      .where(and(eq(accountSnapshots.source, source), eq(accountSnapshots.occurredAt, today)))
+      .limit(1)
+    if (todays) {
+      if (Number(todays.balance) !== rounded) {
+        await db
+          .update(accountSnapshots)
+          .set({ balance: rounded.toFixed(2) })
+          .where(eq(accountSnapshots.id, todays.id))
+      }
+    } else {
+      await db.insert(accountSnapshots).values({
+        source,
+        balance: rounded.toFixed(2),
+        occurredAt: today,
+        note: 'sync',
+      })
+    }
+  }
+
+  revalidate()
+  return { ok: true, balance: rounded, changed }
 }
 
 export async function loadOutstandingCardBalance(): Promise<number> {
