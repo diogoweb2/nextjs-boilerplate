@@ -64,10 +64,10 @@ export function StatCard({
           : 'bg-[rgba(120,255,180,0.16)] text-[#8df0b8]'
         : 'bg-[rgba(255,255,255,0.1)] text-[#9ed8b5]'
     return (
-      <div className="hero-stat col-span-2 flex flex-col gap-1.5 p-5">
+      <div className="hero-stat col-span-2 flex flex-col gap-1.5 p-4 lg:col-span-1">
         <LogoMark className="hero-watermark" />
         <span className="hero-muted text-xs font-medium uppercase tracking-widest">{label}</span>
-        <span className="font-display text-4xl font-bold tabular-nums tracking-tight leading-none">
+        <span className="font-display text-3xl font-bold tabular-nums tracking-tight leading-none">
           {value}
         </span>
         <div className="flex items-center gap-2">

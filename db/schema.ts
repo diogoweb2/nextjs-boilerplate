@@ -942,6 +942,20 @@ export const billReminderDismissals = pgTable('bill_reminder_dismissals', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 })
 
+/**
+ * Single-row marker for the header NotificationBell's "seen" state. `signature`
+ * is a fingerprint of the problem set (ids + details) last acknowledged by
+ * opening the panel; the badge shows only when the current set's signature
+ * differs, so it reappears when a new problem lands (or an existing one
+ * changes) and stays cleared otherwise. DB-backed so acknowledging on one
+ * device clears the badge everywhere.
+ */
+export const notificationSeen = pgTable('notification_seen', {
+  id: serial('id').primaryKey(),
+  signature: text('signature').notNull(),
+  seenAt: timestamp('seen_at').defaultNow().notNull(),
+})
+
 export const categoriesRelations = relations(categories, ({ many }) => ({
   merchants: many(merchants),
   transactions: many(transactions),

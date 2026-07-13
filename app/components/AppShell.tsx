@@ -2,10 +2,17 @@ import { NavBar } from '@/app/components/NavBar'
 import { slugifyAnchor } from '@/app/lib/search-index'
 
 /** Page chrome: top + bottom nav with a centered, padded content column. */
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({
+  children,
+  balances,
+}: {
+  children: React.ReactNode
+  /** Optional account balances shown in the nav (desktop sidebar / mobile More sheet). */
+  balances?: { source: string; label: string; balance: number }[]
+}) {
   return (
     <div className="min-h-screen sm:flex">
-      <NavBar />
+      <NavBar balances={balances} />
       <main className="mx-auto max-w-5xl px-4 pb-24 pt-5 sm:flex-1 sm:min-w-0 sm:pb-10 sm:pt-6">{children}</main>
     </div>
   )

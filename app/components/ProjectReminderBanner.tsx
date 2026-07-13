@@ -1,11 +1,12 @@
 'use client'
 
-import { useTransition } from 'react'
+import { useState, useTransition } from 'react'
 import { dismissProjectFromDashboard, type DashboardProject } from '@/app/actions/projects'
 import { formatCurrency } from '@/app/lib/format'
 
 /**
- * Dashboard reminder for projects whose window is near or current (§15): from
+ * Dashboard reminder, collapsed by default (header shows the count), for
+ * projects whose window is near or current (§15): from
  * ~3 weeks before start through 10 days after end. Only projects that are over
  * (in the +10-day tail) show a Dismiss button; dismissing persists in the DB
  * (`dashboardDismissed`) so it clears across devices and never reappears. The
@@ -43,11 +44,25 @@ function DismissButton({ id }: { id: number }) {
 }
 
 export function ProjectReminderBanner({ projects }: { projects: DashboardProject[] }) {
+  const [open, setOpen] = useState(false)
   if (projects.length === 0) return null
 
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3">
-      <p className="text-sm font-semibold">🧳 Project reminder</p>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-3 text-left"
+      >
+        <span className="text-sm font-semibold">
+          🧳 Project reminder
+          <span className="ml-1.5 font-normal text-[var(--muted)]">({projects.length})</span>
+        </span>
+        <span className={`text-xs text-[var(--muted)] transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden>
+          ▾
+        </span>
+      </button>
+      {open && (
       <ul className="mt-2 flex flex-col gap-2">
         {projects.map((p) => (
           <li key={p.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
@@ -62,6 +77,7 @@ export function ProjectReminderBanner({ projects }: { projects: DashboardProject
           </li>
         ))}
       </ul>
+      )}
     </div>
   )
 }

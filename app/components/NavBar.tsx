@@ -7,6 +7,7 @@ import { logout } from '@/app/actions/auth'
 import { GlobalSearch } from '@/app/components/GlobalSearch'
 import { PwaBackButton } from '@/app/components/PwaBackButton'
 import { LogoMark, LogoWordmark } from '@/app/components/Logo'
+import { formatCurrency } from '@/app/lib/format'
 
 // Stroke icon paths (24×24 grid, lucide-style) — crisper than the old unicode
 // glyphs and they inherit currentColor like everything else.
@@ -109,7 +110,11 @@ function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(href + '/')
 }
 
-export function NavBar() {
+export function NavBar({
+  balances,
+}: {
+  balances?: { source: string; label: string; balance: number }[]
+}) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const [moreOpen, setMoreOpen] = useState(false)
@@ -174,6 +179,19 @@ export function NavBar() {
           })}
         </nav>
 
+        {balances && balances.length > 0 && (
+          <div className="mb-3 flex flex-col gap-1 border-t border-[var(--border)] px-3 pt-3">
+            {balances.map((b) => (
+              <div
+                key={b.source}
+                className="flex items-baseline justify-between text-xs tabular-nums"
+              >
+                <span className="text-[var(--muted)]">{b.label}</span>
+                <span className="font-semibold">{formatCurrency(b.balance)}</span>
+              </div>
+            ))}
+          </div>
+        )}
         <p className="px-3 pb-2 text-[10px] leading-relaxed text-[var(--muted)] opacity-70">
           Family funds under 24/7 surveillance.
           <br />
@@ -222,6 +240,19 @@ export function NavBar() {
             className="absolute bottom-[4.25rem] left-2 right-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2 shadow-lg"
             onClick={(e) => e.stopPropagation()}
           >
+            {balances && balances.length > 0 && (
+              <div className="mb-1 flex gap-2 border-b border-[var(--border)] px-1 pb-2 pt-1">
+                {balances.map((b) => (
+                  <span
+                    key={b.source}
+                    className="rounded-full bg-[var(--surface-2)] px-3 py-1 text-xs font-semibold tabular-nums"
+                  >
+                    <span className="font-normal text-[var(--muted)]">{b.label} </span>
+                    {formatCurrency(b.balance)}
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-1">
               {MOBILE_MORE.map((l) => {
                 const active = isActive(pathname, l.href)

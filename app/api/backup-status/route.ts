@@ -8,7 +8,7 @@ import { ingestTokenOk } from '@/app/lib/apiToken'
  * Token-authed health endpoint for the database backup job (sync/backup). After
  * each run the backup script POSTs `{ status: 'ok' | 'fail', filename?,
  * sizeBytes?, error? }` here so the dashboard can warn when backups have gone
- * stale (no success in >2 weeks → BackupStatusBanner).
+ * stale (no success in >2 weeks → NotificationBell).
  *
  * Same bearer-token auth as /api/ingest + /api/sync-status (proxy.ts whitelists
  * it). Unlike sync_runs this is append-only history: every run inserts a fresh

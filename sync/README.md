@@ -53,8 +53,10 @@ npx tsx sync/run-rogers.ts             # headed, watch it work
 npx tsx sync/run-rogers.ts --headless  # headless (for the eventual cron)
 ```
 
-It logs in, exports "Current transactions", and prints the parsed row count to prove the
-download→parse path. Device trust persists in the profile, so MFA is skipped on daily runs.
+It logs in, exports the newest dated statement month (Rogers' "Current transactions"
+option is broken — it enables Download but never produces a file, as of Jul 2026), and
+prints the parsed row count to prove the download→parse path. Device trust persists in
+the profile, so MFA is skipped on daily runs.
 
 ## Phase 2 — ingest into the app
 
@@ -332,7 +334,7 @@ records `ok` and stamps "last worked"; on failure it records `fail` with the err
 preserving the prior last-worked time.
 
 The dashboard reads the `sync_runs` table and, if any source's latest run failed, shows a red
-banner naming the bank(s) and when each last worked (`app/components/SyncErrorBanner.tsx`) — and
+notification in the header bell naming the bank(s) and when each last worked (`app/components/NotificationBell.tsx`) — and
 tints that source red in the status bar. This surfaces a break **immediately**, instead of
 waiting for the 3-day staleness heuristic. The next successful run clears it automatically.
 

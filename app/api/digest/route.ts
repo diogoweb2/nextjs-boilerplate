@@ -18,7 +18,7 @@ import { buildYearReport } from '@/app/lib/yearReport'
  *                      it instead pushes that month's recap (once, deduped) and
  *                      skips the daily digest. Every attempt (success or failure)
  *                      is recorded to `digest_runs` — see runDailyDigestJob — so a
- *                      500 here surfaces on the dashboard (DigestStatusBanner)
+ *                      500 here surfaces on the dashboard (NotificationBell)
  *                      instead of only in the local launchd log.
  */
 export const dynamic = 'force-dynamic'

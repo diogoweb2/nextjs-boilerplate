@@ -1,5 +1,5 @@
 /**
- * Shared sync-freshness config used by the dashboard badge (SyncStatusBar) and
+ * Shared sync-freshness config used by the dashboard notification bell (NotificationBell) and
  * the daily digest (app/lib/digest.ts). One place to add a source or change the
  * staleness threshold so the two never drift.
  */

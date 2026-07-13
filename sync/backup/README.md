@@ -85,4 +85,4 @@ launchctl bootout gui/$(id -u)/com.budget.backup
 | `report-status.sh` | best-effort `POST /api/backup-status` (Keychain-token auth) |
 | `../launchd/com.budget.backup.plist` | weekly Friday 11:40 schedule |
 | `../../app/api/backup-status/route.ts` | token-authed endpoint → `backup_runs` table |
-| `../../app/components/BackupStatusBanner.tsx` | dashboard "backup overdue" banner |
+| `../../app/components/NotificationBell.tsx` | dashboard "backup overdue" notification| dashboard "backup overdue" banner |

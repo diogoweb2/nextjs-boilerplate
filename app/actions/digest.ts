@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { runDailyDigestJob } from '@/app/lib/digest'
 
 /**
- * Manual re-trigger for the daily digest, called from DigestStatusBanner's
+ * Manual re-trigger for the daily digest, called from the NotificationBell's
  * Retry button after the automated launchd run failed (see `digest_runs`).
  * Runs the exact same push logic as the token-authed POST /api/digest — this
  * just skips the bearer-token hop since the button is already behind the

@@ -349,7 +349,7 @@ export async function maybeTriggerDigest(): Promise<void> {
  * /api/digest (the local launchd runner) and the session-authed manual retry
  * (`retryDailyDigest`), so a dashboard "Retry" click runs the exact same path
  * a healthy cron run would have. Every attempt — success or thrown error — is
- * recorded to `digest_runs` so DigestStatusBanner can surface a failure and so
+ * recorded to `digest_runs` so the NotificationBell can surface a failure and so
  * a fresh run can tell "the last one failed" and push through even with no
  * new spend today (see `previousRunFailed` below).
  */

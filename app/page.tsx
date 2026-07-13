@@ -4,12 +4,11 @@ import { importBatches, categories, budgetGoals, syncRuns, backupRuns, digestRun
 import { AppShell, Card, EmptyHint } from '@/app/components/AppShell'
 import { UploadDialog } from '@/app/components/UploadDialog'
 import { PeriodSelector } from '@/app/components/PeriodSelector'
-import { SyncStatusBar } from '@/app/components/SyncStatusBar'
-import { SyncErrorBanner, type SyncFailure } from '@/app/components/SyncErrorBanner'
-import { BackupStatusBanner } from '@/app/components/BackupStatusBanner'
-import { DigestStatusBanner } from '@/app/components/DigestStatusBanner'
+import { NotificationBell } from '@/app/components/NotificationBell'
+import { notificationSignature, type NotificationItem } from '@/app/lib/notifications'
+import { loadNotificationSeenSig } from '@/app/actions/notifications'
 import { backupStale } from '@/app/lib/backup'
-import { SYNC_SOURCES, mostRecentIso } from '@/app/lib/sync'
+import { SYNC_SOURCES, mostRecentIso, formatSyncAge, syncStale } from '@/app/lib/sync'
 import { StatCard } from '@/app/components/charts/StatCard'
 import { InsightCard } from '@/app/components/InsightCard'
 import { BurndownTrajectory } from '@/app/components/BurndownTrajectory'
@@ -143,6 +142,12 @@ export default async function Home({
         lastDigestPushQuery(),
       ])
 
+  type SyncFailure = {
+    label: string
+    lastSuccessAt: string | null
+    error: string | null
+    failureCount: number
+  }
   const syncFailures: SyncFailure[] = SYNC_SOURCES.flatMap((s) => {
     const run = syncRunRows.find((r) => r.source === s.source)
     if (!run || run.status !== 'fail') return []
@@ -216,6 +221,67 @@ export default async function Home({
     const lastSync = mostRecentIso(syncTimes[i], run?.lastSuccessAt?.toISOString() ?? null)
     return { label: s.label, lastSync, failed: failedLabels.has(s.label) }
   })
+
+  // Everything that used to be an always-visible warning banner/badge (sync
+  // failures & partial-failure warnings, stale sources, overdue backup, failed
+  // digest) now feeds the header NotificationBell instead.
+  const notifications: NotificationItem[] = [
+    ...syncFailures.map((f): NotificationItem => ({
+      id: `sync-fail-${f.label}`,
+      severity: 'error',
+      title: `${f.label} sync failed`,
+      lines: [
+        `Last worked ${f.lastSuccessAt ? `${formatSyncAge(f.lastSuccessAt)} ago` : 'never'}` +
+          (f.failureCount > 1 ? ` · failed ${f.failureCount}×` : ''),
+        ...(f.error ? [f.error] : []),
+      ],
+    })),
+    ...syncWarnings.map((w, i): NotificationItem => ({
+      id: `sync-warn-${i}`,
+      severity: 'warning',
+      title: 'Sync warning',
+      lines: [w],
+    })),
+    ...syncEntries
+      .filter((e) => !e.failed && syncStale(e.lastSync))
+      .map((e): NotificationItem => ({
+        id: `sync-stale-${e.label}`,
+        severity: 'warning',
+        title: `${e.label} hasn't synced recently`,
+        lines: [e.lastSync ? `Last sync ${formatSyncAge(e.lastSync)} ago.` : 'Never synced.'],
+      })),
+    ...(backupStale(backupLastSuccess)
+      ? [
+          {
+            id: 'backup-stale',
+            severity: 'error',
+            title: backupLastSuccess ? 'Backup is overdue' : 'No backup yet',
+            lines: [
+              backupLastSuccess
+                ? `Last successful backup was ${formatSyncAge(backupLastSuccess)} ago. The weekly backup may have stopped — run "npm run backup" to back up now.`
+                : 'Your data has never been backed up to Google Drive. Run "npm run backup" (or wait for the weekly job) to create the first backup.',
+            ],
+          } satisfies NotificationItem,
+        ]
+      : []),
+    ...(lastDigestRun?.status === 'fail'
+      ? [
+          {
+            id: 'digest-fail',
+            severity: 'error',
+            title: 'Daily digest failed',
+            lines: [
+              `Last attempt ${formatSyncAge(lastDigestRun.lastRunAt.toISOString())} ago failed.`,
+              ...(lastDigestRun.error ? [lastDigestRun.error] : []),
+            ],
+            kind: 'digest-retry',
+          } satisfies NotificationItem,
+        ]
+      : []),
+  ]
+  const notifSig = notificationSignature(notifications)
+  const notifSeenSig = demo ? null : await loadNotificationSeenSig()
+  const notifUnseen = notifications.length > 0 && notifSig !== notifSeenSig
 
   const all = allFlows.filter((t) => t.flow === 'expense')
 
@@ -361,8 +427,14 @@ export default async function Home({
   const budgetInsights = buildBudgetInsights(budget, burndown)
   const allInsightCards = ov.hasData ? [...budgetInsights, ...statInsights, ...insights.cards] : []
 
+  // Chequing balances render in the nav chrome (sidebar bottom / mobile More
+  // sheet) instead of taking a row of the page.
+  const navBalances = emergency.hasData
+    ? emergency.accounts.filter((a) => a.source === 'tangerine' || a.source === 'scotia')
+    : []
+
   return (
-    <AppShell>
+    <AppShell balances={navBalances}>
       {showPaceModal && <PaceAlertModal alerts={paceAlerts} />}
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -371,8 +443,14 @@ export default async function Home({
             {ov.anchor ? ov.periodLabel : 'Upload a statement to begin'}
           </p>
         </div>
-        <div className="flex flex-col items-end gap-2">
-          <SyncStatusBar entries={syncEntries} lastNotified={lastDigestPush} />
+        <div className="flex items-center gap-2">
+          <NotificationBell
+            items={notifications}
+            unseen={notifUnseen}
+            signature={notifSig}
+            syncEntries={syncEntries}
+            lastNotified={lastDigestPush}
+          />
           <PeriodSelector
             monthDropdownOnly
             currentMonthDefault
@@ -384,39 +462,16 @@ export default async function Home({
       <YearReportReminder year={reminderReportYear} />
       <ReportReminder month={reminderReportMonth} />
 
-      {billReminders.length > 0 && (
-        <div className="mb-5">
-          <BillReminderBanner reminders={billReminders} />
+      {(billReminders.length > 0 || dashboardProjects.length > 0) && (
+        <div className="mb-5 grid items-start gap-5 sm:grid-cols-2">
+          {billReminders.length > 0 && <BillReminderBanner reminders={billReminders} />}
+          {dashboardProjects.length > 0 && <ProjectReminderBanner projects={dashboardProjects} />}
         </div>
       )}
 
       {renewalWarnings.length > 0 && (
         <div className="mb-5">
           <RenewalWarningBanner warnings={renewalWarnings} />
-        </div>
-      )}
-
-      {dashboardProjects.length > 0 && (
-        <div className="mb-5">
-          <ProjectReminderBanner projects={dashboardProjects} />
-        </div>
-      )}
-
-      {(syncFailures.length > 0 || syncWarnings.length > 0) && (
-        <div className="mb-5">
-          <SyncErrorBanner failures={syncFailures} warnings={syncWarnings} />
-        </div>
-      )}
-
-      {backupStale(backupLastSuccess) && (
-        <div className="mb-5">
-          <BackupStatusBanner lastSuccessAt={backupLastSuccess} />
-        </div>
-      )}
-
-      {lastDigestRun?.status === 'fail' && (
-        <div className="mb-5">
-          <DigestStatusBanner lastRunAt={lastDigestRun.lastRunAt.toISOString()} error={lastDigestRun.error} />
         </div>
       )}
 
@@ -437,25 +492,6 @@ export default async function Home({
           <OtherCategoryBanner transactions={otherTxns} month={exactMonth} />
         </div>
       )}
-
-      {emergency.hasData && (() => {
-        const scotia = emergency.accounts.find((a) => a.source === 'scotia')
-        const tangerine = emergency.accounts.find((a) => a.source === 'tangerine')
-        if (!scotia && !tangerine) return null
-        return (
-          <div className="mb-5 flex flex-wrap gap-2">
-            {[tangerine, scotia].filter(Boolean).map((a) => (
-              <span
-                key={a!.source}
-                className="rounded-full bg-[var(--surface-2)] px-3 py-1 text-sm font-semibold tabular-nums"
-              >
-                <span className="font-normal text-[var(--muted)]">{a!.label} </span>
-                {formatCurrency(a!.balance)}
-              </span>
-            ))}
-          </div>
-        )
-      })()}
 
       {!ov.hasData ? (
         <Card title="Get started">

@@ -1392,8 +1392,9 @@ not a dedup table. If the route throws (e.g. a DB hiccup → 500), the failure i
 the error is re-thrown/returned, so the local launchd runner's own `notify()` (Mac banner, easy to miss)
 isn't the only signal.
 
-`app/page.tsx` reads the most recent `digest_runs` row; if `status === 'fail'` it renders
-`DigestStatusBanner` with a **Retry** button that calls `retryDailyDigest`, re-running the exact same
+`app/page.tsx` reads the most recent `digest_runs` row; if `status === 'fail'` it adds a
+"Daily digest failed" notification to the header bell (`NotificationBell`) with a **Retry**
+button that calls `retryDailyDigest`, re-running the exact same
 `runDailyDigestJob` path (no ingest token needed — the button is already behind the session cookie).
 The banner clears once a run succeeds (`revalidatePath('/')`).
 

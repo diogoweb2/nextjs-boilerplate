@@ -1,12 +1,13 @@
 'use client'
 
-import { useTransition } from 'react'
+import { useState, useTransition } from 'react'
 import { dismissBillReminder } from '@/app/actions/bills'
 import type { BillReminder } from '@/app/lib/bill-calendar'
 import { formatCurrency } from '@/app/lib/format'
 
 /**
  * Top-of-dashboard warning for bills whose expected day is within 2 days (§19).
+ * Collapsed by default (header shows the count); expands on click.
  * Clears on its own once the payment posts; each line is also dismissible — the
  * dismissal persists in the DB (per bill + due month), so it clears across
  * devices and next month's cycle warns again.
@@ -36,6 +37,7 @@ function DismissButton({ billKey, dueYm }: { billKey: string; dueYm: string }) {
 }
 
 export function BillReminderBanner({ reminders }: { reminders: BillReminder[] }) {
+  const [open, setOpen] = useState(false)
   if (reminders.length === 0) return null
 
   return (
@@ -43,7 +45,20 @@ export function BillReminderBanner({ reminders }: { reminders: BillReminder[] })
       role="alert"
       className="rounded-lg border border-[var(--warning)]/40 bg-[var(--warning)]/10 px-4 py-3"
     >
-      <p className="text-sm font-semibold">📅 Bill payment coming up</p>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-3 text-left"
+      >
+        <span className="text-sm font-semibold">
+          📅 Bill payment coming up
+          <span className="ml-1.5 font-normal text-[var(--muted)]">({reminders.length})</span>
+        </span>
+        <span className={`text-xs text-[var(--muted)] transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden>
+          ▾
+        </span>
+      </button>
+      {open && (
       <ul className="mt-2 flex flex-col gap-2">
         {reminders.map((r) => (
           <li key={r.billKey} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
@@ -60,6 +75,7 @@ export function BillReminderBanner({ reminders }: { reminders: BillReminder[] })
           </li>
         ))}
       </ul>
+      )}
     </div>
   )
 }

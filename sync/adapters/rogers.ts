@@ -1,4 +1,4 @@
-import type { Page } from 'playwright'
+import type { Download, Page } from 'playwright'
 import { join } from 'path'
 import { downloadDir } from '../lib/profile'
 import type { Adapter, Credentials, DateRange } from './types'
@@ -93,40 +93,113 @@ async function isMfaChallenge(page: Page): Promise<boolean> {
 
 /**
  * Rogers' export UI is statement-period based (a `#month-select` dropdown), not
- * an arbitrary date range, so `_range` is unused: we always pull
- * "Current transactions" (the active, unbilled cycle) — that's the rolling
- * window the daily sync needs. Re-importing is free (dedup on Reference Number),
- * so there's no harm re-downloading the same cycle every day.
+ * an arbitrary date range, so `_range` is unused. We pull the NEWEST dated
+ * statement option (values like "2026-07-11", newest first) — NOT the
+ * "Current transactions" option, which is broken on Rogers' side: selecting it
+ * enables Download, the modal closes, and no file is ever produced (confirmed by
+ * hand, Jul 2026). Re-importing is free (dedup on Reference Number), so
+ * re-downloading the same statement every day is harmless.
  *
- * Boundary caveat: on the day a statement closes, the last days of the old cycle
- * move from "Current transactions" into a dated statement option. If a gap ever
- * shows up, the cheap fix is to ALSO download the most recent dated option each
- * run — dedup makes the overlap a no-op. Not built until it's a real problem.
+ * Boundary caveat: the newest statement lags the unbilled cycle, so transactions
+ * after the last statement date only land once the next statement is cut — the
+ * sync trails by up to a cycle. If Rogers ever fixes "Current transactions",
+ * switch back for same-day data.
  */
 async function exportCsv(page: Page, _range: DateRange): Promise<string> {
   await page.goto(TRANSACTIONS_URL, { waitUntil: 'domcontentloaded' })
 
   // The `aria-label="Download transactions"` sits on an inner <p> that is only the
-  // LABEL: the click handler lives on its parent <div>, and the <p> itself carries
-  // `hidden md:block` (invisible on narrow viewports). So anchor on the stable
-  // aria-label but click the parent — clicking the label alone doesn't open the
-  // dialog. Class names are Tailwind soup Rogers reshuffles freely; never match those.
+  // LABEL: the click handler lives on its parent <div>. So anchor on the stable
+  // aria-label but click the parent. Class names are Tailwind soup Rogers reshuffles
+  // freely; never match those.
   const openDialog = page.locator('[aria-label="Download transactions"]').locator('xpath=..')
   await openDialog.waitFor({ state: 'visible', timeout: 15_000 })
-  await openDialog.click()
 
   const monthSelect = page.locator('#month-select')
-  await monthSelect.waitFor({ state: 'visible', timeout: 10_000 })
-  await monthSelect.selectOption('current_transactions')
 
-  // Arm the download listener before the click that triggers it.
-  const [download] = await Promise.all([
-    page.waitForEvent('download'),
-    page.getByRole('button', { name: 'Download', exact: true }).click(),
-  ])
+  // Open the dialog by DISPATCHING the pointer/mouse sequence onto the element,
+  // rather than with Playwright's real-mouse `.click()`.
+  //
+  // Playwright's click moves a virtual mouse to the element's center and clicks
+  // there; on this page that lands but never opens the dialog. Dispatching the
+  // events directly onto the node — verified by hand in DevTools — does open it.
+  // The trigger is a plain <div> (no `disabled`, no button role), so Playwright's
+  // actionability checks pass regardless and give us no signal either way.
+  //
+  // Retried because React renders the <div> before hydration wires its handler, so
+  // an early dispatch is silently swallowed. Success is defined as "the dialog is
+  // actually on screen", not "the click returned" — the previous version's failure
+  // showed up much later, on a dialog that had never opened. Re-clicking is safe:
+  // the trigger opens the dialog, it doesn't toggle it.
+  for (let attempt = 1; ; attempt++) {
+    await openDialog.evaluate((el) => {
+      const r = el.getBoundingClientRect()
+      const init: MouseEventInit = {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        clientX: r.x + r.width / 2,
+        clientY: r.y + r.height / 2,
+        button: 0,
+      }
+      for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+        el.dispatchEvent(new MouseEvent(type, init))
+      }
+    })
+    try {
+      await monthSelect.waitFor({ state: 'visible', timeout: 2_000 })
+      break
+    } catch {
+      if (attempt >= 10) {
+        throw new Error(
+          'The download dialog never opened after 10 clicks on "Download transactions".'
+        )
+      }
+      await page.waitForTimeout(1_000)
+    }
+  }
+
+  // Pick the newest dated statement. The options are ordered newest-first, after
+  // the "-Select-" placeholder ("") and the broken "current_transactions" entry,
+  // and their values are the statement close date (e.g. "2026-07-11") — so the
+  // first date-shaped value is the most recent month.
+  const newest = await monthSelect.evaluate((el) => {
+    const select = el as HTMLSelectElement
+    return (
+      Array.from(select.options)
+        .map((o) => o.value)
+        .find((v) => /^\d{4}-\d{2}-\d{2}$/.test(v)) ?? null
+    )
+  })
+  if (!newest) {
+    throw new Error('No dated statement option found in the #month-select dropdown.')
+  }
+  await monthSelect.selectOption(newest)
+
+  // Arm the download listener BEFORE the click that triggers it, and listen on the
+  // whole context rather than just this page: Rogers hands the CSV off through a
+  // brand-new tab, and Playwright fires `download` on the page that actually
+  // receives it — so a plain `page.waitForEvent('download')` waits forever on the
+  // wrong page while the click itself worked fine. The export is also generated
+  // server-side, so give it well over the 30s default.
+  const downloadPromise = new Promise<Download>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error('No download started within 90s of clicking Download.')),
+      90_000
+    )
+    const settle = (d: Download) => {
+      clearTimeout(timer)
+      resolve(d)
+    }
+    page.once('download', settle)
+    page.context().on('page', (popup) => popup.once('download', settle))
+  })
+
+  await page.getByRole('button', { name: 'Download', exact: true }).click()
+  const download = await downloadPromise
 
   const stamp = new Date().toISOString().slice(0, 10)
-  const dest = join(downloadDir('rogers'), `rogers-current-${stamp}.csv`)
+  const dest = join(downloadDir('rogers'), `rogers-${newest}-dl${stamp}.csv`)
   await download.saveAs(dest)
   return dest
 }

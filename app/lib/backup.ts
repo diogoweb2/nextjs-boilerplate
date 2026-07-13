@@ -1,6 +1,6 @@
 /**
  * Backup-freshness config used by the dashboard staleness banner
- * (BackupStatusBanner). The weekly launchd job (sync/backup) reports each run to
+ * (NotificationBell). The weekly launchd job (sync/backup) reports each run to
  * /api/backup-status → backup_runs; here we decide when "no recent backup"
  * becomes a visible warning. Display reuses formatSyncAge from ./sync.
  */
