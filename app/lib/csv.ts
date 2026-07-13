@@ -182,7 +182,12 @@ function parseMaster(rows: string[][]): ParsedRow[] {
       rawCategory: fixMojibake(r[idx.category] ?? '') || null,
       cardLast4: lastDigits(r[idx.card] ?? ''),
       country: (r[idx.country] ?? '').trim() || null,
-      isPayment: isPaymentDescription(merchant) || (amount < 0 && !(r[idx.category] ?? '').trim()),
+      // Credits with no merchant category are bank payments — except cashback
+      // redemptions ("CashBack / Remises"), which are statement credits that
+      // reduce what's owed, not payments.
+      isPayment:
+        isPaymentDescription(merchant) ||
+        (amount < 0 && !(r[idx.category] ?? '').trim() && !/cash\s?back|remises/i.test(merchant)),
     })
   }
   return out

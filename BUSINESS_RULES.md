@@ -1552,7 +1552,12 @@ the calendar too. Desktop renders a 7-column month grid; mobile renders an agend
    E-Transfer bills (trailer storage) once the owner confirms them as rules on Budget › Bills.
 3. **"Credit card payment" pseudo-bill** (`billKey: 'cc'`): bank-side `is_payment` rows toward
    tracked cards are excluded from `loadAllFlows`, so `loadCcPaymentHistory` (app/actions/bills.ts)
-   feeds them in separately. Needs ≥2 past months of payments to project.
+   feeds them in separately. Needs ≥2 past months of payments to project. The **expected amount**
+   is what's actually owed right now — `loadCcExpectedPayment` = outstanding per card since its
+   last payment (§14's `loadOutstandingByCard`) + the §14 pending-charges buffer — because past
+   payments are lumpy and their average badly misestimates the next one. The 3-month payment mean
+   is only the fallback when no live balance is available (e.g. demo). Cashback redemptions
+   ("CashBack / Remises") are statement credits, never `is_payment`.
 
 **Day & amount.** The exact due date isn't knowable from statements, so each bill sits on its
 **most common posting day-of-month** (mode over the last 12 occurrences, ties to the most

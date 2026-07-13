@@ -6,6 +6,8 @@ import { db } from '@/db'
 import { billReminderDismissals, transactions } from '@/db/schema'
 import { requireAuth } from '@/app/lib/auth-guard'
 import { isDemoSession } from '@/app/lib/demo'
+import { loadOutstandingCardBalance } from '@/app/actions/emergency'
+import { loadCashflowConfig } from '@/app/actions/cashflow'
 import type { BillDismissal, CcPayment } from '@/app/lib/bill-calendar'
 
 /**
@@ -22,6 +24,20 @@ export async function loadCcPaymentHistory(): Promise<CcPayment[]> {
   return rows
     .map((r) => ({ date: r.txnDate, amount: Math.abs(Number(r.amount)) }))
     .filter((r) => r.amount > 0)
+}
+
+/**
+ * Expected amount of the next credit-card payment: what's actually owed on the
+ * tracked cards right now (charges since each card's last payment, §14's
+ * `loadOutstandingByCard`) plus the owner's pending-charges buffer. Feeds the
+ * cc pseudo-bill so the reminder shows the real upcoming payment instead of an
+ * average of past (lumpy) payments. Null when nothing is owed.
+ */
+export async function loadCcExpectedPayment(): Promise<number | null> {
+  if (await isDemoSession()) return null
+  const [outstanding, config] = await Promise.all([loadOutstandingCardBalance(), loadCashflowConfig()])
+  const total = Math.round((outstanding + config.ccPendingBuffer) * 100) / 100
+  return total > 0 ? total : null
 }
 
 /** Dismissed "bill due soon" reminders, for the banner builder (see §19). */

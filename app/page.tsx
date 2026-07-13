@@ -30,7 +30,7 @@ import { loadSurplusPrompts } from '@/app/actions/surplus'
 import { loadDashboardProjects } from '@/app/actions/projects'
 import { ProjectReminderBanner } from '@/app/components/ProjectReminderBanner'
 import { loadEmergencyFund } from '@/app/actions/emergency'
-import { loadCcPaymentHistory, loadBillDismissals } from '@/app/actions/bills'
+import { loadCcPaymentHistory, loadBillDismissals, loadCcExpectedPayment } from '@/app/actions/bills'
 import { buildBillCalendar, buildBillReminders } from '@/app/lib/bill-calendar'
 import { BillsCalendar } from '@/app/components/BillsCalendar'
 import { BillReminderBanner } from '@/app/components/BillReminderBanner'
@@ -314,13 +314,14 @@ export default async function Home({
   // plus a top-of-page reminder for bills expected within the next 2 days.
   const todayIso = new Date().toISOString().slice(0, 10)
   const ccPayments = demo ? [] : await loadCcPaymentHistory()
+  const ccExpected = demo ? null : await loadCcExpectedPayment()
   const billCalendar =
     budget.hasData && exactMonth
-      ? buildBillCalendar(allFlows, rules, exactMonth, FIXED_CATEGORIES, ccPayments, todayIso)
+      ? buildBillCalendar(allFlows, rules, exactMonth, FIXED_CATEGORIES, ccPayments, todayIso, ccExpected)
       : null
   const billReminders = demo
     ? []
-    : buildBillReminders(allFlows, rules, FIXED_CATEGORIES, ccPayments, todayIso, await loadBillDismissals())
+    : buildBillReminders(allFlows, rules, FIXED_CATEGORIES, ccPayments, todayIso, await loadBillDismissals(), ccExpected)
 
   // Annual-subscription renewal warnings (§18b): declared-yearly subs due to
   // recharge within ~1 month, so the owner can cancel first. Skipped in the demo.

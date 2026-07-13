@@ -203,8 +203,19 @@ function billFromRule(
   }
 }
 
-/** The credit-card payment pseudo-bill (manual monthly payment to tracked cards). */
-function ccBill(ccPayments: CcPayment[], ym: string, todayIso: string): CalendarBill | null {
+/**
+ * The credit-card payment pseudo-bill (manual monthly payment to tracked cards).
+ * When the payment hasn't posted yet, the expected amount is what's actually
+ * owed on the cards (`ccExpected` = outstanding since last payment + pending
+ * buffer, from loadCcExpectedPayment) — past payments are too lumpy to average.
+ * The 3-month mean is only the fallback when no live balance is available.
+ */
+function ccBill(
+  ccPayments: CcPayment[],
+  ym: string,
+  todayIso: string,
+  ccExpected: number | null
+): CalendarBill | null {
   if (ccPayments.length === 0) return null
   const months = new Map<string, number>()
   for (const p of ccPayments) {
@@ -219,7 +230,7 @@ function ccBill(ccPayments: CcPayment[], ym: string, todayIso: string): Calendar
   const amount =
     paid !== undefined
       ? paid
-      : mean(occ.slice(-3).map((k) => months.get(k) ?? 0))
+      : ccExpected ?? mean(occ.slice(-3).map((k) => months.get(k) ?? 0))
   const day =
     paid !== undefined
       ? dayOf(posted[posted.length - 1])
@@ -280,7 +291,8 @@ export function buildBillCalendar(
   ym: string,
   fixedCats: string[],
   ccPayments: CcPayment[],
-  todayIso: string
+  todayIso: string,
+  ccExpected: number | null = null
 ): BillCalendar {
   const bills: CalendarBill[] = []
   const ruleIds = new Set(rules.map((r) => r.merchantId))
@@ -303,7 +315,7 @@ export function buildBillCalendar(
   }
 
   // 3. The manual credit-card payment.
-  const cc = ccBill(ccPayments, ym, todayIso)
+  const cc = ccBill(ccPayments, ym, todayIso, ccExpected)
   if (cc) bills.push(cc)
 
   bills.sort((a, b) => a.day - b.day || b.amount - a.amount)
@@ -332,7 +344,8 @@ export function buildBillReminders(
   fixedCats: string[],
   ccPayments: CcPayment[],
   todayIso: string,
-  dismissals: BillDismissal[] = []
+  dismissals: BillDismissal[] = [],
+  ccExpected: number | null = null
 ): BillReminder[] {
   const today = todayIso.slice(0, 10)
   const todayYm = monthKey(today)
@@ -340,7 +353,7 @@ export function buildBillReminders(
 
   const reminders: BillReminder[] = []
   for (const ym of [todayYm, addMonths(todayYm, 1)]) {
-    const cal = buildBillCalendar(all, rules, ym, fixedCats, ccPayments, todayIso)
+    const cal = buildBillCalendar(all, rules, ym, fixedCats, ccPayments, todayIso, ccExpected)
     for (const b of cal.bills) {
       if (b.status !== 'due') continue
       const daysUntil = Math.round((parseUtc(b.date) - parseUtc(today)) / MS_PER_DAY)
