@@ -37,7 +37,18 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   const text = await request.text()
   if (!text.trim()) {
-    return Response.json({ ok: false, error: 'Empty body.' }, { status: 400 })
+    // An empty statement (e.g. no Amex spend this period) is not an error — treat
+    // it as a successful no-op so the sync runner doesn't report a failure.
+    return Response.json(
+      {
+        ok: true,
+        source: expected ?? null,
+        inserted: 0,
+        skipped: 0,
+        period: new Date().toISOString().slice(0, 7),
+      },
+      { status: 200 },
+    )
   }
 
   const result = await ingestStatement(text, filename, expected)

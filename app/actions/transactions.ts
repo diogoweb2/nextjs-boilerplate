@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { revalidatePath } from 'next/cache'
 import { and, eq, ilike, inArray } from 'drizzle-orm'
 import { db } from '@/db'
-import { transactions, merchants, categories, merchantAmountRules } from '@/db/schema'
+import { transactions, merchants, categories, merchantAmountRules, transferReviews } from '@/db/schema'
 import { requireAuth } from '@/app/lib/auth-guard'
 
 function revalidateAll() {
@@ -231,6 +231,23 @@ export async function upsertAmountRule(txnId: number, note: string | null): Prom
       target: [merchantAmountRules.merchantId, merchantAmountRules.amount],
       set: { categoryId: txn.categoryId, note: cleanNote },
     })
+  // A remembered merchant+amount is already decided — dismiss any pending
+  // "what was this for?" prompts queued for matching transactions.
+  const matching = await db
+    .select({ id: transactions.id })
+    .from(transactions)
+    .where(and(eq(transactions.merchantId, txn.merchantId), eq(transactions.amount, txn.amount)))
+  if (matching.length > 0) {
+    await db
+      .update(transferReviews)
+      .set({ status: 'dismissed' })
+      .where(
+        and(
+          inArray(transferReviews.transactionId, matching.map((m) => m.id)),
+          eq(transferReviews.status, 'pending')
+        )
+      )
+  }
   revalidateAll()
 }
 

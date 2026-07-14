@@ -248,15 +248,18 @@ export async function ingestStatement(
   // analytics stay correct every year without manual edits.
   await reconcileBelairSplit()
 
+  // Apply merchant+amount rules first: auto-fill category and note on matching new
+  // txns. A remembered merchant+amount is already explained, so matched txns are
+  // excluded from the transfer-review prompts below.
+  const remembered = await applyAmountRules(inserted.map((r) => r.id))
+  const unexplained = inserted.map((r) => r.id).filter((id) => !remembered.has(id))
+
   // Queue investment transfers (out), unknown outbound withdrawals (out, e.g. an
   // internal Tangerine↔Scotia transfer), and unknown inbound deposits (in) for the
   // dashboard "what was this for?" prompt.
-  await createTransferReviews(inserted.map((r) => r.id))
-  await createWithdrawalReviews(inserted.map((r) => r.id))
-  await createInboundReviews(inserted.map((r) => r.id))
-
-  // Apply merchant+amount rules: auto-fill category and note on matching new txns.
-  await applyAmountRules(inserted.map((r) => r.id))
+  await createTransferReviews(unexplained)
+  await createWithdrawalReviews(unexplained)
+  await createInboundReviews(unexplained)
 
   // Keep the net-zero recovery goal in sync (auto-complete / revive on new data).
   await reconcileNetZeroGoals()
@@ -269,11 +272,14 @@ export async function ingestStatement(
  * A match (same merchant_id + exact amount) overwrites the transaction's category
  * and note with the saved rule — so recurring fixed payments like a monthly garage
  * transfer are auto-categorized and labelled without touching the merchant level.
+ * Returns the ids of matched transactions so the caller can skip queueing them
+ * for transfer review — a remembered amount is already decided.
  */
-async function applyAmountRules(txnIds: number[]): Promise<void> {
-  if (txnIds.length === 0) return
+async function applyAmountRules(txnIds: number[]): Promise<Set<number>> {
+  const matched = new Set<number>()
+  if (txnIds.length === 0) return matched
   const rules = await db.select().from(merchantAmountRules)
-  if (rules.length === 0) return
+  if (rules.length === 0) return matched
 
   const txns = await db
     .select({ id: transactions.id, merchantId: transactions.merchantId, amount: transactions.amount })
@@ -285,12 +291,14 @@ async function applyAmountRules(txnIds: number[]): Promise<void> {
       (r) => r.merchantId === txn.merchantId && Number(r.amount) === Number(txn.amount)
     )
     if (rule) {
+      matched.add(txn.id)
       await db
         .update(transactions)
         .set({ categoryId: rule.categoryId, note: rule.note })
         .where(eq(transactions.id, txn.id))
     }
   }
+  return matched
 }
 
 /**

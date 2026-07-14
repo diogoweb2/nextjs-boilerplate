@@ -173,6 +173,16 @@ All actions live in `app/actions/merchants.ts`:
 - **Teach a substring** (`addContainsRule`): adds a `contains` rule AND retroactively repoints
   existing matching transactions.
 
+### Amount rules — "Remember" (`merchant_amount_rules`)
+A finer-grained learning layer for merchants whose meaning depends on the **exact amount**
+(e.g. `E-Transfer Out` $111.87 = the trailer rental). Clicking **Remember** on a transaction
+(`upsertAmountRule`, `app/actions/transactions.ts`) saves merchant + exact amount → current
+category + note (and doubles as saving the note). On import (`applyAmountRules`,
+`app/actions/import.ts`) a matching new transaction gets that category and note auto-filled.
+A remembered merchant+amount is treated as **already decided**: matched transactions are
+**excluded from all transfer-review queues** (§10 import hook), and clicking Remember also
+**dismisses any pending reviews** on existing transactions with the same merchant+amount.
+
 ### Seeds (`app/lib/seed-data.ts`, applied by `db/seed.ts`)
 - `CATEGORY_SEED`: starter categories with colors.
 - `BRAND_SEED`: well-known merchants + `contains` patterns (Amazon, Costco/Costco Gas,
@@ -670,7 +680,9 @@ new **`Goal Spend`** income category, so it shows on the Income page as its own 
 - **Inbound transfer review** — when the real money lands (see below).
 
 ### Import hook (`app/actions/import.ts` → `createTransferReviews` / `createWithdrawalReviews` / `createInboundReviews`)
-After each import:
+After each import, amount rules run **first** (`applyAmountRules`): any transaction matching a
+remembered merchant+amount (§3) is considered already decided and is **skipped by all three
+review queues** below. Then:
 - **Outbound** (`createTransferReviews`, `direction='out'`): every newly-inserted Scotia transfer the
   classifier routed to the **`Investment (iTrade)`** payee (the recurring **$900** and any
   **non-$1,100** customer transfer — `classifyScotia`) gets a `pending` review. The exact
