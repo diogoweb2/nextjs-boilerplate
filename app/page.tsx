@@ -201,12 +201,18 @@ export default async function Home({
   // than that success → the scrape itself is failing, and every consumer is
   // silently on its computed fallback. Only warns once a balance has been
   // recorded before, so it never fires for a source whose scrape isn't built yet.
+  // Compare by DAY (not raw timestamp): within one successful run the balance is
+  // captured a few seconds BEFORE the run reports 'ok', so a timestamp compare
+  // would flag every healthy run. A lagging scrape means an earlier CALENDAR day.
   const liveBalanceRows = demo ? [] : await db.select().from(liveBalances)
   for (const s of SYNC_SOURCES) {
     const run = syncRunRows.find((r) => r.source === s.source)
     if (run?.status !== 'ok' || !run.lastSuccessAt) continue
     const live = liveBalanceRows.find((r) => r.source === s.source)
-    if (live && live.capturedAt < run.lastSuccessAt) {
+    if (
+      live &&
+      live.capturedAt.toISOString().slice(0, 10) < run.lastSuccessAt.toISOString().slice(0, 10)
+    ) {
       syncWarnings.push(
         `${s.label} synced OK but its account balance didn't update (last read ` +
           `${live.capturedAt.toISOString().slice(0, 10)}). Balance-based numbers fall back to ` +
