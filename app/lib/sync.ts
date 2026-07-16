@@ -8,10 +8,13 @@ export type SyncSource = {
   source: 'amex' | 'master' | 'scotia' | 'tangerine'
   label: string
   /**
-   * Sources that gate the daily digest notification. The push fires once all
-   * of these have synced today, even if the others (scotia/tangerine) haven't —
-   * Master and Amex carry the bulk of daily spend, so waiting on the slower
-   * accounts would delay (or drop) the notification.
+   * Sources that must be 'ok' today before the daily digest can push. The
+   * event-triggered push additionally waits for the *other* sources
+   * (scotia/tangerine) to finish attempting (ok or fail) so a late batch can't
+   * change the pace % minutes after the notification reported it — but only
+   * these required sources can *block* the push outright: if a non-required
+   * runner dies without ever reporting, the 11:15 fallback still fires on
+   * Master + Amex alone.
    */
   requiredForDigest?: boolean
 }

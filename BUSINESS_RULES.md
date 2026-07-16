@@ -1417,23 +1417,31 @@ compound into "also no notification today" once it's back up. This is also what 
 send a push: the failed run it's reacting to *is* the previous row. (`allSyncsOk` and `pushConfigured()`
 are **not** bypassed — a missing required sync or missing VAPID keys still skips.)
 
-**Which syncs gate the push:** only the **digest-required** sources — **Master** and **Amex** — need to
-be 'ok'-today for the notification to fire (`DIGEST_REQUIRED_SOURCES` in `app/lib/sync.ts`, the
-`requiredForDigest` subset of `SYNC_SOURCES`). The slower bank accounts (Scotia, Tangerine) don't gate it —
-they carry little daily spend, so waiting on them would delay or drop the notification. Flip a source's
-`requiredForDigest` flag to change the gate.
+**Which syncs gate the push:** there are two gates with different strictness.
+`runDailyDigestJob` (the 11:15 fallback and manual Retry) pushes once the **digest-required** sources —
+**Master** and **Amex** — are 'ok'-today (`DIGEST_REQUIRED_SOURCES` in `app/lib/sync.ts`, the
+`requiredForDigest` subset of `SYNC_SOURCES`); a Scotia/Tangerine runner that dies without ever
+reporting can't silence the day's notification. The *event-triggered* path (`maybeTriggerDigest`) is
+stricter: it additionally waits until **every** source has finished attempting today (lastRunAt today,
+'ok' **or** 'fail') before firing. Rationale: the push used to fire the moment Master+Amex were clean and
+race the slower accounts — a Scotia batch landing minutes later (mortgage / property-tax rows, which
+shrink the discretionary budget) changed the dashboard's pace % right after the notification reported a
+different one. Waiting for the last runner makes the pushed numbers match the site. Flip a source's
+`requiredForDigest` flag to change which sources can block the push outright.
 
 ### Event-triggered digest — don't wait for 11:15 (`maybeTriggerDigest`)
 The 11:15 launchd job is a fallback now, not the only trigger. `maybeTriggerDigest` (`app/lib/digest.ts`)
 is called from `next/server`'s `after()` — so it runs post-response and never adds latency — from the two
 places a source can turn 'ok' in `sync_runs`:
 
-- `POST /api/sync-status` (the automated per-bank runner reporting in), after every `status: 'ok'` write.
+- `POST /api/sync-status` (the automated per-bank runner reporting in), after **every** write — 'ok' or
+  'fail'. A failed source has still *finished* for the day, and can be the last one the push is waiting on.
 - `importCsv` (`app/actions/import.ts`), after a manual CSV upload's `clearSyncFailure` — this is what
   makes hand-fixing the one bank that failed automatically also trigger it, same day, no waiting.
 
-`maybeTriggerDigest` first checks `allSourcesSyncedToday()` (the same Master+Amex-'ok'-today check
-`runDailyDigestJob` gates on) and only calls `runDailyDigestJob` once that's true — so the earlier
+`maybeTriggerDigest` first checks `allSourcesFinishedToday()` (every source ran today, Master+Amex 'ok';
+stricter than the Master+Amex-only `allSourcesSyncedToday()` gate `runDailyDigestJob` pushes behind — see
+"Which syncs gate the push" above) and only calls `runDailyDigestJob` once that's true — so the earlier
 syncs each morning are a cheap no-op, not repeated full digest computations. Because `dailyDigestPushes` dedups
 per UTC date, whichever of these fires first each day (an event trigger, or the 11:15 fallback) is the one
 that actually pushes; the rest just record another `digest_runs` row. Errors are swallowed at the call site

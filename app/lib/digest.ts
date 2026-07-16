@@ -311,8 +311,9 @@ async function recordDigestRun(status: 'ok' | 'fail', error?: string): Promise<v
  * True once every digest-required source (Master + Amex) has a successful run
  * today (UTC date). Requires status='ok' AND lastRunAt on today's UTC calendar
  * date so that yesterday's stale 'ok' doesn't count as today's sync being done.
- * The slower accounts (Scotia/Tangerine) don't gate the push. Shared by the
- * daily push gate below and by `maybeTriggerDigest`'s early-fire check.
+ * This is the hard gate `runDailyDigestJob` pushes behind: the slower accounts
+ * (Scotia/Tangerine) don't block the 11:15 fallback push, so a runner that dies
+ * without ever reporting in can't silence the whole day's notification.
  */
 export async function allSourcesSyncedToday(): Promise<boolean> {
   const todayUtc = new Date()
@@ -327,19 +328,45 @@ export async function allSourcesSyncedToday(): Promise<boolean> {
 }
 
 /**
+ * True once EVERY source has finished attempting today (any status) and the
+ * digest-required ones are 'ok'. This is the *event-trigger* gate: the push
+ * fired the moment Master+Amex were clean used to race the slower accounts —
+ * a Scotia batch landing minutes later (mortgage/property-tax rows) changed
+ * the pace % right after the notification reported it. Waiting until the last
+ * runner reports in makes the pushed numbers match what the site shows.
+ * Deliberately looser than 'ok' for Scotia/Tangerine: a source that reported
+ * *fail* has still finished — its data isn't coming today, so there's nothing
+ * to wait for. (A retrying runner posts 'fail' per attempt, so a later retry
+ * can still land after the push — rare, and no worse than not waiting at all.)
+ */
+async function allSourcesFinishedToday(): Promise<boolean> {
+  const todayUtc = new Date()
+  todayUtc.setUTCHours(0, 0, 0, 0)
+  const rows = await db
+    .select({ source: syncRuns.source, status: syncRuns.status, lastRunAt: syncRuns.lastRunAt })
+    .from(syncRuns)
+  const required = new Set(DIGEST_REQUIRED_SOURCES.map((s) => s.source))
+  return SYNC_SOURCES.every(({ source }) => {
+    const row = rows.find((r) => r.source === source)
+    if (row?.lastRunAt == null || row.lastRunAt < todayUtc) return false
+    return required.has(source) ? row.status === 'ok' : true
+  })
+}
+
+/**
  * Event-triggered digest: called (via `after()`, so it never blocks the
- * response) right after a sync source reports 'ok' — either the automated
+ * response) right after a sync source reports in — either the automated
  * runner (POST /api/sync-status) or a manual CSV upload clearing a failed
- * source (importCsv). Fires `runDailyDigestJob` the moment the last of the
- * digest-required sources (Master + Amex) syncs clean for the day, instead of waiting for the 11:15
- * launchd job — so "upload the one bank that failed automatically" also
- * triggers it right away. Cheap no-op the rest of the day: `dailyDigestPushes`
- * dedup means at most one of these (or the 11:15 fallback) actually pushes.
- * Errors are swallowed — `runDailyDigestJob` already records them to
- * `digest_runs` for the dashboard banner.
+ * source (importCsv). Fires `runDailyDigestJob` the moment the last source
+ * has finished for the day (see `allSourcesFinishedToday`), instead of waiting
+ * for the 11:15 launchd job — so "upload the one bank that failed
+ * automatically" also triggers it right away. Cheap no-op the rest of the day:
+ * `dailyDigestPushes` dedup means at most one of these (or the 11:15 fallback)
+ * actually pushes. Errors are swallowed — `runDailyDigestJob` already records
+ * them to `digest_runs` for the dashboard banner.
  */
 export async function maybeTriggerDigest(): Promise<void> {
-  if (!(await allSourcesSyncedToday())) return
+  if (!(await allSourcesFinishedToday())) return
   await runDailyDigestJob().catch(() => {})
 }
 

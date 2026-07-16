@@ -17,9 +17,9 @@ import { maybeTriggerDigest } from '@/app/lib/digest'
  * single row per source: on 'ok' we stamp lastSuccessAt and clear the error/
  * counter; on 'fail' we keep the prior lastSuccessAt and bump failureCount.
  *
- * On 'ok', also checks (post-response, via `after`) whether every source has
- * now synced today — if so it fires the daily digest immediately instead of
- * waiting for the 11:15 launchd job. See maybeTriggerDigest.
+ * Every report also checks (post-response, via `after`) whether every source
+ * has now finished for the day — if so it fires the daily digest immediately
+ * instead of waiting for the 11:15 launchd job. See maybeTriggerDigest.
  */
 const SOURCES = ['master', 'amex', 'tangerine', 'scotia'] as const
 type Source = (typeof SOURCES)[number]
@@ -76,9 +76,11 @@ export async function POST(request: NextRequest): Promise<Response> {
   // Reflect the new health on the dashboard without waiting for the next deploy.
   revalidatePath('/')
 
-  if (status === 'ok') {
-    after(() => maybeTriggerDigest())
-  }
+  // Any report can be the day's last: the digest waits for every source to
+  // finish (ok or fail), so a bank giving up must also unblock the push —
+  // otherwise a Scotia failure would stall the notification until the 11:15
+  // fallback. maybeTriggerDigest's own gate makes premature calls a no-op.
+  after(() => maybeTriggerDigest())
 
   return Response.json({ ok: true }, { status: 200 })
 }
