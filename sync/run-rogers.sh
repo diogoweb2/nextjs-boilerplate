@@ -38,10 +38,11 @@ for attempt in $(seq 1 "$ATTEMPTS"); do
   if [ "$status" -eq 0 ]; then
     echo "✓ rogers sync succeeded on attempt $attempt @ $(date)"
     echo "ok" > "$STATUS_DIR/rogers"
-    # Trigger the digest now that this sync succeeded. If all other sources are
-    # also ok today the push fires; the server deduplicates so the 11:15 job is a no-op.
+    # Trigger the digest check now that this sync succeeded. It only pushes once
+    # ALL 4 accounts are ok today, so this fires the notification when the last
+    # sync of the day completes; the 12:30 launchd job is just a backstop.
     echo "→ triggering digest check…"
-    "$NODE" "$TSX" "$REPO/sync/digest.ts" || echo "  (digest trigger failed — scheduled digest at 11:15 will retry)"
+    "$NODE" "$TSX" "$REPO/sync/digest.ts" || echo "  (digest trigger failed — scheduled digest at 12:30 will retry)"
     exit 0
   fi
   echo "✗ rogers sync failed on attempt $attempt (exit $status) @ $(date)"

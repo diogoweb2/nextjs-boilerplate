@@ -254,9 +254,13 @@ launchctl start com.budget.sync.tangerine   # optional: trigger once now to test
 
 Logs: `~/Library/Application Support/budget-sync/logs/tangerine.log`.
 
-## Daily digest notification (11:15am, Web Push)
+## Daily digest notification (Web Push)
 
-After the day's syncs, a separate launchd job triggers a **Web Push** notification with a
+The digest **only pushes once all 4 accounts (Rogers, Amex, Scotia, Tangerine) have a
+fresh `ok` sync** — so the notification normally fires the moment the last sync of the day
+completes (each successful runner triggers a digest check). A launchd job at **12:30** is a
+backstop in case the per-sync triggers don't fire. After the day's syncs, it triggers a
+**Web Push** notification with a
 budget summary — delivered to your **phone (Android) and any subscribed browser**, even
 with everything closed. No Playwright, no tab open: the runner just POSTs the deployed
 app's `/api/digest`, which computes the digest **and** pushes it server-side.
@@ -319,7 +323,7 @@ launchctl start com.budget.sync.digest   # optional: trigger once now to test
 ```
 
 Logs: `~/Library/Application Support/budget-sync/logs/digest.log`. The launchd job only
-*triggers* the push (a single HTTP POST), so the Mac just needs to be awake at 11:15 — it
+*triggers* the push (a single HTTP POST), so the Mac just needs to be awake at 12:30 — it
 already is for the syncs. If the trigger itself fails, the runner fires a local macOS
 banner so a broken pipeline still surfaces.
 
