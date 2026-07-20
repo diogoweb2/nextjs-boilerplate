@@ -9,7 +9,7 @@ import { notificationSignature, type NotificationItem } from '@/app/lib/notifica
 import { loadNotificationSeenSig } from '@/app/actions/notifications'
 import { backupStale } from '@/app/lib/backup'
 import { SYNC_SOURCES, mostRecentIso, formatSyncAge, syncStale } from '@/app/lib/sync'
-import { StatCard } from '@/app/components/charts/StatCard'
+import { SpendSummaryGrid } from '@/app/components/charts/SpendSummaryGrid'
 import { InsightCard } from '@/app/components/InsightCard'
 import { BurndownTrajectory } from '@/app/components/BurndownTrajectory'
 import { NetBudgetTrajectory } from '@/app/components/NetBudgetTrajectory'
@@ -517,31 +517,22 @@ export default async function Home({
       ) : (
         <div className="flex flex-col gap-5">
           {/* Total spend + per-category quick tiles */}
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <StatCard
-              hero
-              label="Total spend"
-              value={formatCurrency(ov.gross)}
-              current={ov.gross}
-              previous={ov.prevGross}
-              invertColors
-              hint={totalSpendHint}
-            />
-            {ov.categoryCards.map((c) => (
-              <StatCard
-                key={c.name}
-                label={c.label}
-                value={formatCurrency(c.amount)}
-                current={c.amount}
-                previous={c.prevAmount}
-                invertColors
-                accent={c.color}
-                budget={(goalByName.get(c.name) ?? 0) * 1}
-                href={`/transactions?category=${encodeURIComponent(c.name)}${month ? `&month=${month}` : ''}`}
-                reportHref={`/category?name=${encodeURIComponent(c.name)}`}
-              />
-            ))}
-          </div>
+          <SpendSummaryGrid
+            totalValue={formatCurrency(ov.gross)}
+            totalCurrent={ov.gross}
+            totalPrevious={ov.prevGross}
+            totalHint={totalSpendHint}
+            categoryCards={ov.categoryCards.map((c) => ({
+              name: c.name,
+              label: c.label,
+              amount: c.amount,
+              prevAmount: c.prevAmount,
+              color: c.color,
+              budget: goalByName.get(c.name) ?? 0,
+              href: `/transactions?category=${encodeURIComponent(c.name)}${month ? `&month=${month}` : ''}`,
+              reportHref: `/category?name=${encodeURIComponent(c.name)}`,
+            }))}
+          />
 
           {/* Net trajectory — burndown + year trajectory side by side */}
           {(burndown || budget.hasData) && (

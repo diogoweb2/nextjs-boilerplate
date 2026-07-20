@@ -14,6 +14,8 @@ export function StatCard({
   budget,
   reportHref,
   hero = false,
+  compact = false,
+  onToggleCompact,
 }: {
   label: string
   value: string
@@ -39,7 +41,22 @@ export function StatCard({
   reportHref?: string
   /** Vault-green headline tile with the winged-bill watermark. */
   hero?: boolean
+  /** Minimal rendering: label + budget bar only (hero: value + delta only). */
+  compact?: boolean
+  /** When set, shows a +/- toggle button in the top-right corner. */
+  onToggleCompact?: () => void
 }) {
+  const toggleButton = onToggleCompact && (
+    <button
+      type="button"
+      onClick={onToggleCompact}
+      title={compact ? 'Expand all' : 'Compact all'}
+      aria-label={compact ? 'Expand all' : 'Compact all'}
+      className="relative z-10 flex h-4 w-4 shrink-0 items-center justify-center rounded text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--foreground)]"
+    >
+      {compact ? '+' : '−'}
+    </button>
+  )
   const delta =
     current !== undefined && previous !== undefined
       ? formatPercentDelta(current, previous)
@@ -64,26 +81,47 @@ export function StatCard({
           : 'bg-[rgba(120,255,180,0.16)] text-[#8df0b8]'
         : 'bg-[rgba(255,255,255,0.1)] text-[#9ed8b5]'
     return (
-      <div className="hero-stat col-span-2 flex flex-col gap-1.5 p-4 lg:col-span-1">
+      <div
+        className={`hero-stat col-span-2 flex flex-col gap-1.5 lg:col-span-1 ${compact ? 'p-2.5' : 'p-4'}`}
+      >
         <LogoMark className="hero-watermark" />
-        <span className="hero-muted text-xs font-medium uppercase tracking-widest">{label}</span>
-        <span className="font-display text-3xl font-bold tabular-nums tracking-tight leading-none">
-          {value}
-        </span>
-        <div className="flex items-center gap-2">
-          {delta && (
-            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${heroBadge}`}>
-              {delta.direction === 'up' ? '↑' : delta.direction === 'down' ? '↓' : ''}
-              {delta.text}
+        {toggleButton && <div className="absolute right-2.5 top-2.5">{toggleButton}</div>}
+        {!compact && (
+          <span className="hero-muted text-xs font-medium uppercase tracking-widest">{label}</span>
+        )}
+        {compact ? (
+          <div className="flex items-center gap-2">
+            <span className="font-display text-xl font-bold tabular-nums tracking-tight leading-none">
+              {value}
             </span>
-          )}
-          {delta && (
-            <span className="hero-muted text-[11px]">
-              vs previous period – {formatCurrency(previous!)}
+            {delta && (
+              <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${heroBadge}`}>
+                {delta.direction === 'up' ? '↑' : delta.direction === 'down' ? '↓' : ''}
+                {delta.text}
+              </span>
+            )}
+          </div>
+        ) : (
+          <>
+            <span className="font-display text-3xl font-bold tabular-nums tracking-tight leading-none">
+              {value}
             </span>
-          )}
-        </div>
-        {hint && <span className="hero-muted relative z-10 text-xs">{hint}</span>}
+            <div className="flex items-center gap-2">
+              {delta && (
+                <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${heroBadge}`}>
+                  {delta.direction === 'up' ? '↑' : delta.direction === 'down' ? '↓' : ''}
+                  {delta.text}
+                </span>
+              )}
+              {delta && (
+                <span className="hero-muted text-[11px]">
+                  vs previous period – {formatCurrency(previous!)}
+                </span>
+              )}
+            </div>
+          </>
+        )}
+        {hint && !compact && <span className="hero-muted relative z-10 text-xs">{hint}</span>}
       </div>
     )
   }
@@ -106,7 +144,9 @@ export function StatCard({
   // icon link for the report — without ever nesting anchors.
   if (reportHref) {
     return (
-      <div className="card flex flex-col gap-1 p-4 relative transition-colors hover:border-[var(--accent)]">
+      <div
+        className={`card flex flex-col gap-1 relative transition-colors hover:border-[var(--accent)] ${compact ? 'p-2.5' : 'p-4'}`}
+      >
         {/* Full-coverage link: makes the whole card clickable for `href` */}
         {href && (
           <a
@@ -126,52 +166,63 @@ export function StatCard({
             )}
             {label}
           </span>
-          <a
-            href={reportHref}
-            title={`${label} history`}
-            className="rounded p-0.5 hover:bg-[var(--surface-2)] hover:text-[var(--foreground)]"
-          >
-            {chartIcon}
-          </a>
+          <span className="relative z-10 flex items-center gap-0.5">
+            {!compact && (
+              <a
+                href={reportHref}
+                title={`${label} history`}
+                className="rounded p-0.5 hover:bg-[var(--surface-2)] hover:text-[var(--foreground)]"
+              >
+                {chartIcon}
+              </a>
+            )}
+            {toggleButton}
+          </span>
         </span>
         {/* Rest of content — pointer-events-none so clicks pass through to the full-coverage link */}
         <div className="relative z-10 flex flex-col gap-1 pointer-events-none">
-          <span className="font-display text-2xl font-bold tabular-nums tracking-tight leading-none">{value}</span>
-          {delta && (
+          {!compact && (
+            <span className="font-display text-2xl font-bold tabular-nums tracking-tight leading-none">{value}</span>
+          )}
+          {delta && !compact && (
             <span className={`self-start rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${badgeClass}`}>
               {delta.direction === 'up' ? '↑' : delta.direction === 'down' ? '↓' : ''}{delta.text}
             </span>
           )}
-          {delta && (
+          {delta && !compact && (
             <span className="text-[10px] text-[var(--muted)]">
               vs previous period – {formatCurrency(previous!)}
             </span>
           )}
-          {hint && <span className="text-xs text-[var(--muted)]">{hint}</span>}
+          {hint && !compact && <span className="text-xs text-[var(--muted)]">{hint}</span>}
           {showBudget && (
-            <div className="mt-2 flex flex-col gap-1.5">
-              <div className="flex items-baseline justify-between">
-                <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted)]">
-                  Budget
-                </span>
-                <span className="text-[10px] font-semibold tabular-nums" style={{ color: barColor }}>
-                  {Math.round(ratio * 100)}%
-                </span>
-              </div>
+            <div className={`flex flex-col gap-1.5 ${compact ? 'mt-1' : 'mt-2'}`}>
+              {!compact && (
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted)]">
+                    Budget
+                  </span>
+                  <span className="text-[10px] font-semibold tabular-nums" style={{ color: barColor }}>
+                    {Math.round(ratio * 100)}%
+                  </span>
+                </div>
+              )}
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--surface-2)]">
                 <div
                   className={`h-full rounded-full transition-all ${ratio >= 0.85 ? 'bar-sheen' : ''}`}
                   style={{ width: `${Math.min(100, ratio * 100)}%`, backgroundColor: barColor }}
                 />
               </div>
-              <div className="flex items-baseline justify-between text-[10px] tabular-nums text-[var(--muted)]">
-                <span>of {formatCurrency(budget)}</span>
-                {ratio < 1 ? (
-                  <span style={{ color: barColor }}>{formatCurrency(budget - current!)} left</span>
-                ) : (
-                  <span style={{ color: barColor }}>{formatCurrency(current! - budget)} over 💀</span>
-                )}
-              </div>
+              {!compact && (
+                <div className="flex items-baseline justify-between text-[10px] tabular-nums text-[var(--muted)]">
+                  <span>of {formatCurrency(budget)}</span>
+                  {ratio < 1 ? (
+                    <span style={{ color: barColor }}>{formatCurrency(budget - current!)} left</span>
+                  ) : (
+                    <span style={{ color: barColor }}>{formatCurrency(current! - budget)} over 💀</span>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
