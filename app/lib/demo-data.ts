@@ -14,6 +14,7 @@ import type { ProjectionRule } from '@/app/lib/projection'
 import type { GoalView, PendingReview } from '@/app/actions/goals'
 import type { SurplusPrompt } from '@/app/actions/surplus'
 import type { InvestmentsData, AccountView } from '@/app/actions/investments'
+import { buildInvestmentReport, type InvestmentReport, type ReportPosition } from '@/app/lib/investmentReport'
 import type { NetWorthData } from '@/app/actions/networth'
 import { computeTfsaRoom, type RegisteredEntry } from '@/app/lib/tfsa'
 import { computeRespGrant } from '@/app/lib/resp'
@@ -1057,4 +1058,45 @@ export function demoInvestmentsData(): InvestmentsData {
     selfName: 'Me',
     partnerName: 'Partner',
   }
+}
+
+/**
+ * Synthetic monthly investment report for the demo — reuses the demo holdings as
+ * "now" and derives a "last month" baseline (market down ~9%, a bond-heavy mix)
+ * so the dip / rotate signal has something to show. Deterministic.
+ */
+export function demoInvestmentReport(): InvestmentReport {
+  const data = demoInvestmentsData()
+  const bond = (mv: number): ReportPosition => ({
+    symbol: 'ZAG', name: 'BMO Aggregate Bond ETF', assetClass: 'Fixed Income', currency: 'CAD',
+    quantity: 3000, marketValueCad: mv, bookValueCad: mv,
+  })
+  const inputs = data.accounts.map((a) => {
+    const curPos: ReportPosition[] = a.positions.map((p) => ({
+      symbol: p.symbol, name: p.name, assetClass: p.assetClass, currency: p.currency,
+      quantity: p.quantity, marketValueCad: p.marketValueCad, bookValueCad: Math.round(p.marketValueCad * 0.75 * 100) / 100,
+    }))
+    // Give the TFSA a big bond chunk so the rotate-opportunity fires in the demo.
+    if (a.kind === 'tfsa') curPos.push(bond(38000))
+    const curTotal = Math.round(curPos.reduce((s, p) => s + p.marketValueCad, 0) * 100) / 100
+    // Baseline a month back: equities ~9% higher (peak), bonds ~flat.
+    const prevPos: ReportPosition[] = curPos.map((p) =>
+      p.assetClass === 'Fixed Income'
+        ? { ...p, marketValueCad: Math.round(p.marketValueCad * 0.998 * 100) / 100 }
+        : { ...p, marketValueCad: Math.round(p.marketValueCad * 1.13 * 100) / 100 },
+    )
+    const prevTotal = Math.round(prevPos.reduce((s, p) => s + p.marketValueCad, 0) * 100) / 100
+    return {
+      id: a.id, name: a.name, kind: a.kind, ownerName: a.ownerName,
+      current: { occurredAt: '2026-06-24', fxUsdCad: 1.37, totalValueCad: curTotal, positions: curPos },
+      previous: { occurredAt: '2026-05-24', fxUsdCad: 1.36, totalValueCad: prevTotal, positions: prevPos },
+      valueSeries: [
+        { occurredAt: '2026-04-24', value: Math.round(prevTotal * 0.99 * 100) / 100 },
+        { occurredAt: '2026-05-24', value: prevTotal },
+        { occurredAt: '2026-06-24', value: curTotal },
+      ],
+      contributionsInWindow: a.kind === 'tfsa' ? 900 : 0,
+    }
+  })
+  return buildInvestmentReport(inputs)
 }

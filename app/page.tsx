@@ -38,6 +38,8 @@ import { TransferReview } from '@/app/components/TransferReview'
 import { OtherCategoryBanner } from '@/app/components/OtherCategoryBanner'
 import { ReportReminder } from '@/app/components/ReportReminder'
 import { YearReportReminder } from '@/app/components/YearReportReminder'
+import { InvestmentReportReminder } from '@/app/components/InvestmentReportReminder'
+import { loadInvestmentReportDue } from '@/app/actions/investmentReport'
 import { completedReportMonth, completedYearReportYear } from '@/app/lib/reportSchedule'
 import { SurplusAllocation } from '@/app/components/SurplusAllocation'
 import { GoalsSummary } from '@/app/components/GoalsSummary'
@@ -400,6 +402,9 @@ export default async function Home({
   const emergency = await loadEmergencyFund()
   const goalsSummary = await loadGoalsData()
   const dashboardProjects = demo ? [] : await loadDashboardProjects()
+  // The latest holdings-snapshot date to nag about (only if it's ~a month past
+  // the prior snapshot) — the device-local investment report reminder (§16b).
+  const investmentReportDue = demo ? null : await loadInvestmentReportDue()
 
   // Bills & recurring calendar (§19): every projected bill on its expected day,
   // plus a top-of-page reminder for bills expected within the next 2 days.
@@ -467,6 +472,7 @@ export default async function Home({
 
       <YearReportReminder year={reminderReportYear} />
       <ReportReminder month={reminderReportMonth} />
+      <InvestmentReportReminder snapshotDate={investmentReportDue} />
 
       {(billReminders.length > 0 || dashboardProjects.length > 0) && (
         <div className="mb-5 grid items-start gap-5 sm:grid-cols-2">

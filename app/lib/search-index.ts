@@ -79,6 +79,7 @@ export const FEATURE_INDEX: FeatureEntry[] = [
   { label: 'Emergency runway', page: 'Accounts › Emergency', href: '/accounts/emergency#emergency-runway', keywords: ['job loss', 'months', 'scenario'] },
   { label: 'Safe to move to investment', page: 'Accounts › Emergency', href: '/accounts/emergency#safe-to-move-to-investment', keywords: ['cash flow', 'trough', 'transfer'] },
   { label: 'Investments', page: 'Accounts › Investments', href: '/accounts/investments', keywords: ['tfsa', 'resp', 'room', 'grant', 'cesg', 'holdings', 'itrade', 'contribution'] },
+  { label: 'Investment report', page: 'Accounts › Investments › Report', href: '/accounts/investments/report', keywords: ['monthly report', 'what changed', 'movers', 'allocation', 'bonds', 'rotate', 'dip', 'buy the dip', 'drawdown', 'move investment'] },
   { label: 'Net worth', page: 'Accounts › Net worth', href: '/accounts/networth#net-worth', keywords: ['total', 'assets'] },
   { label: 'Mortgage remaining', page: 'Accounts › Net worth', href: '/accounts/networth#mortgage-remaining', keywords: ['payoff', 'balance', 'house'] },
 

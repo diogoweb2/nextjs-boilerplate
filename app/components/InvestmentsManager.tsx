@@ -1,6 +1,7 @@
 'use client'
 
 import { useRef, useState, useTransition } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { formatCurrency, formatCurrencyCompact, formatLongDate } from '@/app/lib/format'
 import {
@@ -36,9 +37,14 @@ export function InvestmentsManager({ data }: { data: InvestmentsData }) {
             Registered accounts at iTrade — value, contribution room & government grants.
           </p>
         </div>
-        <div className="text-right">
+        <div className="flex flex-col items-end gap-1">
           <div className="text-2xl font-bold tabular-nums">{formatCurrencyCompact(data.totalValueCad)}</div>
           <div className="text-[11px] text-[var(--muted)]">total market value (CAD)</div>
+          {data.accounts.some((a) => a.latest) && (
+            <Link href="/accounts/investments/report" className="text-xs font-medium text-[var(--accent)]">
+              📈 Monthly report ▶
+            </Link>
+          )}
         </div>
       </header>
 

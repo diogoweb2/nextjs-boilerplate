@@ -1247,6 +1247,48 @@ read-only.
 Run after pulling this change: `npm run db:push` (adds `registered_accounts`, `holding_snapshots`,
 `holding_positions`, `registered_contributions`).
 
+## 16b. Monthly investment report (`/accounts/investments/report`)
+
+A deterministic **"what changed since last month"** recap over the iTrade holdings snapshots
+(§16), meant to help the owner decide whether it's worth **moving something** — and, since a big
+chunk sits in bonds, **when to rotate bonds into equities** (buy the dip). **No live prices, no
+advice, no AI.** Engine: `app/lib/investmentReport.ts` (`buildInvestmentReport`, pure/db-free),
+loader `app/actions/investmentReport.ts` (`loadInvestmentReport`), page
+`app/accounts/investments/report/page.tsx` + client `app/components/InvestmentReportClient.tsx`.
+
+### The window it compares
+Per registered account it pairs the **latest** holdings snapshot with the **newest snapshot at
+least ~25 days older** (`MIN_BASELINE_GAP_DAYS`) — so re-importing manually just regenerates the
+report against the last month-apart snapshot ("if I manually import, regenerate if it's a month of
+difference"). Needs ≥2 comparable snapshots or it shows a "not enough history yet" note.
+
+### What it shows
+- **Headline** — total value now, total $ change, **market change excluding new deposits**
+  (`marketDeltaCad = Δvalue − net contributions in the window`, so a deposit isn't mistaken for
+  a gain), and new money in. Net contributions come from `registered_contributions` dated **after**
+  the baseline snapshot.
+- **Bond-rotation / dip signal** (`computeDip`) — the portfolio's value series' trailing-peak
+  **drawdown %**. Levels off named consts: `buy` ≤ **−8%** (`DIP_BUY_THRESHOLD`), `watch` ≤ **−4%**.
+  A **rotate opportunity** fires only when it's a `buy`-level dip **and** ≥ **15%**
+  (`MIN_BOND_PCT_TO_ROTATE`) of the portfolio is in bonds/cash — i.e. there's something to rotate
+  *and* prices are low. Purely from stored snapshots; the message names the drawdown and bond %.
+- **Allocation** — coarse buckets (`bucketForAssetClass`: bonds / equity / cash / other, matched on
+  the iTrade asset-class label) with each bucket's value, % of portfolio, and $ change vs the
+  baseline. `bondPct = (bonds + cash) / total`.
+- **Biggest movers** — per-position $ change vs the baseline (new positions flagged NEW, fully-sold
+  ones SOLD), portfolio-wide top 6 plus per-account lists; trivial moves < $25 (`MOVER_MIN_ABS_CAD`)
+  dropped.
+
+### Dashboard reminder ("the report is ready")
+`app/components/InvestmentReportReminder.tsx` — a device-local banner mirroring the spend recap's
+`ReportReminder` (§15). The **snapshot date** to nag about is decided server-side
+(`loadInvestmentReportDue` → `dueInvestmentReport`, `app/lib/investmentReportSchedule.ts`): the
+latest snapshot, but **only when it's ≥25 days newer than the one before it** (a real
+month-over-month change). What's **seen** is `localStorage[investmentReportSeen]`
+(`INVESTMENT_REPORT_SEEN_KEY`, keyed by snapshot date) — per device, not the db; opening the report
+(the client sets the key) or Dismiss clears it. Demo passes `null` (never nags). The Investments
+page header also links straight to the report.
+
 ## 15. Monthly report — the "80s recap" (`/report`)
 
 A standalone, synthwave-themed recap of one month, meant to be **fun and glanceable** for a
