@@ -16,7 +16,7 @@
  * And, for the deployed app, INGEST_URL (the digest URL is derived from it) or an
  * explicit DIGEST_URL override.
  */
-import { existsSync, readFileSync, statSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 import { readSecret } from './lib/keychain'
@@ -31,6 +31,31 @@ const STATUS_SOURCES = [
 ]
 // Only consider status files written in the last 4 hours — avoids yesterday's failures.
 const STALE_MS = 4 * 60 * 60 * 1000
+
+// Once-per-day marker for the "sync failed" nudge, so repeated per-sync triggers
+// don't banner more than once. Stored next to the status files as YYYY-MM-DD.
+const NUDGE_FILE = join(STATUS_DIR, 'digest-nudge')
+
+function nudgedToday(): boolean {
+  try {
+    return readFileSync(NUDGE_FILE, 'utf8').trim() === today()
+  } catch {
+    return false
+  }
+}
+
+function markNudgedToday(): void {
+  try {
+    mkdirSync(STATUS_DIR, { recursive: true })
+    writeFileSync(NUDGE_FILE, today())
+  } catch {
+    /* best-effort; a missed marker just risks one extra banner */
+  }
+}
+
+function today(): string {
+  return new Date().toLocaleDateString('en-CA') // YYYY-MM-DD, local
+}
 
 function readSyncStatus(key: string): 'ok' | 'fail' | null {
   const file = join(STATUS_DIR, key)
@@ -82,6 +107,12 @@ async function main(): Promise<void> {
 
   if (notReady.length > 0) {
     console.log(`→ digest skipped: waiting on all accounts to sync (${notReady.join(', ')} not ready)`)
+    // Nudge only when a sync actually FAILED today (not merely "hasn't run yet"),
+    // and only once per day — otherwise every early per-sync trigger would banner.
+    if (failedSources.length > 0 && !nudgedToday()) {
+      notify('Budget digest skipped', `No daily push — sync failed: ${failedSources.join(', ')}`)
+      markNudgedToday()
+    }
     return
   }
 
