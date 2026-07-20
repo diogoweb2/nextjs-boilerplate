@@ -73,6 +73,18 @@ async function main(): Promise<void> {
     console.log(`⚠️  failed syncs detected: ${failedSources.join(', ')}`)
   }
 
+  // Gate: only send the digest once ALL 4 accounts have a fresh "ok" sync. If any
+  // is failed, missing, or stale, stay quiet — the next scheduled run (or a re-run
+  // after the sync catches up) will push once the day's imports are complete.
+  const notReady = STATUS_SOURCES
+    .filter(({ key }) => readSyncStatus(key) !== 'ok')
+    .map(({ label }) => label)
+
+  if (notReady.length > 0) {
+    console.log(`→ digest skipped: waiting on all accounts to sync (${notReady.join(', ')} not ready)`)
+    return
+  }
+
   const res = await fetch(url, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
