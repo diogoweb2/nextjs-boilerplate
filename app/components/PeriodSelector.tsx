@@ -167,7 +167,7 @@ export function PeriodSelector({
       {showSpecialToggle && (
         <button
           onClick={() => update({ special: excludeSpecial ? '1' : '0' })}
-          className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
+          className={`hidden rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors sm:inline-block ${
             excludeSpecial
               ? 'border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-[var(--accent)]'
               : 'border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]'

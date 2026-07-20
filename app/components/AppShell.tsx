@@ -5,15 +5,18 @@ import { slugifyAnchor } from '@/app/lib/search-index'
 export function AppShell({
   children,
   balances,
+  mobileTopBarExtra,
 }: {
   children: React.ReactNode
   /** Optional account balances shown in the nav (desktop sidebar / mobile More sheet). */
   balances?: { source: string; label: string; balance: number }[]
+  /** Rendered in the mobile top bar in place of the Sign out button (still reachable via More). */
+  mobileTopBarExtra?: React.ReactNode
 }) {
   return (
     <div className="min-h-screen sm:flex">
-      <NavBar balances={balances} />
-      <main className="mx-auto max-w-5xl px-4 pb-24 pt-5 sm:flex-1 sm:min-w-0 sm:pb-10 sm:pt-6">{children}</main>
+      <NavBar balances={balances} mobileTopBarExtra={mobileTopBarExtra} />
+      <main className="mx-auto max-w-5xl px-4 pb-24 pt-3 sm:flex-1 sm:min-w-0 sm:pb-10 sm:pt-4">{children}</main>
     </div>
   )
 }

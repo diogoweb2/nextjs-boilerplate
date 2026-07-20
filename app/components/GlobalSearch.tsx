@@ -244,9 +244,12 @@ export function GlobalSearch({ variant }: { variant: 'desktop' | 'mobile' }) {
           setOpen(true)
           requestAnimationFrame(() => inputRef.current?.focus())
         }}
-        className="rounded-lg px-2 py-1 text-base text-[var(--muted)]"
+        className="rounded-lg border border-[var(--border)] p-2 text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--foreground)]"
       >
-        ⌕
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <circle cx="11" cy="11" r="8" />
+          <path d="m21 21-4.3-4.3" />
+        </svg>
       </button>
       {open && (
         <div className="fixed inset-0 z-50">

@@ -48,6 +48,7 @@ export function NotificationBell({
   signature,
   syncEntries,
   lastNotified,
+  className = '',
 }: {
   items: NotificationItem[]
   /** Server-computed: current signature differs from the acknowledged one. */
@@ -56,6 +57,7 @@ export function NotificationBell({
   signature: string
   syncEntries: SyncEntry[]
   lastNotified: string | null
+  className?: string
 }) {
   const [open, setOpen] = useState(false)
   const [ackedSig, setAckedSig] = useState<string | null>(null)
@@ -83,7 +85,7 @@ export function NotificationBell({
   }
 
   return (
-    <div className="relative" ref={panelRef}>
+    <div className={`relative ${className}`} ref={panelRef}>
       <button
         onClick={toggle}
         title="Notifications"

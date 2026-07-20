@@ -43,6 +43,7 @@ function DismissButton({ id }: { id: number }) {
   )
 }
 
+/** Full sentence — used only in the expanded (multi-project) list. */
 function ProjectLine({ p }: { p: DashboardProject }) {
   return (
     <span className="text-sm text-[var(--muted)]">
@@ -55,6 +56,22 @@ function ProjectLine({ p }: { p: DashboardProject }) {
   )
 }
 
+/** Name + amount only, one line — used for the collapsed / single-project view. */
+function ProjectCompactLine({ p }: { p: DashboardProject }) {
+  return (
+    <a
+      href={`/projects/${p.id}`}
+      title={`${phrase(p)} (${dateRange(p)})`}
+      className="truncate text-sm font-medium text-[var(--foreground)] hover:underline"
+    >
+      {p.emoji} {p.name}
+      {p.count > 0 && (
+        <span className="ml-1.5 font-normal text-[var(--muted)]">{formatCurrency(p.total)}</span>
+      )}
+    </a>
+  )
+}
+
 export function ProjectReminderBanner({ projects }: { projects: DashboardProject[] }) {
   const [open, setOpen] = useState(false)
   if (projects.length === 0) return null
@@ -63,23 +80,23 @@ export function ProjectReminderBanner({ projects }: { projects: DashboardProject
   if (projects.length === 1) {
     const p = projects[0]
     return (
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3">
-        <ProjectLine p={p} />
+      <div className="flex h-full items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2">
+        <ProjectCompactLine p={p} />
         {p.phase === 'wrapup' && <DismissButton id={p.id} />}
       </div>
     )
   }
 
   return (
-    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3">
+    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2">
       <button
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
+        title="Project reminder"
         className="flex w-full items-center justify-between gap-3 text-left"
       >
         <span className="text-sm font-semibold">
-          🧳 Project reminder
-          <span className="ml-1.5 font-normal text-[var(--muted)]">({projects.length})</span>
+          🧳 <span className="ml-1 font-normal text-[var(--muted)]">{projects.length}</span>
         </span>
         <span className={`text-xs text-[var(--muted)] transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden>
           ▾

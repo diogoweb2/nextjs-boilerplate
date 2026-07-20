@@ -80,48 +80,50 @@ export function StatCard({
           ? 'bg-[rgba(255,120,130,0.18)] text-[#ffb3bb]'
           : 'bg-[rgba(120,255,180,0.16)] text-[#8df0b8]'
         : 'bg-[rgba(255,255,255,0.1)] text-[#9ed8b5]'
-    return (
-      <div
-        className={`hero-stat col-span-2 flex flex-col gap-1.5 lg:col-span-1 ${compact ? 'p-2.5' : 'p-4'}`}
-      >
-        <LogoMark className="hero-watermark" />
-        {toggleButton && <div className="absolute right-2.5 top-2.5">{toggleButton}</div>}
-        {!compact && (
-          <span className="hero-muted text-xs font-medium uppercase tracking-widest">{label}</span>
-        )}
-        {compact ? (
-          <div className="flex items-center gap-2">
-            <span className="font-display text-xl font-bold tabular-nums tracking-tight leading-none">
+    // Compact: behave like a normal grid cell (single column, same height as the
+    // category tiles) so the headline number costs no extra row.
+    if (compact) {
+      return (
+        <div className="hero-stat relative flex flex-col justify-center gap-1 p-2.5">
+          <LogoMark className="hero-watermark" />
+          {toggleButton && <div className="absolute right-2.5 top-2.5">{toggleButton}</div>}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pr-5">
+            <span className="font-display text-sm font-bold tabular-nums tracking-tight leading-none">
               {value}
             </span>
             {delta && (
-              <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${heroBadge}`}>
+              <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${heroBadge}`}>
                 {delta.direction === 'up' ? '↑' : delta.direction === 'down' ? '↓' : ''}
                 {delta.text}
               </span>
             )}
           </div>
-        ) : (
-          <>
-            <span className="font-display text-3xl font-bold tabular-nums tracking-tight leading-none">
-              {value}
+        </div>
+      )
+    }
+
+    return (
+      <div className="hero-stat col-span-2 flex flex-col gap-1.5 p-4 lg:col-span-1">
+        <LogoMark className="hero-watermark" />
+        {toggleButton && <div className="absolute right-2.5 top-2.5">{toggleButton}</div>}
+        <span className="hero-muted text-xs font-medium uppercase tracking-widest">{label}</span>
+        <span className="font-display text-3xl font-bold tabular-nums tracking-tight leading-none">
+          {value}
+        </span>
+        <div className="flex items-center gap-2">
+          {delta && (
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${heroBadge}`}>
+              {delta.direction === 'up' ? '↑' : delta.direction === 'down' ? '↓' : ''}
+              {delta.text}
             </span>
-            <div className="flex items-center gap-2">
-              {delta && (
-                <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${heroBadge}`}>
-                  {delta.direction === 'up' ? '↑' : delta.direction === 'down' ? '↓' : ''}
-                  {delta.text}
-                </span>
-              )}
-              {delta && (
-                <span className="hero-muted text-[11px]">
-                  vs previous period – {formatCurrency(previous!)}
-                </span>
-              )}
-            </div>
-          </>
-        )}
-        {hint && !compact && <span className="hero-muted relative z-10 text-xs">{hint}</span>}
+          )}
+          {delta && (
+            <span className="hero-muted text-[11px]">
+              vs previous period – {formatCurrency(previous!)}
+            </span>
+          )}
+        </div>
+        {hint && <span className="hero-muted relative z-10 text-xs">{hint}</span>}
       </div>
     )
   }

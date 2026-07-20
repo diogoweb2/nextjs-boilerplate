@@ -32,7 +32,6 @@ import { loadEmergencyFund } from '@/app/actions/emergency'
 import { loadCcPaymentHistory, loadBillDismissals, loadCcExpectedPayment } from '@/app/actions/bills'
 import { buildBillCalendar, buildBillReminders } from '@/app/lib/bill-calendar'
 import { BillsCalendar } from '@/app/components/BillsCalendar'
-import { BillReminderBanner } from '@/app/components/BillReminderBanner'
 import { isDemoSession } from '@/app/lib/demo'
 import { TransferReview } from '@/app/components/TransferReview'
 import { OtherCategoryBanner } from '@/app/components/OtherCategoryBanner'
@@ -287,9 +286,6 @@ export default async function Home({
         ]
       : []),
   ]
-  const notifSig = notificationSignature(notifications)
-  const notifSeenSig = demo ? null : await loadNotificationSeenSig()
-  const notifUnseen = notifications.length > 0 && notifSig !== notifSeenSig
 
   const all = allFlows.filter((t) => t.flow === 'expense')
 
@@ -419,6 +415,31 @@ export default async function Home({
     ? []
     : buildBillReminders(allFlows, rules, FIXED_CATEGORIES, ccPayments, todayIso, await loadBillDismissals(), ccExpected)
 
+  // Bills expected within the next 2 days feed the NotificationBell (§19) as
+  // warning items, following the same acknowledge/badge logic as sync/backup.
+  for (const r of billReminders) {
+    const date = new Date(`${r.dueDate}T00:00:00`).toLocaleDateString(undefined, {
+      month: 'long',
+      day: 'numeric',
+    })
+    const due =
+      r.daysUntil === 0
+        ? 'expected today'
+        : r.daysUntil === 1
+          ? `expected tomorrow (${date})`
+          : `expected in ${r.daysUntil} days (${date})`
+    notifications.push({
+      id: `bill-${r.billKey}-${r.dueYm}`,
+      severity: 'warning',
+      title: `📅 ${r.label} payment coming up`,
+      lines: [`${due} — about ${formatCurrency(r.amount)}.`],
+    })
+  }
+
+  const notifSig = notificationSignature(notifications)
+  const notifSeenSig = demo ? null : await loadNotificationSeenSig()
+  const notifUnseen = notifications.length > 0 && notifSig !== notifSeenSig
+
   // Annual-subscription renewal warnings (§18b): declared-yearly subs due to
   // recharge within ~1 month, so the owner can cancel first. Skipped in the demo.
   const renewalWarnings = demo
@@ -445,11 +466,31 @@ export default async function Home({
     : []
 
   return (
-    <AppShell balances={navBalances}>
+    <AppShell
+      balances={navBalances}
+      mobileTopBarExtra={
+        <>
+          <PeriodSelector
+            monthDropdownOnly
+            currentMonthDefault
+            availableMonths={months_available}
+          />
+          <NotificationBell
+            items={notifications}
+            unseen={notifUnseen}
+            signature={notifSig}
+            syncEntries={syncEntries}
+            lastNotified={lastDigestPush}
+          />
+        </>
+      }
+    >
       {showPaceModal && <PaceAlertModal alerts={paceAlerts} />}
-      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      {/* Desktop header: title + date + controls. On mobile these live in the
+          top bar (see mobileTopBarExtra), so the whole row is hidden there. */}
+      <div className="mb-4 hidden items-center justify-between gap-3 sm:flex">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Overview</h1>
+          <h1 className="text-xl font-bold tracking-tight">Overview</h1>
           <p className="text-sm text-[var(--muted)]">
             {ov.anchor ? ov.periodLabel : 'Upload a statement to begin'}
           </p>
@@ -474,10 +515,9 @@ export default async function Home({
       <ReportReminder month={reminderReportMonth} />
       <InvestmentReportReminder snapshotDate={investmentReportDue} />
 
-      {(billReminders.length > 0 || dashboardProjects.length > 0) && (
-        <div className="mb-5 grid items-start gap-5 sm:grid-cols-2">
-          {billReminders.length > 0 && <BillReminderBanner reminders={billReminders} />}
-          {dashboardProjects.length > 0 && <ProjectReminderBanner projects={dashboardProjects} />}
+      {dashboardProjects.length > 0 && (
+        <div className="mb-5">
+          <ProjectReminderBanner projects={dashboardProjects} />
         </div>
       )}
 

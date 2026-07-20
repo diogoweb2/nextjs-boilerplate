@@ -112,8 +112,11 @@ function isActive(pathname: string, href: string): boolean {
 
 export function NavBar({
   balances,
+  mobileTopBarExtra,
 }: {
   balances?: { source: string; label: string; balance: number }[]
+  /** Rendered in the mobile top bar in place of the Sign out button (still reachable via More). */
+  mobileTopBarExtra?: React.ReactNode
 }) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -210,24 +213,17 @@ export function NavBar({
 
       {/* Mobile top bar */}
       <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[color-mix(in_srgb,var(--background)_85%,transparent)] backdrop-blur sm:hidden">
-        <div className="flex items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-1">
+        <div className="flex items-center justify-between gap-2 px-4 py-3">
+          <div className="flex min-w-0 items-center gap-1">
             <PwaBackButton />
-            <Link href={navHref('/')} className="flex items-center gap-2">
-            <LogoMark className="h-7 w-9 flex-none" />
-            <LogoWordmark className="text-[15px]" />
+            <Link href={navHref('/')} className="flex min-w-0 items-center gap-2">
+              <LogoMark className="h-7 w-9 flex-none" />
+              <LogoWordmark className="truncate text-[15px]" />
             </Link>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex shrink-0 items-center gap-1">
             <GlobalSearch variant="mobile" />
-            <form action={logout}>
-              <button
-                type="submit"
-                className="rounded-lg px-2 py-1 text-xs font-medium text-[var(--muted)]"
-              >
-                Sign out
-              </button>
-            </form>
+            {mobileTopBarExtra}
           </div>
         </div>
       </header>
