@@ -9,15 +9,15 @@
  * CRA / Service Canada / HOOPP publications.
  *
  * ────────────────────────────────────────────────────────────────────────────
- * ⚠️  VERIFY-BEFORE-TRUSTING (as of 2026-07 — owner confirms in-browser):
- *   - YMPE / YAMPE table (CPP), max CPP at 65
- *   - OAS full monthly amount + clawback (recovery-tax) threshold
- *   - TFSA 2026 annual limit / RRSP dollar limit
- *   - ODSP single/couple rates, Canada Disability Benefit amount
- *   - RRIF minimum-withdrawal factor table
- *   - RDSP grant (CDSG) tiers + bond (CDSB) amounts
- *   - Ontario + federal tax brackets, basic personal amounts, credits
- * These are best-known values, not authoritative. See §10 "Honest limitations".
+ * ✅ VERIFIED 2026-07 against published sources (CRA / Service Canada / ESDC /
+ * TaxTips): YMPE/YAMPE 2026, max CPP at 65, OAS Jul–Sep 2026 amount + clawback
+ * threshold, RRSP 2026 dollar limit (TFSA table lives in tfsa.ts, also correct),
+ * 2026 federal + Ontario brackets & BPAs, RDSP CDSG tier threshold, ODSP + CDB
+ * Jul 2026 rates, RRIF prescribed factors.
+ * Still approximate by design: CDSB bond threshold (only used for a "$0 for this
+ * family" check), Ontario age amount (½ federal approx), no Ontario surtax.
+ * Indexed figures (OAS quarterly, ODSP/CDB, brackets yearly) need re-verifying
+ * when RULES_LAST_VERIFIED ages. See §10 "Honest limitations".
  * ────────────────────────────────────────────────────────────────────────────
  */
 
@@ -37,7 +37,7 @@ export const YMPE: Record<number, number> = {
   2010: 47200, 2011: 48300, 2012: 50100, 2013: 51100, 2014: 52500,
   2015: 53600, 2016: 54900, 2017: 55300, 2018: 55900, 2019: 57400,
   2020: 58700, 2021: 61600, 2022: 64900, 2023: 66600, 2024: 68500,
-  2025: 71300, 2026: 74900,
+  2025: 71300, 2026: 74600,
 }
 
 /**
@@ -46,7 +46,7 @@ export const YMPE: Record<number, number> = {
  * layer (CPP2) covers earnings between YMPE and YAMPE at a higher replacement.
  */
 export const YAMPE: Record<number, number> = {
-  2024: 73200, 2025: 81200, 2026: 85400,
+  2024: 73200, 2025: 81200, 2026: 85000,
 }
 
 const YMPE_YEARS = Object.keys(YMPE).map(Number)
@@ -76,7 +76,7 @@ export function yampeFor(year: number): number {
  * Maximum CPP retirement pension at 65 (monthly), current year. Used only as a
  * sanity clamp — the reconstruction should never exceed this. Best-known 2026.
  */
-export const CPP_MAX_MONTHLY_AT_65 = 1433.0 // ⚠️ verify (2025 was ~1433; 2026 TBD)
+export const CPP_MAX_MONTHLY_AT_65 = 1507.65 // 2026 (verified 2026-07)
 
 /** Base CPP replaces 25% of the average of the best pensionable-earnings ratios. */
 export const CPP_BASE_REPLACEMENT = 0.25
@@ -100,9 +100,10 @@ export type EarningsPoint = { year: number; earnings: number }
 /**
  * Reconstruct an annual gross-earnings history from two known points (start-year
  * salary and current salary), linearly interpolated between them and held flat
- * after the current year to the CPP start age. Immigrant CPP starts at the first
- * Canadian year — pre-arrival years are simply absent (and the dropout erases the
- * rest), which is exactly why immigrant CPP is better than people fear (§5.3).
+ * after the current year to the CPP start age. Note the CPP contributory period
+ * still runs from age 18 regardless of arrival — `estimateCpp` pads the pre-career
+ * years with zeros, and the general dropout then erases most (not all) of them,
+ * which is why immigrant CPP is better than people fear but rarely the max (§5.3).
  */
 export function reconstructEarnings(
   startYear: number,
@@ -128,21 +129,33 @@ export function reconstructEarnings(
 
 /**
  * Estimate the monthly CPP retirement pension (today's-dollar terms, at `startAge`).
- * Deterministic reconstruction (§5.3): per year compute the pensionable-earnings
- * ratio `min(earnings, YMPE)/YMPE`, apply the general dropout to the weakest years,
- * average the survivors, take 25% (base) of the 5-yr-average YMPE, add a prorated
- * enhancement for post-2019 years, then apply the start-age factor and clamp to max.
+ * Deterministic reconstruction (§5.3): the contributory period runs from age 18
+ * (`birthYear` given) to the CPP start — years before the first earnings point are
+ * padded as zero-earning years, exactly as CPP counts them. Per year compute the
+ * pensionable-earnings ratio `min(earnings, YMPE)/YMPE`, apply the general dropout
+ * to the weakest years, average the survivors, take 25% (base) of the 5-yr-average
+ * YMPE, add a prorated enhancement for post-2019 years, then apply the start-age
+ * factor and clamp to max.
  */
 export function estimateCpp(
   earnings: EarningsPoint[],
   startAge: number,
+  birthYear?: number,
   refYear = new Date().getFullYear()
 ): { monthlyAt65: number; monthlyAtStart: number; ratioAvg: number } {
   if (earnings.length === 0) return { monthlyAt65: 0, monthlyAtStart: 0, ratioAvg: 0 }
 
-  const ratios = earnings.map((p) => Math.min(p.earnings, ympeFor(p.year)) / ympeFor(p.year))
+  const firstEarningsYear = Math.min(...earnings.map((p) => p.year))
+  const zeroYears: number[] = []
+  if (birthYear != null) {
+    for (let y = birthYear + 18; y < firstEarningsYear; y++) zeroYears.push(y)
+  }
+  const ratios = [
+    ...zeroYears.map(() => 0),
+    ...earnings.map((p) => Math.min(p.earnings, ympeFor(p.year)) / ympeFor(p.year)),
+  ]
   // General dropout: remove the lowest ~17% of contributory years.
-  const dropCount = Math.floor(ratios.length * CPP_DROPOUT_RATE)
+  const dropCount = Math.round(ratios.length * CPP_DROPOUT_RATE)
   const kept = [...ratios].sort((a, b) => a - b).slice(dropCount)
   const ratioAvg = kept.reduce((s, r) => s + r, 0) / kept.length
 
@@ -172,10 +185,10 @@ export function estimateCpp(
  * OAS — Old Age Security
  * ══════════════════════════════════════════════════════════════════════════ */
 
-/** Full OAS monthly amount at 65 (today's dollars). ⚠️ verify each quarter. */
-export const OAS_FULL_MONTHLY = 727.67 // best-known 2026 (65–74 rate)
-/** Net-income threshold where the OAS recovery tax (clawback) begins. ⚠️ verify. */
-export const OAS_CLAWBACK_THRESHOLD = 93454 // best-known 2026
+/** Full OAS monthly amount at 65 (today's dollars). Re-verify each quarter (indexed). */
+export const OAS_FULL_MONTHLY = 751.97 // Jul–Sep 2026, 65–74 rate (verified 2026-07)
+/** Net-income threshold where the OAS recovery tax (clawback) begins. */
+export const OAS_CLAWBACK_THRESHOLD = 93454 // Jul 2026–Jun 2027 period (verified 2026-07)
 export const OAS_CLAWBACK_RATE = 0.15
 /** OAS residency: full at 40 years in Canada after age 18; prorated below. */
 export const OAS_FULL_RESIDENCY_YEARS = 40
@@ -291,28 +304,28 @@ export function rrspRoomFromSalary(grossSalary: number, year = 2026): number {
 
 type Bracket = { upTo: number; rate: number }
 
-/** Federal 2026 brackets (best-known). Last bracket upTo = Infinity. */
+/** Federal 2026 brackets (verified 2026-07; full-year 14% first rate). */
 export const FEDERAL_BRACKETS: Bracket[] = [
-  { upTo: 57375, rate: 0.145 }, // ⚠️ first-bracket rate reduced to 14.5% (2025 mid-year)
-  { upTo: 114750, rate: 0.205 },
-  { upTo: 177882, rate: 0.26 },
-  { upTo: 253414, rate: 0.29 },
+  { upTo: 58523, rate: 0.14 },
+  { upTo: 117045, rate: 0.205 },
+  { upTo: 181440, rate: 0.26 },
+  { upTo: 258482, rate: 0.29 },
   { upTo: Infinity, rate: 0.33 },
 ]
 
-/** Ontario 2026 brackets (best-known, before surtax which we omit as simplified). */
+/** Ontario 2026 brackets (verified 2026-07; before surtax, omitted as simplified). */
 export const ONTARIO_BRACKETS: Bracket[] = [
-  { upTo: 52886, rate: 0.0505 },
-  { upTo: 105775, rate: 0.0915 },
+  { upTo: 53891, rate: 0.0505 },
+  { upTo: 107785, rate: 0.0915 },
   { upTo: 150000, rate: 0.1116 },
   { upTo: 220000, rate: 0.1216 },
   { upTo: Infinity, rate: 0.1316 },
 ]
 
-export const FEDERAL_BPA = 16129 // basic personal amount (approx, high-income phased)
-export const ONTARIO_BPA = 12747
+export const FEDERAL_BPA = 16452 // 2026 max (phases to 14,829 above ~$181k income)
+export const ONTARIO_BPA = 12989 // 2026
 /** Age amount (65+) and pension income amount — modeled as credits at lowest rate. */
-export const FEDERAL_AGE_AMOUNT = 9028
+export const FEDERAL_AGE_AMOUNT = 9209 // 2026 (2025's 9,028 × 1.02 indexation)
 export const FEDERAL_PENSION_AMOUNT = 2000
 
 function taxFromBrackets(income: number, brackets: Bracket[]): number {
@@ -409,11 +422,12 @@ export function householdTaxWithSplitting(
  * at $10,500 of grant per year. Lifetime CDSG cap is $70,000.  ⚠️ verify amounts.
  */
 export const RDSP = {
-  incomeThreshold: 111733, // family net income cut for the high match tier ⚠️ verify
+  incomeThreshold: 114750, // high-match tier cut for 2026 transactions (2024 family income; verified 2026-07)
   lifetimeGrantCap: 70000,
   annualGrantCatchupCap: 10500,
-  // Canada Disability Savings Bond (income-tested; likely $0 for this family).
-  bondIncomeThreshold: 36502, // ⚠️ verify
+  // Canada Disability Savings Bond (income-tested; $0 for this family — threshold is
+  // approximate/indexed and only used for that check).
+  bondIncomeThreshold: 38000,
   bondMaxAnnual: 1000,
   bondLifetimeCap: 20000,
 } as const
@@ -433,9 +447,9 @@ export function rdspGrantForContribution(contribution: number, highTier: boolean
  * ODSP + Canada Disability Benefit — the son's adult income §6
  * ══════════════════════════════════════════════════════════════════════════ */
 
-/** ODSP single basic needs + shelter, monthly (today's dollars). ⚠️ verify. */
-export const ODSP_SINGLE_MONTHLY = 1368
-/** Canada Disability Benefit (2025 rules), monthly. ⚠️ verify. */
-export const CANADA_DISABILITY_BENEFIT_MONTHLY = 200
+/** ODSP single basic needs + shelter, monthly. Jul 2026 rate (verified 2026-07). */
+export const ODSP_SINGLE_MONTHLY = 1436
+/** Canada Disability Benefit, monthly. Jul 2026 rate (verified 2026-07). */
+export const CANADA_DISABILITY_BENEFIT_MONTHLY = 204
 /** Governments under-index disability benefits — grow at half of inflation (§6). */
 export const DISABILITY_BENEFIT_INDEXING = 0.5

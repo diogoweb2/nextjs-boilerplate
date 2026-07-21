@@ -85,7 +85,9 @@ check('rows cover to age 95', plan.rows[plan.rows.length - 1].selfAge === 95, `$
 check('retirement year = 1981 + age', plan.retirementYear === 1981 + params.retirementAge)
 check('income layers = 4', plan.incomeLayers.length === 4)
 check('HOOPP is a real number', plan.hooppAnnualReal > 5000 && plan.hooppAnnualReal < 60000, `${plan.hooppAnnualReal.toFixed(0)}`)
-check('self CPP in band', plan.selfCppMonthlyReal > 500 && plan.selfCppMonthlyReal <= 1433, `${plan.selfCppMonthlyReal.toFixed(0)}`)
+// Upper bound = the 2026 max clamp (conservative for a 2040s retiree, whose real
+// max — with the CPP enhancement fully phased in — will be higher in today's dollars).
+check('self CPP in band', plan.selfCppMonthlyReal > 500 && plan.selfCppMonthlyReal <= 1507.65, `${plan.selfCppMonthlyReal.toFixed(0)}`)
 check('income at retirement positive', plan.incomeAtRetirementReal > 0, `${plan.incomeAtRetirementReal.toFixed(0)}`)
 check('capital peaks then declines (retire drawdown)', (() => {
   const retIdx = plan.rows.findIndex((r) => r.retired)

@@ -6,6 +6,7 @@
  */
 import {
   ympeFor,
+  CPP_MAX_MONTHLY_AT_65,
   estimateCpp,
   reconstructEarnings,
   cppStartFactor,
@@ -35,7 +36,7 @@ function near(a: number, b: number, tol: number) {
 }
 
 console.log('YMPE')
-check('2026 known value', ympeFor(2026) === 74900)
+check('2026 known value', ympeFor(2026) === 74600)
 check('future extrapolates up', ympeFor(2035) > ympeFor(2026), `got ${ympeFor(2035)}`)
 
 console.log('CPP start factor')
@@ -46,9 +47,10 @@ check('70 → +42%', near(cppStartFactor(70), 1.42, 0.001), `${cppStartFactor(70
 console.log('CPP estimate (owner: 2010 $50k → 2026 ~$95k, start 65)')
 {
   const e = reconstructEarnings(2010, 50000, 2026, 95000, 2041)
-  const { monthlyAt65 } = estimateCpp(e, 65)
-  // Immigrant with ~30 solid years by 65: expect a healthy fraction of max (~$900–$1433).
-  check('in plausible band', monthlyAt65 > 700 && monthlyAt65 <= 1433, `got ${monthlyAt65.toFixed(0)}`)
+  const { monthlyAt65 } = estimateCpp(e, 65, 1981)
+  // Immigrant (age-18 zeros from 1999 padded, dropout erases most): with 30+ years
+  // at/above the YMPE this lands close to — but strictly below — the max.
+  check('in plausible band', monthlyAt65 > 800 && monthlyAt65 < CPP_MAX_MONTHLY_AT_65, `got ${monthlyAt65.toFixed(0)}`)
 }
 
 console.log('OAS')
@@ -63,7 +65,7 @@ check('20 yrs → half', near(oasResidencyFraction(2026, 65, 1981), 0.5, 0.001),
   const frac = oasResidencyFraction(arrival, 65, birth)
   check('37/40 residency', near(frac, 37 / 40, 0.001), `got ${frac.toFixed(3)}`)
   const oas = estimateOas(arrival, 65, birth)
-  check('OAS ≈ 0.925 × full', near(oas, 727.67 * 37 / 40, 1), `got ${oas.toFixed(2)}`)
+  check('OAS ≈ 0.925 × full', near(oas, 751.97 * 37 / 40, 1), `got ${oas.toFixed(2)}`)
 }
 check('clawback zero below threshold', oasClawback(9000, 80000) === 0)
 check('clawback 15% above threshold', near(oasClawback(9000, 100000), Math.min(9000, (100000 - 93454) * 0.15), 1))

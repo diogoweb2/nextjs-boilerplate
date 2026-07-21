@@ -225,8 +225,8 @@ export function buildRetirementPlan(
     inputs.partner.birthYear + params.partnerCppAge,
     inputs.partner.realSalaryGrowth
   )
-  const selfCpp = estimateCpp(selfEarnings, params.selfCppAge).monthlyAtStart
-  const partnerCpp = estimateCpp(partnerEarnings, params.partnerCppAge).monthlyAtStart
+  const selfCpp = estimateCpp(selfEarnings, params.selfCppAge, inputs.self.birthYear).monthlyAtStart
+  const partnerCpp = estimateCpp(partnerEarnings, params.partnerCppAge, inputs.partner.birthYear).monthlyAtStart
 
   const selfOas = estimateOas(inputs.self.arrivalYear, params.selfOasAge, inputs.self.birthYear)
   const partnerOas = estimateOas(inputs.partner.arrivalYear, params.partnerOasAge, inputs.partner.birthYear)
