@@ -851,6 +851,21 @@ export const emergencyConfig = pgTable('emergency_config', {
 })
 
 /**
+ * Retirement Consultant parameter OVERRIDES (BUSINESS_RULES.md §20). Singleton
+ * jsonb of ONLY the params the owner has pinned — an absent key means "use the
+ * engine default" (computeDefaults). So "Restore defaults" = clear the jsonb, and
+ * future improvements to the defaults flow through automatically. Contains no
+ * personal identifiers (birthdates/names live in .env.local; RRSP balances live in
+ * registered_accounts + holding_snapshots).
+ */
+export const retirementSettings = pgTable('retirement_settings', {
+  id: serial('id').primaryKey(),
+  // Partial RetirementParams (app/lib/retirement.ts) — override keys only.
+  overrides: jsonb('overrides').$type<Record<string, unknown>>().notNull().default({}),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+})
+
+/**
  * Per-merchant, per-amount auto-fill rules. When a future import produces a
  * transaction with the same merchant and exact amount, it automatically inherits
  * the saved category and note — useful for recurring fixed-amount payments like

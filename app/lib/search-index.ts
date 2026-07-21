@@ -82,6 +82,12 @@ export const FEATURE_INDEX: FeatureEntry[] = [
   { label: 'Investment report', page: 'Accounts › Investments › Report', href: '/accounts/investments/report', keywords: ['monthly report', 'what changed', 'movers', 'allocation', 'bonds', 'rotate', 'dip', 'buy the dip', 'drawdown', 'move investment'] },
   { label: 'Net worth', page: 'Accounts › Net worth', href: '/accounts/networth#net-worth', keywords: ['total', 'assets'] },
   { label: 'Mortgage remaining', page: 'Accounts › Net worth', href: '/accounts/networth#mortgage-remaining', keywords: ['payoff', 'balance', 'house'] },
+  { label: 'Retirement', page: 'Accounts › Retirement', href: '/accounts/retirement', keywords: ['retirement', 'pension', 'cpp', 'oas', 'hoopp', 'rrsp', 'rrif', 'retire', 'aposentadoria', 'snowbird', 'rdsp', 'consultant', 'nest egg'] },
+  { label: 'Your plan', page: 'Accounts › Retirement', href: '/accounts/retirement#your-plan', keywords: ['retirement age', 'lifestyle', 'slider', 'snowbird'] },
+  { label: 'Where you are vs. where you should be', page: 'Accounts › Retirement', href: '/accounts/retirement#where-you-are-vs-where-you-should-be', keywords: ['chart', 'glidepath', 'needed', 'on track', 'crisis cone'] },
+  { label: 'Your monthly income at retirement', page: 'Accounts › Retirement', href: '/accounts/retirement#your-monthly-income-at-retirement', keywords: ['waterfall', 'hoopp', 'cpp', 'oas', 'rrsp draw', 'income'] },
+  { label: 'Your plan timeline', page: 'Accounts › Retirement', href: '/accounts/retirement#your-plan-timeline', keywords: ['timeline', 'mortgage-free', 'rdsp', 'cpp', 'oas', 'rrif'] },
+  { label: 'What your consultant says', page: 'Accounts › Retirement', href: '/accounts/retirement#what-your-consultant-says', keywords: ['advice', 'rdsp', 'aggressive', 'decumulation', 'crash test', 'withdraw'] },
 
   // ── Reports ─────────────────────────────────────────────────────────────
   { label: 'Trends', page: 'Reports › Trends', href: '/reports', keywords: ['charts', 'spending'] },

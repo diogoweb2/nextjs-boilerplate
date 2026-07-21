@@ -1653,3 +1653,80 @@ posts. **Dismissal (`bill_reminder_dismissals`)** is DB-persisted (cross-device)
 `bill_key` (`m:<merchantId>` or `cc`) storing the dismissed cycle (`due_ym`) — next month's cycle
 warns again. Server actions in `app/actions/bills.ts`. Demo sessions show the calendar but skip
 the banner. Dashboard-only — no digest push.
+
+## 20. Retirement Consultant (`/accounts/retirement`)
+
+A deterministic, deeply personalized retirement plan for the Toronto family — an
+independent mini-site inside **Accounts**. **No AI/LLM at runtime**: the engine is pure
+year-by-year math over data the app already has, plus a small set of owner-editable
+parameters. The "consultant" = the engine + curated defaults + plain-language verdict
+strings. Spec: `RETIREMENT_PLAN.md`. Files:
+
+- `app/lib/canada-rules.ts` — constants + pure calculators for CPP / OAS / HOOPP /
+  RRIF minimums / Ontario+federal tax with pension splitting / RRSP limits / RDSP grants
+  / ODSP / Canada Disability Benefit. Every table carries `RULES_LAST_VERIFIED` and the
+  UI shows a "rules last verified" note.
+- `app/lib/retirement.ts` — **the engine**. `buildRetirementPlan(inputs, params) →
+  PlanResult`, 100% pure/db-free. One loop age-now→95, nominal internally, deflated for
+  display. Two passes: baseline + a deterministic historical-crisis pass (the chart's
+  shaded cone). Accumulation (contributions + glidepath returns), then decumulation in
+  order: guaranteed income (HOOPP+bridge, CPP, OAS) → RRSP/RRIF meltdown (RRIF minimum
+  enforced at 71) → TFSA (kept above an emergency floor) → non-reg/house proceeds.
+- `app/lib/retirement-defaults.ts` — `computeDefaults(derived) → RetirementParams`, the
+  "consultant chooses the numbers" layer, incl. the three lifestyle tiers derived from
+  **their real category averages** (Essentials / Today's Life / Snowbird Dream).
+- `app/lib/retirement-advice.ts` — rule-generated advice cards (RDSP #1, too-conservative
+  mix with the dollar drag, gap fix, ahead-of-plan, crash test, mortgage redirect), each
+  with a computed dollar impact. The first card's headline feeds the hero verdict.
+- `app/actions/retirement.ts` — `loadRetirementData` (assembles derived inputs from the
+  existing loaders, runs the engine once), `saveParams`/`resetParams` (override jsonb),
+  `saveRrspBalance`. All mutations `requireAuth()`; loaders branch on `isDemoSession()`.
+- UI: `app/accounts/retirement/page.tsx` (server) + `app/components/RetirementPlan.tsx`
+  (client, recomputes the engine live on every slider change) + the centerpiece
+  `app/components/charts/RetirementChart.tsx`.
+
+### Derived inputs (all read-only, recomputed every load — recompute-on-import for free)
+- **Salaries**: `Salary`-category income split by bank (Tangerine = self, Scotia =
+  partner), trailing 12 complete months, **grossed up** via the Ontario tax reverse-lookup
+  (`grossUpFromNet`) because CPP/HOOPP run on gross.
+- **Spending baseline**: trailing-12-complete-month category averages (special excluded),
+  Home split into its mortgage portion (`projectMortgage.regularPayment`, dies at payoff)
+  vs. the rest.
+- **TFSA / DC**: latest `holding_snapshots` per registered account (TFSA kind → TFSA line).
+- **Mortgage**: payoff year + regular payment from `loadMortgageProjection`.
+- **RRSP balances**: `registered_accounts` (kind `rrsp`, `owner` self/partner) + a manual
+  `holding_snapshots` row (`totalValueCad` only, no positions). This means the RRSP flows
+  into the **Net worth** card's investments total automatically (the net-worth query already
+  sums all non-archived registered accounts) — no separate wiring — and future T4/statement
+  ingestion gets RRSP for free.
+
+### Parameters & storage
+`retirement_settings` is a **singleton jsonb of OVERRIDES ONLY** — an absent key = the
+engine default from `computeDefaults`, so "Restore defaults" = clear the jsonb and future
+default improvements flow through. The client works in play mode: changes preview live and
+never persist until **Save** (which sends only the keys that differ from defaults);
+**Discard** reverts to the saved set; **Restore defaults** deletes overrides. `saveParams`
+sanitizes to a known key whitelist. **Basic** controls are always visible; **Advanced**
+(returns, CPP/OAS ages, HOOPP, glidepath, crises, the son's RDSP/estate) is hidden behind
+a toggle ("the wife doesn't need to see these").
+
+### Privacy (repo is public)
+No personal values in any committed file. Birthdates/names come from `.env.local`
+(`OWNER_BIRTHDATE`, `PARTNER_BIRTHDATE`, `SELF_NAME`, `PARTNER_NAME`, optional
+`KID1_NAME`/`KID2_NAME` defaulting to "your son"/"your other kid"). RRSP balances live only
+in the DB. Demo (`demoRetirementData`) runs fully-synthetic inputs through the same engine.
+
+### ⚠️ VERIFY-list (best-known 2026 figures — confirm against current publications)
+The constants in `canada-rules.ts` are best-known as of `RULES_LAST_VERIFIED` (2026-07), not
+authoritative. Re-check against CRA / Service Canada / HOOPP before trusting: **YMPE/YAMPE
+table + max CPP at 65, OAS full monthly + clawback (recovery-tax) threshold, TFSA 2026 limit,
+RRSP dollar limit, RRIF minimum-factor table, RDSP (CDSG) grant tiers + CDSB, ODSP single
+rate, Canada Disability Benefit, Ontario + federal tax brackets / basic personal amounts /
+age + pension credits.** CPP is reconstructed from two salary points, not the real Record of
+Earnings (a My Service Canada override is a future param); HOOPP ignores service buybacks; tax
+is simplified (no surtax, no dividend credits). A planning model, not advice.
+
+### Sanity checks (no test runner in this repo)
+`npx tsx scripts/check-canada-rules.ts` and `npx tsx scripts/check-retirement.ts` assert
+golden-value plausibility bands over the pure math (CPP/OAS/HOOPP/tax/RRIF and the year-by-year
+plan). Run them after touching either engine file.
