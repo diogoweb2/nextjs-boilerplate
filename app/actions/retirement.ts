@@ -370,7 +370,8 @@ function sanitizeOverrides(o: Partial<RetirementParams>): Record<string, unknown
     'fees', 'postMortgageRedirect', 'extraMonthlySavings', 'employerMatchRate', 'selfCppAge', 'partnerCppAge',
     'selfOasAge', 'partnerOasAge', 'hooppServiceStartYear', 'hooppIndexingOfCpi', 'glideBase',
     'glideEquityFloor', 'deriskStartYearsBeforeRetire', 'tfsaFloorMonths', 'tfsaFloorMonthsPostMortgage',
-    'sellHouseAge', 'houseAppreciation', 'crisisEveryYears', 'crisisEquityDrop', 'crisisRecoveryYears',
+    'sellHouseAge', 'houseAppreciation', 'downsizeFraction', 'condoFeesMonthly', 'rentMonthly',
+    'crisisEveryYears', 'crisisEquityDrop', 'crisisRecoveryYears',
     'rdspAnnualContribution', 'planToAge',
   ])
   for (const key of numeric) {
@@ -379,6 +380,7 @@ function sanitizeOverrides(o: Partial<RetirementParams>): Record<string, unknown
   }
   if (o.lifestyle === 'essentials' || o.lifestyle === 'today' || o.lifestyle === 'snowbird') out.lifestyle = o.lifestyle
   if (typeof o.sellHouse === 'boolean') out.sellHouse = o.sellHouse
+  if (o.sellHouseReplacement === 'condo' || o.sellHouseReplacement === 'rent') out.sellHouseReplacement = o.sellHouseReplacement
   if (typeof o.crisisEnabled === 'boolean') out.crisisEnabled = o.crisisEnabled
   if (typeof o.rdspOpen === 'boolean') out.rdspOpen = o.rdspOpen
   if (o.tierMonthly && typeof o.tierMonthly === 'object') {

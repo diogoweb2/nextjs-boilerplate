@@ -110,10 +110,18 @@ export type RetirementParams = {
   tfsaFloorMonths: number
   tfsaFloorMonthsPostMortgage: number
 
-  /** House. */
+  /** House. Selling is never free: a replacement home is always modeled. */
   sellHouse: boolean
   sellHouseAge: number
   houseAppreciation: number
+  /** What replaces the house after selling: buy a smaller condo, or rent. */
+  sellHouseReplacement: 'condo' | 'rent'
+  /** Condo mode: fraction of the sale proceeds spent on the replacement condo. */
+  downsizeFraction: number
+  /** Condo mode: monthly maintenance fees added to spend from the sale (today's $). */
+  condoFeesMonthly: number
+  /** Rent mode: monthly rent added to spend from the sale (today's $). */
+  rentMonthly: number
 
   /** Crises (Advanced). */
   crisisEnabled: boolean
@@ -475,7 +483,26 @@ function runSimulation(
       tfsa += annualTfsa
     } else {
       // ── Decumulation: fund the (inflated) lifestyle target ──
-      const targetAnnual = inflate(c.lifestyleMonthly * 12, year)
+      let targetAnnual = inflate(c.lifestyleMonthly * 12, year)
+
+      // Selling the house is never free: from the sale on, replacement housing
+      // (condo fees or rent) is added to the year's spend…
+      const houseSold = p.sellHouse && selfAge >= p.sellHouseAge
+      if (houseSold) {
+        const housingMonthly =
+          p.sellHouseReplacement === 'rent' ? p.rentMonthly : p.condoFeesMonthly
+        targetAnnual += inflate(housingMonthly * 12, year)
+      }
+      // …and in the sale year, only the proceeds NET of the replacement condo are
+      // invested (renting invests everything — the rent line above pays for it).
+      // Proceeds land before this year's draws so they can fund it.
+      if (p.sellHouse && selfAge === p.sellHouseAge) {
+        const houseNominal = inputs.houseValue * Math.pow(1 + p.houseAppreciation, year - startYear)
+        nonReg +=
+          p.sellHouseReplacement === 'rent'
+            ? houseNominal
+            : houseNominal * (1 - p.downsizeFraction)
+      }
 
       // 1. Guaranteed income first.
       // HOOPP accrues on a salary that keeps pace with inflation until retirement,
@@ -548,12 +575,6 @@ function runSimulation(
         const d = Math.min(nonReg, need)
         nonReg -= d
         need -= d
-      }
-
-      // House sale (proceeds → non-reg).
-      if (p.sellHouse && selfAge === p.sellHouseAge) {
-        const houseNominal = inputs.houseValue * Math.pow(1 + p.houseAppreciation, year - startYear)
-        nonReg += houseNominal
       }
 
       if (need > 1) survives = false // couldn't fund the lifestyle this year
@@ -635,7 +656,15 @@ function requiredCapital(
         (a < p.selfOasAge ? c.selfOas : 0) +
         (partnerAge < p.partnerCppAge ? c.partnerCpp : 0) +
         (partnerAge < p.partnerOasAge ? c.partnerOas : 0)
-      const gapAnnual = Math.max(0, c.lifestyleMonthly - netSteadyMonthly + missing) * 12
+      // Post-sale replacement housing (condo fees / rent) raises the spend target.
+      const extraHousing =
+        p.sellHouse && a >= p.sellHouseAge
+          ? p.sellHouseReplacement === 'rent'
+            ? p.rentMonthly
+            : p.condoFeesMonthly
+          : 0
+      const gapAnnual =
+        Math.max(0, c.lifestyleMonthly + extraHousing - netSteadyMonthly + missing) * 12
       pv += (gapAnnual / WITHDRAWAL_NET_FACTOR) / Math.pow(1 + realReturn, a - selfAge)
     }
     return pv

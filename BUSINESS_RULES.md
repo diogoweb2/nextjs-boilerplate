@@ -1669,9 +1669,24 @@ strings. Spec: `RETIREMENT_PLAN.md`. Files:
 - `app/lib/retirement.ts` — **the engine**. `buildRetirementPlan(inputs, params) →
   PlanResult`, 100% pure/db-free. One loop age-now→95, nominal internally, deflated for
   display. Two passes: baseline + a deterministic historical-crisis pass (the chart's
-  shaded cone). Accumulation (contributions + glidepath returns), then decumulation in
-  order: guaranteed income (HOOPP+bridge, CPP, OAS) → RRSP/RRIF meltdown (RRIF minimum
-  enforced at 71) → TFSA (kept above an emergency floor) → non-reg/house proceeds.
+  shaded cone, with post-crash recovery years at ~+12% equity). Accumulation
+  (contributions + employer match `employerMatchRate` + glidepath returns), then
+  decumulation in order: guaranteed income (HOOPP+bridge, CPP, OAS) → RRSP/RRIF meltdown
+  (RRIF minimum enforced at 71; a forced minimum above the year's need is reinvested,
+  never dropped) → TFSA (floored, never drawn below zero) → non-reg/house proceeds.
+  **Selling the house is never free**: `sellHouseReplacement` is `'condo'` (default —
+  `downsizeFraction` of the proceeds buys the condo, `condoFeesMonthly` joins the spend)
+  or `'rent'` (all proceeds invested, `rentMonthly` joins the spend); the Needed curve
+  carries the same post-sale housing cost.
+  Key conventions (reviewed 2026-07-20): CPP earnings STOP at retirement (zero years pad
+  both ends of the contributory period, so early retirement lowers CPP); HOOPP is fully
+  inflation-indexed to the retirement year, then at 75%-of-CPI; the hero/waterfall show
+  **steady-state after-tax** income (CPP/OAS at their start ages plus a sustainable
+  ~3%-real annuity of retirement-year capital, minus estimated tax) — the pre-CPP bridge
+  shows up in `drawPhases`, and `survivesToPlanEnd` distinguishes "lasts to 95" from a
+  negative early-years gap; the chart's "Needed" line is a savings TRAJECTORY before the
+  retirement age (required-at-retirement discounted back net of planned contributions),
+  and PV of the after-tax, withdrawal-grossed-up gap after it.
 - `app/lib/retirement-defaults.ts` — `computeDefaults(derived) → RetirementParams`, the
   "consultant chooses the numbers" layer, incl. the three lifestyle tiers derived from
   **their real category averages** (Essentials / Today's Life / Snowbird Dream).
@@ -1683,7 +1698,11 @@ strings. Spec: `RETIREMENT_PLAN.md`. Files:
   `saveRrspBalance`. All mutations `requireAuth()`; loaders branch on `isDemoSession()`.
 - UI: `app/accounts/retirement/page.tsx` (server) + `app/components/RetirementPlan.tsx`
   (client, recomputes the engine live on every slider change) + the centerpiece
-  `app/components/charts/RetirementChart.tsx`.
+  `app/components/charts/RetirementChart.tsx`. A **live-impact readout** compares the
+  previewed params against the saved baseline plan: a "What your changes do" panel at the
+  top of the Assumptions & controls drawer (retire year/age, after-tax income, surplus/
+  shortfall, earliest retirement age, lasts-to-plan-end, crash test — only changed rows
+  shown) plus a one-line delta in the sticky Save bar. All display is today's dollars.
 
 ### Derived inputs (all read-only, recomputed every load — recompute-on-import for free)
 - **Salaries**: `Salary`-category income split by bank (Tangerine = self, Scotia =

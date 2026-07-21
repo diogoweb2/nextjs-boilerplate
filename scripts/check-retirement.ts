@@ -114,6 +114,26 @@ console.log('Monotonicity: later retirement age → not worse gap')
     `55:${early.selfCppMonthlyReal.toFixed(0)} 65:${late.selfCppMonthlyReal.toFixed(0)}`)
 }
 
+console.log('House sale models replacement housing (never free)')
+{
+  const keep = buildRetirementPlan(inputs, { ...params, sellHouse: false })
+  const condo = buildRetirementPlan(inputs, { ...params, sellHouse: true, sellHouseAge: 75, sellHouseReplacement: 'condo' })
+  const rent = buildRetirementPlan(inputs, { ...params, sellHouse: true, sellHouseAge: 75, sellHouseReplacement: 'rent' })
+  const atAge = (p: typeof keep, age: number) => p.rows.find((r) => r.selfAge === age)!.capitalReal
+  const end = (p: typeof keep) => p.rows[p.rows.length - 1].capitalReal
+  check('selling (condo) still adds capital vs keeping', end(condo) > end(keep),
+    `condo ${end(condo).toFixed(0)} keep ${end(keep).toFixed(0)}`)
+  // The condo purchase consumes downsizeFraction of the proceeds: the sale-year
+  // capital jump must be well below the full (real) house value.
+  const jump = atAge(condo, 75) - atAge(keep, 75)
+  const houseReal = inputs.houseValue *
+    Math.pow((1 + params.houseAppreciation) / (1 + params.inflation), 75 - (inputs.currentYear - inputs.self.birthYear))
+  check('condo purchase consumed from proceeds', jump < houseReal * 0.7,
+    `jump ${jump.toFixed(0)} vs house ${houseReal.toFixed(0)}`)
+  check('renting invests more at the sale than buying a condo', atAge(rent, 75) > atAge(condo, 75),
+    `rent ${atAge(rent, 75).toFixed(0)} condo ${atAge(condo, 75).toFixed(0)}`)
+}
+
 console.log('Needed curve is a savings trajectory, not "retire today"')
 {
   const first = plan.rows[0]

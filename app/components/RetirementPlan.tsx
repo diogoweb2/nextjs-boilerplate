@@ -521,6 +521,55 @@ function ParamsDrawer({
               <NumField value={params.sellHouseAge} onChange={(v) => set('sellHouseAge', v)} />
             </span>
           </Field>
+          {params.sellHouse && (
+            <Field
+              label="After selling, you live in…"
+              hint="selling is never free — the replacement home is part of the math"
+            >
+              <div className="space-y-2">
+                <select
+                  value={params.sellHouseReplacement}
+                  onChange={(e) => set('sellHouseReplacement', e.target.value as 'condo' | 'rent')}
+                  className="rounded border border-[var(--border)] bg-transparent px-2 py-1 text-sm"
+                >
+                  <option value="condo">a smaller condo (buy)</option>
+                  <option value="rent">a rental</option>
+                </select>
+                {params.sellHouseReplacement === 'condo' ? (
+                  <div className="flex flex-wrap items-center gap-3 text-sm">
+                    <span className="inline-flex items-center gap-1">
+                      costs{' '}
+                      <NumField
+                        value={round4(params.downsizeFraction * 100)}
+                        onChange={(v) => set('downsizeFraction', v / 100)}
+                        step={5}
+                        suffix="% of the sale"
+                      />
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      + fees{' '}
+                      <NumField
+                        value={params.condoFeesMonthly}
+                        onChange={(v) => set('condoFeesMonthly', v)}
+                        step={50}
+                        suffix="$/mo"
+                      />
+                    </span>
+                  </div>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-sm">
+                    rent{' '}
+                    <NumField
+                      value={params.rentMonthly}
+                      onChange={(v) => set('rentMonthly', v)}
+                      step={100}
+                      suffix="$/mo"
+                    />
+                  </span>
+                )}
+              </div>
+            </Field>
+          )}
         </div>
       </section>
 

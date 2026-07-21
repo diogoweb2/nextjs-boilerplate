@@ -107,6 +107,10 @@ export function computeDefaults(d: DerivedForDefaults): RetirementParams {
     sellHouse: false, // keep the house by default (also the son's home, §6)
     sellHouseAge: 75,
     houseAppreciation: 0.035, // Toronto long-run avg (§1)
+    sellHouseReplacement: 'condo', // selling is never free — model the next home
+    downsizeFraction: 0.55, // a Toronto condo ≈ 55% of the house's sale value
+    condoFeesMonthly: 700,
+    rentMonthly: 2800,
 
     crisisEnabled: true,
     crisisEveryYears: 9, // ≈ a −30% bear every 9 years (§5.9)
