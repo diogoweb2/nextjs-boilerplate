@@ -149,6 +149,15 @@ function lastDigits(raw: string): string | null {
   return digits ? digits.slice(-4) : null
 }
 
+// Amex's "Account #" is a short cardmember number (e.g. 11011), NOT a 16-digit
+// card number — so we keep the WHOLE digit string. Truncating to last-4 (as
+// master card numbers need) would turn Alice's 11011 into 1011 and break
+// cardholder attribution against PARTNER_CARDS. See §4b in BUSINESS_RULES.md.
+function accountDigits(raw: string): string | null {
+  const digits = raw.replace(/\D/g, '')
+  return digits || null
+}
+
 function colIndex(header: string[], name: string): number {
   return header.findIndex((c) => c.trim().toLowerCase() === name.toLowerCase())
 }
@@ -227,7 +236,7 @@ function parseAmex(rows: string[][]): ParsedRow[] {
       rawDescription: merchant,
       amount,
       rawCategory: null,
-      cardLast4: lastDigits(account),
+      cardLast4: accountDigits(account),
       country: null,
       isPayment: isPaymentDescription(fullDesc),
     })
