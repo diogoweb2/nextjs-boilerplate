@@ -46,3 +46,4 @@ sync/itrade.accounts.json
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+RETIREMENT_PLAN.md

@@ -5,6 +5,7 @@ const TABS = [
   { href: '/accounts', label: 'Goals', exact: true },
   { href: '/accounts/emergency', label: 'Emergency' },
   { href: '/accounts/investments', label: 'Investments' },
+  { href: '/accounts/retirement', label: 'Retirement' },
   { href: '/accounts/networth', label: 'Net worth' },
 ]
 

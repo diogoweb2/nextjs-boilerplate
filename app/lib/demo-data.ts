@@ -16,6 +16,9 @@ import type { SurplusPrompt } from '@/app/actions/surplus'
 import type { InvestmentsData, AccountView } from '@/app/actions/investments'
 import { buildInvestmentReport, type InvestmentReport, type ReportPosition } from '@/app/lib/investmentReport'
 import type { NetWorthData } from '@/app/actions/networth'
+import type { RetirementData } from '@/app/actions/retirement'
+import { buildRetirementPlan, type RetirementInputs } from '@/app/lib/retirement'
+import { computeDefaults, type DerivedForDefaults } from '@/app/lib/retirement-defaults'
 import { computeTfsaRoom, type RegisteredEntry } from '@/app/lib/tfsa'
 import { computeRespGrant } from '@/app/lib/resp'
 import type { EmergencyFundData } from '@/app/actions/emergency'
@@ -1099,4 +1102,51 @@ export function demoInvestmentReport(): InvestmentReport {
     }
   })
   return buildInvestmentReport(inputs)
+}
+
+/**
+ * Synthetic Retirement Consultant data (never real balances). Runs entirely
+ * fabricated inputs through the same pure engine so the page renders for a demo
+ * visitor with internally-consistent numbers.
+ */
+export function demoRetirementData(): RetirementData {
+  const inputs: RetirementInputs = {
+    currentYear: 2026,
+    self: { birthYear: 1981, grossSalary: 92000, realSalaryGrowth: 0, careerStartYear: 2010, careerStartSalary: 50000, arrivalYear: 2009 },
+    partner: { birthYear: 1982, grossSalary: 78000, realSalaryGrowth: 0, careerStartYear: 2011, careerStartSalary: 35000, arrivalYear: 2010 },
+    selfRrsp: 210000,
+    partnerRrsp: 32000,
+    tfsaTotal: 84000,
+    dcBalance: 36000,
+    currentEquityFraction: 0.55,
+    houseValue: 1100000,
+    mortgagePayoffYear: 2031,
+    monthlyMortgagePayment: 2000,
+    currentMonthlySpend: 7600,
+    monthlyRrspContribution: 800,
+    monthlyTfsaContribution: 300,
+  }
+  const derived: DerivedForDefaults = {
+    inputs,
+    categoryMonthly: {
+      Home: 3000, Groceries: 1300, Health: 280, Dental: 110, Cars: 760, Subscriptions: 240,
+      Transport: 190, Dining: 560, Entertainment: 280, Kids: 640, Investment: 1100, Travel: 480, Shopping: 560,
+    },
+    mortgagePortionMonthly: 2000,
+  }
+  const defaults = computeDefaults(derived)
+  const recommended = buildRetirementPlan(inputs, defaults).recommendedRetireAge
+  if (recommended) defaults.retirementAge = recommended
+  const plan = buildRetirementPlan(inputs, defaults)
+  return {
+    inputs,
+    defaults,
+    overrides: {},
+    params: defaults,
+    plan,
+    rrsp: { self: 210000, partner: 32000, selfAsOf: '2026-06-30', partnerAsOf: '2026-06-30', partnerIsEstimate: true },
+    derivedFlags: { selfSalary: true, partnerSalary: true, spend: true, tfsa: true },
+    names: { self: 'Me', partner: 'Partner', kid1: 'your son', kid2: 'your other kid' },
+    rulesLastVerified: '2026-07',
+  }
 }
