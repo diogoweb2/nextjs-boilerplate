@@ -367,7 +367,7 @@ function sanitizeOverrides(o: Partial<RetirementParams>): Record<string, unknown
   const out: Record<string, unknown> = {}
   const numeric = new Set<keyof RetirementParams>([
     'retirementAge', 'partnerRetirementAgeOffset', 'inflation', 'equityReturn', 'bondReturn',
-    'fees', 'postMortgageRedirect', 'extraMonthlySavings', 'selfCppAge', 'partnerCppAge',
+    'fees', 'postMortgageRedirect', 'extraMonthlySavings', 'employerMatchRate', 'selfCppAge', 'partnerCppAge',
     'selfOasAge', 'partnerOasAge', 'hooppServiceStartYear', 'hooppIndexingOfCpi', 'glideBase',
     'glideEquityFloor', 'deriskStartYearsBeforeRetire', 'tfsaFloorMonths', 'tfsaFloorMonthsPostMortgage',
     'sellHouseAge', 'houseAppreciation', 'crisisEveryYears', 'crisisEquityDrop', 'crisisRecoveryYears',

@@ -87,6 +87,7 @@ export function computeDefaults(d: DerivedForDefaults): RetirementParams {
 
     postMortgageRedirect: 0.5, // a deliberately human default (§5.2)
     extraMonthlySavings: 0,
+    employerMatchRate: 0.03, // owner to confirm from a pay stub (§1)
 
     selfCppAge: 65,
     partnerCppAge: 65,

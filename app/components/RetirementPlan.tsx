@@ -12,6 +12,7 @@ import {
   buildRetirementPlan,
   type RetirementParams,
   type LifestyleTier,
+  type PlanResult,
 } from '@/app/lib/retirement'
 import { buildAdvice } from '@/app/lib/retirement-advice'
 
@@ -39,11 +40,12 @@ export function RetirementPlan({ data }: { data: RetirementData }) {
   const [params, setParams] = useState<RetirementParams>(data.params)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
-  const [nominal, setNominal] = useState(false)
 
   // Live recompute on every change — the engine is pure & fast.
   const plan = useMemo(() => buildRetirementPlan(data.inputs, params), [data.inputs, params])
   const advice = useMemo(() => buildAdvice(plan, params, data), [plan, params, data])
+  // Baseline = the plan under the saved params, for the live "what changed" readout.
+  const basePlan = useMemo(() => buildRetirementPlan(data.inputs, data.params), [data.inputs, data.params])
 
   const dirty = useMemo(() => JSON.stringify(params) !== JSON.stringify(data.params), [params, data.params])
 
@@ -76,6 +78,13 @@ export function RetirementPlan({ data }: { data: RetirementData }) {
 
   const gap = plan.monthlyGapReal
   const onTrack = plan.onTrack
+  // Primary verdict = does the money last to plan end (same test the consultant
+  // recommendation uses). A negative year-one gap while still surviving means later
+  // pensions (CPP/OAS) backfill the early years — that's a bridge, not a shortfall.
+  const survives = plan.survivesToPlanEnd
+  const earlyYearsBridge = survives && gap < 0
+  const couldRetireEarlier =
+    survives && plan.recommendedRetireAge != null && plan.recommendedRetireAge < plan.selfRetireAge
 
   return (
     <div className="space-y-6">
@@ -92,19 +101,27 @@ export function RetirementPlan({ data }: { data: RetirementData }) {
             {mo(plan.lifestyleMonthlyReal)}.
           </p>
           <div className="flex items-center gap-3 flex-wrap">
-            <span
-              className="inline-flex items-center rounded-full px-3 py-1 text-sm font-bold"
-              style={{
-                background: onTrack ? 'color-mix(in srgb, #10b981 15%, transparent)' : 'color-mix(in srgb, #ef4444 15%, transparent)',
-                color: onTrack ? '#10b981' : '#ef4444',
-              }}
-            >
-              {onTrack
-                ? plan.recommendedRetireAge && plan.recommendedRetireAge < plan.selfRetireAge
+            {(() => {
+              const color = onTrack ? '#10b981' : earlyYearsBridge ? '#f59e0b' : '#ef4444'
+              const label = onTrack
+                ? couldRetireEarlier
                   ? `AHEAD — you could retire at ${plan.recommendedRetireAge}`
                   : 'ON TRACK ✓'
-                : `${mo(Math.abs(gap))} short`}
-            </span>
+                : earlyYearsBridge
+                  ? `LASTS TO ${params.planToAge} — ${mo(Math.abs(gap))} below target`
+                  : `${mo(Math.abs(gap))} short`
+              return (
+                <span
+                  className="inline-flex items-center rounded-full px-3 py-1 text-sm font-bold"
+                  style={{
+                    background: `color-mix(in srgb, ${color} 15%, transparent)`,
+                    color,
+                  }}
+                >
+                  {label}
+                </span>
+              )
+            })()}
             {!plan.survivesCrisis && (
               <span className="text-xs text-[#f59e0b]">⚠ may not survive a historical market crash</span>
             )}
@@ -198,25 +215,37 @@ export function RetirementPlan({ data }: { data: RetirementData }) {
       <Card title="Your monthly income at retirement">
         <div className="space-y-2">
           {plan.incomeLayers.map((l) => {
-            const pct = plan.incomeAtRetirementReal > 0 ? (l.monthlyReal / plan.incomeAtRetirementReal) * 100 : 0
+            const negative = l.monthlyReal < 0
+            const pct = plan.incomeAtRetirementReal > 0
+              ? (Math.abs(l.monthlyReal) / plan.incomeAtRetirementReal) * 100
+              : 0
             return (
               <div key={l.key}>
                 <div className="flex justify-between text-sm mb-0.5">
                   <span>{l.label}</span>
-                  <span className="font-medium">{mo(l.monthlyReal)}</span>
+                  <span className="font-medium" style={negative ? { color: '#ef4444' } : undefined}>
+                    {negative ? `− ${mo(Math.abs(l.monthlyReal))}` : mo(l.monthlyReal)}
+                  </span>
                 </div>
                 <div className="h-2 rounded-full bg-[var(--border)] overflow-hidden">
-                  <div className="h-full rounded-full" style={{ width: `${pct}%`, background: ACCENT }} />
+                  <div
+                    className="h-full rounded-full"
+                    style={{ width: `${Math.min(100, pct)}%`, background: negative ? '#ef4444' : ACCENT }}
+                  />
                 </div>
               </div>
             )
           })}
           <div className="flex justify-between text-sm font-bold pt-2 border-t border-[var(--border)]">
-            <span>Total</span>
+            <span>Total (after tax)</span>
             <span>{mo(plan.incomeAtRetirementReal)}</span>
           </div>
         </div>
         <p className="mt-3 text-xs text-[var(--muted)]">
+          Today&apos;s dollars, once every pension is in pay. If you retire before CPP/OAS start,
+          your savings bridge those years — see &ldquo;when to move money&rdquo; below.
+        </p>
+        <p className="mt-1 text-xs text-[var(--muted)]">
           Her hospital pension (HOOPP) alone is worth ≈{' '}
           {formatCurrencyCompact((plan.hooppAnnualReal / 12) * 12 * 25)} in an RRSP — guaranteed for
           life and inflation-protected.
@@ -279,11 +308,11 @@ export function RetirementPlan({ data }: { data: RetirementData }) {
               set={set}
               advancedOpen={advancedOpen}
               setAdvancedOpen={setAdvancedOpen}
-              nominal={nominal}
-              setNominal={setNominal}
               pending={pending}
               startTransition={startTransition}
               router={router}
+              basePlan={basePlan}
+              plan={plan}
             />
           </Card>
         )}
@@ -297,7 +326,9 @@ export function RetirementPlan({ data }: { data: RetirementData }) {
       {/* ─────────────── Sticky save bar (play mode) ─────────────── */}
       {dirty && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--background)] px-4 py-2 shadow-lg">
-          <span className="text-xs text-[var(--muted)]">Unsaved changes</span>
+          <span className="text-xs text-[var(--muted)]">
+            Unsaved changes<DeltaSummary base={basePlan} cur={plan} />
+          </span>
           <button onClick={onSave} disabled={pending} className="rounded-full px-3 py-1 text-sm font-medium text-white" style={{ background: ACCENT }}>
             Save
           </button>
@@ -403,11 +434,11 @@ function ParamsDrawer({
   set,
   advancedOpen,
   setAdvancedOpen,
-  nominal,
-  setNominal,
   pending,
   startTransition,
   router,
+  basePlan,
+  plan,
 }: {
   params: RetirementParams
   defaults: RetirementParams
@@ -415,11 +446,11 @@ function ParamsDrawer({
   set: <K extends keyof RetirementParams>(key: K, value: RetirementParams[K]) => void
   advancedOpen: boolean
   setAdvancedOpen: (v: boolean) => void
-  nominal: boolean
-  setNominal: (v: boolean) => void
   pending: boolean
   startTransition: React.TransitionStartFunction
   router: ReturnType<typeof useRouter>
+  basePlan: PlanResult
+  plan: PlanResult
 }) {
   const [rrspSelf, setRrspSelf] = useState(String(data.rrsp.self))
   const [rrspPartner, setRrspPartner] = useState(String(data.rrsp.partner))
@@ -432,6 +463,8 @@ function ParamsDrawer({
         Each control shows the consultant&apos;s default. Changes preview live; nothing saves until you
         press Save.
       </div>
+
+      <LiveImpact base={basePlan} cur={plan} />
 
       {/* ── Basic ── */}
       <section className="space-y-4">
@@ -477,6 +510,9 @@ function ParamsDrawer({
           </Field>
           <Field label="Extra monthly savings" hint="on top of what you already invest">
             <NumField value={params.extraMonthlySavings} onChange={(v) => set('extraMonthlySavings', v)} step={50} suffix="$/mo" />
+          </Field>
+          <Field label="Employer RRSP match" hint={`consultant: ${pct(defaults.employerMatchRate)} of your gross — confirm from a pay stub`}>
+            <NumField value={round4(params.employerMatchRate * 100)} onChange={(v) => set('employerMatchRate', v / 100)} step={0.5} suffix="%" />
           </Field>
           <Field label="Sell / downsize the house?" hint={`default: keep it (also ${data.names.kid1}'s home)`}>
             <span className="inline-flex items-center gap-2">
@@ -546,11 +582,174 @@ function ParamsDrawer({
         </section>
       )}
 
-      <label className="flex items-center gap-2 text-xs text-[var(--muted)]">
-        <input type="checkbox" checked={nominal} onChange={(e) => setNominal(e.target.checked)} />
-        Show future (nominal) dollars instead of today&apos;s
-      </label>
+      <p className="text-xs text-[var(--muted)]">
+        All amounts are in today&apos;s dollars (today&apos;s purchasing power).
+      </p>
     </div>
+  )
+}
+
+/* ─────────────── Live impact (what your change does) ─────────────── */
+
+type ImpactRow = {
+  label: string
+  from: string
+  to: string
+  delta: string
+  /** true = improvement (green), false = worse (red), null = neutral (muted). */
+  good: boolean | null
+}
+
+/** The rows of the plan that changed between the saved baseline and the live params. */
+function impactRows(base: PlanResult, cur: PlanResult): ImpactRow[] {
+  const rows: ImpactRow[] = []
+  const signed = (v: number, unit: string) => `${v > 0 ? '+' : '−'}${Math.abs(v)}${unit}`
+  const signedMo = (v: number) =>
+    `${v > 0 ? '+' : '−'}${formatCurrencyCompact(Math.abs(v))}/mo`
+
+  if (cur.selfRetireAge !== base.selfRetireAge) {
+    const d = cur.selfRetireAge - base.selfRetireAge
+    rows.push({
+      label: 'Retire',
+      from: `${base.retirementYear} (age ${base.selfRetireAge})`,
+      to: `${cur.retirementYear} (age ${cur.selfRetireAge})`,
+      delta: signed(d, 'y'),
+      good: null, // your choice, not better/worse by itself
+    })
+  }
+  if (Math.round(cur.incomeAtRetirementReal) !== Math.round(base.incomeAtRetirementReal)) {
+    const d = cur.incomeAtRetirementReal - base.incomeAtRetirementReal
+    rows.push({
+      label: 'Monthly income (after tax)',
+      from: mo(base.incomeAtRetirementReal),
+      to: mo(cur.incomeAtRetirementReal),
+      delta: signedMo(d),
+      good: d > 0,
+    })
+  }
+  if (Math.round(cur.lifestyleMonthlyReal) !== Math.round(base.lifestyleMonthlyReal)) {
+    const d = cur.lifestyleMonthlyReal - base.lifestyleMonthlyReal
+    rows.push({
+      label: 'Lifestyle needs',
+      from: mo(base.lifestyleMonthlyReal),
+      to: mo(cur.lifestyleMonthlyReal),
+      delta: signedMo(d),
+      good: null,
+    })
+  }
+  if (Math.round(cur.monthlyGapReal) !== Math.round(base.monthlyGapReal)) {
+    const d = cur.monthlyGapReal - base.monthlyGapReal
+    const fmt = (g: number) => (g >= 0 ? `${mo(g)} surplus` : `${mo(Math.abs(g))} short`)
+    rows.push({
+      label: 'Surplus / shortfall',
+      from: fmt(base.monthlyGapReal),
+      to: fmt(cur.monthlyGapReal),
+      delta: signedMo(d),
+      good: d > 0,
+    })
+  }
+  if (cur.recommendedRetireAge !== base.recommendedRetireAge) {
+    const from = base.recommendedRetireAge
+    const to = cur.recommendedRetireAge
+    rows.push({
+      label: 'Earliest you could retire',
+      from: from != null ? `age ${from}` : 'never (unfunded)',
+      to: to != null ? `age ${to}` : 'never (unfunded)',
+      delta: from != null && to != null ? signed(to - from, 'y') : '—',
+      good: from != null && to != null ? to < from : to != null,
+    })
+  }
+  if (cur.survivesToPlanEnd !== base.survivesToPlanEnd) {
+    rows.push({
+      label: 'Money lasts to plan end',
+      from: base.survivesToPlanEnd ? 'yes' : 'no',
+      to: cur.survivesToPlanEnd ? 'yes' : 'no',
+      delta: cur.survivesToPlanEnd ? '✓' : '✗',
+      good: cur.survivesToPlanEnd,
+    })
+  }
+  if (cur.survivesCrisis !== base.survivesCrisis) {
+    rows.push({
+      label: 'Crash test',
+      from: base.survivesCrisis ? 'survives' : 'fails',
+      to: cur.survivesCrisis ? 'survives' : 'fails',
+      delta: cur.survivesCrisis ? '✓' : '✗',
+      good: cur.survivesCrisis,
+    })
+  }
+  return rows
+}
+
+const deltaColor = (good: boolean | null) =>
+  good === null ? 'var(--muted)' : good ? '#10b981' : '#ef4444'
+
+/** Live readout inside the controls drawer: saved plan → what you're previewing. */
+function LiveImpact({ base, cur }: { base: PlanResult; cur: PlanResult }) {
+  const rows = impactRows(base, cur)
+  return (
+    <div className="sticky top-2 z-10 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+      <div className="text-xs font-semibold mb-1">What your changes do</div>
+      {rows.length === 0 ? (
+        <p className="text-xs text-[var(--muted)]">
+          Move any control and the effect shows here — e.g. &ldquo;Retire: −4y → age 54&rdquo;.
+        </p>
+      ) : (
+        <div className="space-y-1">
+          {rows.map((r) => (
+            <div key={r.label} className="flex items-baseline justify-between gap-3 text-xs">
+              <span className="text-[var(--muted)]">{r.label}</span>
+              <span className="text-right">
+                <span className="text-[var(--muted)]">{r.from}</span>
+                <span className="mx-1">→</span>
+                <span className="font-medium">{r.to}</span>
+                <span
+                  className="ml-2 inline-block rounded-full px-1.5 py-0.5 font-semibold"
+                  style={{
+                    color: deltaColor(r.good),
+                    background: `color-mix(in srgb, ${deltaColor(r.good)} 12%, transparent)`,
+                  }}
+                >
+                  {r.delta}
+                </span>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** One-line version for the sticky save bar. */
+function DeltaSummary({ base, cur }: { base: PlanResult; cur: PlanResult }) {
+  const parts: { text: string; good: boolean | null }[] = []
+  if (cur.selfRetireAge !== base.selfRetireAge) {
+    const d = cur.selfRetireAge - base.selfRetireAge
+    parts.push({ text: `retire ${d > 0 ? '+' : '−'}${Math.abs(d)}y → age ${cur.selfRetireAge}`, good: null })
+  }
+  const dIncome = cur.incomeAtRetirementReal - base.incomeAtRetirementReal
+  if (Math.round(dIncome) !== 0) {
+    parts.push({
+      text: `income ${dIncome > 0 ? '+' : '−'}${formatCurrencyCompact(Math.abs(dIncome))}/mo`,
+      good: dIncome > 0,
+    })
+  }
+  if (cur.survivesToPlanEnd !== base.survivesToPlanEnd) {
+    parts.push({
+      text: cur.survivesToPlanEnd ? 'now lasts to plan end' : 'runs out of money',
+      good: cur.survivesToPlanEnd,
+    })
+  }
+  if (parts.length === 0) return null
+  return (
+    <>
+      {parts.map((p, i) => (
+        <span key={i}>
+          {' · '}
+          <span style={{ color: deltaColor(p.good) }}>{p.text}</span>
+        </span>
+      ))}
+    </>
   )
 }
 

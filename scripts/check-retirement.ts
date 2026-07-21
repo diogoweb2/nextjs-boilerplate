@@ -83,7 +83,8 @@ console.log('Plan')
 const plan = buildRetirementPlan(inputs, params)
 check('rows cover to age 95', plan.rows[plan.rows.length - 1].selfAge === 95, `${plan.rows[plan.rows.length - 1].selfAge}`)
 check('retirement year = 1981 + age', plan.retirementYear === 1981 + params.retirementAge)
-check('income layers = 4', plan.incomeLayers.length === 4)
+check('income layers = 5 (incl. tax)', plan.incomeLayers.length === 5)
+check('tax layer is negative', (plan.incomeLayers.find((l) => l.key === 'tax')?.monthlyReal ?? 0) < 0)
 check('HOOPP is a real number', plan.hooppAnnualReal > 5000 && plan.hooppAnnualReal < 60000, `${plan.hooppAnnualReal.toFixed(0)}`)
 // Upper bound = the 2026 max clamp (conservative for a 2040s retiree, whose real
 // max — with the CPP enhancement fully phased in — will be higher in today's dollars).
@@ -107,6 +108,19 @@ console.log('Monotonicity: later retirement age → not worse gap')
   const late = buildRetirementPlan(inputs, { ...params, retirementAge: 65 })
   check('retiring later improves (or holds) the monthly gap', late.monthlyGapReal >= early.monthlyGapReal - 1,
     `55:${early.monthlyGapReal.toFixed(0)} 65:${late.monthlyGapReal.toFixed(0)}`)
+  // CPP earnings stop at retirement: retiring at 55 must yield LESS CPP than at 65
+  // (the 55–65 zero-earning years survive the dropout only partially).
+  check('early retirement lowers CPP', early.selfCppMonthlyReal < late.selfCppMonthlyReal,
+    `55:${early.selfCppMonthlyReal.toFixed(0)} 65:${late.selfCppMonthlyReal.toFixed(0)}`)
+}
+
+console.log('Needed curve is a savings trajectory, not "retire today"')
+{
+  const first = plan.rows[0]
+  const retire = plan.rows.find((r) => r.year === plan.retirementYear)!
+  check('needed today < needed at retirement', first.neededReal < retire.neededReal,
+    `today:${first.neededReal.toFixed(0)} retire:${retire.neededReal.toFixed(0)}`)
+  check('needed is non-negative everywhere', plan.rows.every((r) => r.neededReal >= 0))
 }
 
 console.log('')
