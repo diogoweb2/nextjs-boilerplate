@@ -24,11 +24,35 @@ const LOGIN_URL = 'https://selfserve.rogersbank.com/sign-in?locale=en'
 const TRANSACTIONS_URL = 'https://selfserve.rogersbank.com/transactions'
 
 async function needsLogin(page: Page): Promise<boolean> {
-  // The username field is only present on the logged-out sign-in screen.
+  // The username field is only present on the logged-out sign-in screen — but it
+  // can still be on screen UNDER the MFA modal, so MFA wins the tie-break.
+  if (await mfaVisible(page)) return false
   return page
     .locator('#Username')
     .isVisible()
     .catch(() => false)
+}
+
+/**
+ * Heuristic detector for Rogers' post-password MFA UI. Rogers runs the whole flow
+ * (send-method modal → code entry) inside /sign-in without changing the URL, and
+ * sometimes leaves the credential form mounted behind it — so neither the URL nor
+ * `#Username` can tell us on their own.
+ *
+ * Matched on user-visible copy plus the standard one-time-code input, because the
+ * markup is Tailwind soup with no stable ids of its own. Deliberately broad: a
+ * false positive costs a wait the user can just click through, while a false
+ * negative kills the run mid-challenge.
+ */
+async function mfaVisible(page: Page): Promise<boolean> {
+  const otp = page.locator(
+    'input[autocomplete="one-time-code"], input[name*="code" i], input[id*="otp" i]'
+  )
+  if (await otp.first().isVisible().catch(() => false)) return true
+  const copy = page.getByText(
+    /verification code|security code|authentication code|verify it'?s you|send.*(code|passcode)|approve.*(phone|device)|two[- ]step/i
+  )
+  return copy.first().isVisible().catch(() => false)
 }
 
 async function login(page: Page, creds: Credentials): Promise<void> {
@@ -59,14 +83,28 @@ async function login(page: Page, creds: Credentials): Promise<void> {
   //      reCAPTCHA scored the automated/headless session too low).
   // We deliberately don't wait for the URL alone: MFA never changes it, so that
   // wait would time out and kill the run mid-challenge.
+  // 60s, not 30: Rogers' sign-in POST plus the reCAPTCHA round-trip is slow enough
+  // that 30s occasionally expired while the request was still in flight.
   const submitted = await Promise.race([
     page
-      .waitForURL((url) => !url.pathname.includes('/sign-in'), { timeout: 30_000 })
+      .waitForURL((url) => !url.pathname.includes('/sign-in'), { timeout: 60_000 })
       .then(() => true),
     page
       .locator('#Username')
-      .waitFor({ state: 'hidden', timeout: 30_000 })
+      .waitFor({ state: 'hidden', timeout: 60_000 })
       .then(() => true),
+    // The MFA modal can render OVER a still-mounted credential form, so neither of
+    // the two waits above ever fires. Poll for it, and return as soon as it shows:
+    // the runner then owns the wait (20 min, visible browser) instead of us timing
+    // out and failing the run while the user is reaching for their phone.
+    (async () => {
+      const deadline = Date.now() + 60_000
+      while (Date.now() < deadline) {
+        if (await mfaVisible(page)) return true
+        await page.waitForTimeout(500)
+      }
+      return false
+    })(),
   ]).catch(() => false)
 
   if (!submitted) {
@@ -87,23 +125,18 @@ async function login(page: Page, creds: Credentials): Promise<void> {
  * closing the browser out from under the user mid-code.
  */
 async function isMfaChallenge(page: Page): Promise<boolean> {
+  if (await mfaVisible(page)) return true // explicit MFA UI, even over the login form
   if (await needsLogin(page)) return false // credential form → not MFA, just expired
   return page.url().includes('/sign-in')
 }
 
 /**
  * Rogers' export UI is statement-period based (a `#month-select` dropdown), not
- * an arbitrary date range, so `_range` is unused. We pull the NEWEST dated
- * statement option (values like "2026-07-11", newest first) — NOT the
- * "Current transactions" option, which is broken on Rogers' side: selecting it
- * enables Download, the modal closes, and no file is ever produced (confirmed by
- * hand, Jul 2026). Re-importing is free (dedup on Reference Number), so
- * re-downloading the same statement every day is harmless.
- *
- * Boundary caveat: the newest statement lags the unbilled cycle, so transactions
- * after the last statement date only land once the next statement is cut — the
- * sync trails by up to a cycle. If Rogers ever fixes "Current transactions",
- * switch back for same-day data.
+ * an arbitrary date range, so `_range` is unused. We pull "Current transactions"
+ * — the unbilled, up-to-today activity. Anything statement-based trails the
+ * current cycle by up to a month, which is why this is the only option we use.
+ * Re-importing is free (dedup on Reference Number), so re-downloading the
+ * overlapping window every day is harmless.
  */
 async function exportCsv(page: Page, _range: DateRange): Promise<string> {
   await page.goto(TRANSACTIONS_URL, { waitUntil: 'domcontentloaded' })
@@ -159,22 +192,21 @@ async function exportCsv(page: Page, _range: DateRange): Promise<string> {
     }
   }
 
-  // Pick the newest dated statement. The options are ordered newest-first, after
-  // the "-Select-" placeholder ("") and the broken "current_transactions" entry,
-  // and their values are the statement close date (e.g. "2026-07-11") — so the
-  // first date-shaped value is the most recent month.
-  const newest = await monthSelect.evaluate((el) => {
+  // Pick "Current transactions" — the entry between the "-Select-" placeholder
+  // ("") and the dated statement options (values like "2026-07-11"). Match on the
+  // option's TEXT rather than hardcoding its value, since the value is Rogers'
+  // internal token and the visible label is the stable contract.
+  const current = await monthSelect.evaluate((el) => {
     const select = el as HTMLSelectElement
     return (
-      Array.from(select.options)
-        .map((o) => o.value)
-        .find((v) => /^\d{4}-\d{2}-\d{2}$/.test(v)) ?? null
+      Array.from(select.options).find((o) => /current transactions/i.test(o.textContent ?? ''))
+        ?.value ?? null
     )
   })
-  if (!newest) {
-    throw new Error('No dated statement option found in the #month-select dropdown.')
+  if (current === null) {
+    throw new Error('No "Current transactions" option found in the #month-select dropdown.')
   }
-  await monthSelect.selectOption(newest)
+  await monthSelect.selectOption(current)
 
   // Arm the download listener BEFORE the click that triggers it, and listen on the
   // whole context rather than just this page: Rogers hands the CSV off through a
@@ -199,7 +231,7 @@ async function exportCsv(page: Page, _range: DateRange): Promise<string> {
   const download = await downloadPromise
 
   const stamp = new Date().toISOString().slice(0, 10)
-  const dest = join(downloadDir('rogers'), `rogers-${newest}-dl${stamp}.csv`)
+  const dest = join(downloadDir('rogers'), `rogers-current-dl${stamp}.csv`)
   await download.saveAs(dest)
   return dest
 }

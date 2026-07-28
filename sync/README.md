@@ -53,8 +53,8 @@ npx tsx sync/run-rogers.ts             # headed, watch it work
 npx tsx sync/run-rogers.ts --headless  # headless (for the eventual cron)
 ```
 
-It logs in, exports the newest dated statement month (Rogers' "Current transactions"
-option is broken — it enables Download but never produces a file, as of Jul 2026), and
+It logs in, exports the "Current transactions" period (unbilled activity up to today —
+statement-dated options trail the current cycle by up to a month), and
 prints the parsed row count to prove the download→parse path. Device trust persists in
 the profile, so MFA is skipped on daily runs.
 
