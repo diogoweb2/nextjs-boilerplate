@@ -19,6 +19,7 @@ import { requireAuth } from '@/app/lib/auth-guard'
 import { parseStatement, type ImportSource, type ParsedRow } from '@/app/lib/csv'
 import { normalizeKey, prettify, masterCategoryFor } from '@/app/lib/normalize'
 import { reconcileNetZeroGoals } from '@/app/actions/goals'
+import { runAutoFillForAllProjects } from '@/app/actions/projects'
 import { maybeTriggerDigest } from '@/app/lib/digest'
 
 export type ImportResult =
@@ -166,6 +167,8 @@ export async function importCsv(formData: FormData): Promise<ImportResult> {
     revalidatePath('/merchants')
     revalidatePath('/transactions')
     revalidatePath('/goals')
+    // Fold the new rows into any auto-filling project (trip mode) right away.
+    await runAutoFillForAllProjects()
     // If this was the last source still missing today, fire the digest right
     // away instead of waiting for the 11:15 job — e.g. hand-fixing the one
     // bank that failed automatically shouldn't mean waiting hours for a nudge.

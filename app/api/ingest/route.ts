@@ -1,6 +1,7 @@
 import { revalidatePath } from 'next/cache'
 import type { NextRequest } from 'next/server'
 import { ingestStatement } from '@/app/actions/import'
+import { runAutoFillForAllProjects } from '@/app/actions/projects'
 import { ingestTokenOk } from '@/app/lib/apiToken'
 import type { ImportSource } from '@/app/lib/csv'
 
@@ -55,6 +56,9 @@ export async function POST(request: NextRequest): Promise<Response> {
   if (!result.ok) {
     return Response.json(result, { status: 400 })
   }
+
+  // Same as the manual upload: fold the new rows into any auto-filling project.
+  await runAutoFillForAllProjects()
 
   // Same cache invalidation the manual upload triggers, so the UI reflects new rows.
   for (const path of ['/', '/trends', '/income', '/merchants', '/transactions']) {

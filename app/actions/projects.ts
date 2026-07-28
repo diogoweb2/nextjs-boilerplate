@@ -136,6 +136,24 @@ const MEMBER_COLUMNS = {
   merchantCategoryId: merchants.categoryId,
 } as const
 
+/**
+ * SQL filter for "cards belonging to the auto-fill target". Shared by auto-fill
+ * and the "Suggested — review" candidates so a partner-only project never
+ * suggests the other person's spend. `both`/`null` → no restriction.
+ * Rows with a null card_last4 (bank rows) count as self.
+ */
+function cardScopeFilter(autoFill: AutoFill | null, partnerCards: string[]) {
+  if (!autoFill || autoFill === 'both') return undefined
+  if (autoFill === 'self') {
+    // Without a PARTNER_CARDS mapping everything is self, so nothing to filter.
+    return partnerCards.length === 0
+      ? undefined
+      : or(isNull(transactions.cardLast4), notInArray(transactions.cardLast4, partnerCards))
+  }
+  // partner: with no mapping configured we can't identify their cards at all.
+  return partnerCards.length === 0 ? sql`false` : inArray(transactions.cardLast4, partnerCards)
+}
+
 async function categoryMap(): Promise<Map<number, { name: string; color: string }>> {
   const cats = await db
     .select({ id: categories.id, name: categories.name, color: categories.color })
@@ -359,7 +377,11 @@ export async function loadAutoFillReviews(id: number): Promise<ProjectTxn[]> {
 export async function loadProjectCandidates(id: number): Promise<ProjectTxn[]> {
   if (await isDemoSession()) return []
   const [p] = await db
-    .select({ startDate: projects.startDate, endDate: projects.endDate })
+    .select({
+      startDate: projects.startDate,
+      endDate: projects.endDate,
+      autoFill: projects.autoFill,
+    })
     .from(projects)
     .where(eq(projects.id, id))
     .limit(1)
@@ -371,19 +393,22 @@ export async function loadProjectCandidates(id: number): Promise<ProjectTxn[]> {
     .from(projectTransactions)
     .where(eq(projectTransactions.projectId, id))
 
+  const conditions = [
+    sql`${transactions.txnDate} between ${p.startDate} and ${p.endDate}`,
+    eq(transactions.flow, 'expense'),
+    eq(transactions.isPayment, false),
+    isNull(transactions.country),
+    notInArray(transactions.id, existing),
+    // Honour the project's auto-fill scope: a "partner's cards" project must not
+    // suggest the other person's spend.
+    cardScopeFilter((p.autoFill as AutoFill | null) ?? null, getPersonNames().partnerCards),
+  ].filter(Boolean) as Parameters<typeof and>
+
   const rows = await db
     .select(MEMBER_COLUMNS)
     .from(transactions)
     .innerJoin(merchants, eq(merchants.id, transactions.merchantId))
-    .where(
-      and(
-        sql`${transactions.txnDate} between ${p.startDate} and ${p.endDate}`,
-        eq(transactions.flow, 'expense'),
-        eq(transactions.isPayment, false),
-        isNull(transactions.country),
-        notInArray(transactions.id, existing)
-      )
-    )
+    .where(and(...conditions))
     .orderBy(transactions.txnDate)
 
   return enrich(rows, catMap)
@@ -483,6 +508,12 @@ export async function updateProject(id: number, patch: Partial<ProjectInput>): P
   await db.update(projects).set(set).where(eq(projects.id, id))
   revalidatePath('/projects')
   revalidatePath(`/projects/${id}`)
+
+  // Turning auto-fill on (or widening the dates) after creation must fill too —
+  // otherwise the setting silently does nothing until "Refresh auto-fill".
+  if (patch.autoFill !== undefined || patch.startDate !== undefined || patch.endDate !== undefined) {
+    await _runProjectAutoFill(id)
+  }
 }
 
 /**
@@ -565,14 +596,16 @@ export async function removeTransactionsFromProject(
   await requireAuth()
   const ids = [...new Set(txnIds)].filter((n) => Number.isInteger(n))
   if (ids.length === 0) return
+  // Tombstone rather than delete: a plain delete would let the next auto-fill
+  // (or "Suggested — review") put the row straight back. Re-adding it later
+  // flips the tombstone back to a real member.
   await db
-    .delete(projectTransactions)
-    .where(
-      and(
-        eq(projectTransactions.projectId, projectId),
-        inArray(projectTransactions.transactionId, ids)
-      )
-    )
+    .insert(projectTransactions)
+    .values(ids.map((transactionId) => ({ projectId, transactionId, dismissed: true, needsReview: false })))
+    .onConflictDoUpdate({
+      target: [projectTransactions.projectId, projectTransactions.transactionId],
+      set: { dismissed: true, needsReview: false },
+    })
   revalidatePath('/projects')
   revalidatePath(`/projects/${projectId}`)
   revalidatePath('/transactions')
@@ -623,20 +656,9 @@ async function _runProjectAutoFill(
   if (!p?.autoFill || !p.startDate || !p.endDate) return { added: 0, review: 0 }
 
   const { partnerCards } = getPersonNames()
-
-  // Build the card-owner filter (credit cards only).
-  let cardFilter: ReturnType<typeof inArray> | ReturnType<typeof or> | undefined
-  if (p.autoFill === 'partner') {
-    if (partnerCards.length === 0) return { added: 0, review: 0 }
-    cardFilter = inArray(transactions.cardLast4, partnerCards)
-  } else if (p.autoFill === 'self') {
-    // Rows with null cardLast4 or a card not in PARTNER_CARDS belong to self.
-    cardFilter =
-      partnerCards.length > 0
-        ? or(isNull(transactions.cardLast4), notInArray(transactions.cardLast4, partnerCards))
-        : undefined
-  }
-  // 'both': no card filter
+  if (p.autoFill === 'partner' && partnerCards.length === 0) return { added: 0, review: 0 }
+  // Card-owner filter (credit cards only); undefined for 'both'.
+  const cardFilter = cardScopeFilter(p.autoFill as AutoFill, partnerCards)
 
   // Subquery: all txn IDs already tracked (member, review, or dismissed).
   const existing = db
@@ -690,6 +712,29 @@ export async function runProjectAutoFill(
 ): Promise<{ added: number; review: number }> {
   await requireAuth()
   return _runProjectAutoFill(projectId)
+}
+
+/**
+ * Sweep every configured project after new transactions land (CSV upload or the
+ * sync runner). Without this, spend imported *during* a trip never reaches the
+ * project until the owner remembers to press "Refresh auto-fill". Idempotent:
+ * see _runProjectAutoFill (onConflictDoNothing + dismissal tombstones), so it
+ * never resurrects a row the owner removed or dismissed. No auth of its own —
+ * callers are already authenticated (server action) or token-authed (ingest API).
+ */
+export async function runAutoFillForAllProjects(): Promise<void> {
+  const rows = await db
+    .select({ id: projects.id })
+    .from(projects)
+    .where(
+      and(
+        eq(projects.archived, false),
+        sql`${projects.autoFill} is not null`,
+        sql`${projects.startDate} is not null`,
+        sql`${projects.endDate} is not null`
+      )
+    )
+  for (const r of rows) await _runProjectAutoFill(r.id)
 }
 
 /**

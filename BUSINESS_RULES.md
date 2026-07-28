@@ -1076,10 +1076,16 @@ many-to-many join, unique on `(project, transaction)`, cascade on either delete)
 - **"Suggested — review"** (`loadProjectCandidates`): transactions inside the project's
   `[start,end]` window whose `country` is **unknown** (Amex/bank rows carry no country code, so we
   can't prove they were foreign), excluding payments and any txn that already has a membership row
-  (member *or* dismissed). The owner **Adds** the ones that belong or **Dismisses** the rest
-  (per-row or "Dismiss all"). Dismiss writes a `dismissed = true` tombstone row so the txn never
-  reappears here; Adding it later flips it back to a real member. This is the manual safety net for
-  the country-data gap below.
+  (member *or* dismissed). When the project has **auto-fill** set to `self`/`partner`, the list is
+  additionally scoped to **that person's cards** (`cardScopeFilter`, the same `PARTNER_CARDS`
+  mapping auto-fill uses) — a "partner's cards" project must never suggest the other person's
+  spend, and bank rows (null `card_last4`) count as *self*. The owner **Adds** the ones that belong
+  or **Dismisses** the rest (per-row or "Dismiss all"). Dismiss writes a `dismissed = true`
+  tombstone row so the txn never reappears here; Adding it later flips it back to a real member.
+  This is the manual safety net for the country-data gap below.
+- **Removing a member** (`removeTransactionsFromProject`) also writes a `dismissed = true`
+  tombstone rather than deleting the row — otherwise the next auto-fill / suggestion pass would put
+  it straight back. Adding it again flips the tombstone back to a member.
 
 ### Dashboard reminder
 
@@ -1113,10 +1119,18 @@ Two destinations:
 `project_transactions.needs_review = true` rows are excluded from the project total, member list,
 and Activity badges — they are staging, not confirmed members.
 
-Auto-fill runs automatically on project creation (if dates + auto_fill are set) and can be
-re-triggered via **"Refresh auto-fill"** on the detail page to pick up new transactions imported
-since the last fill. It is idempotent: uses `onConflictDoNothing` so existing user decisions
-(manual adds, dismissals, approvals) are never overwritten.
+Auto-fill runs:
+- on **project creation** (if dates + auto_fill are set);
+- on **`updateProject`** whenever `auto_fill`, `start_date` or `end_date` changes — turning the
+  setting on after creation, or widening the window, must fill immediately;
+- after **every ingest** — `importCsv` and the `/api/ingest` sync endpoint call
+  `runAutoFillForAllProjects()`, which sweeps every non-archived project that has auto_fill +
+  both dates. This is what makes spend imported *during* a trip land in the project without the
+  owner doing anything;
+- manually via **"Refresh auto-fill"** on the detail page.
+
+It is idempotent: `onConflictDoNothing` plus the dismissal tombstones mean existing user decisions
+(manual adds, dismissals, approvals, removals) are never overwritten or resurrected.
 
 `loadProjectMemberships` (Activity badges) excludes `needsReview = true` rows so the badge only
 appears once the owner confirms the transaction belongs to the project.
