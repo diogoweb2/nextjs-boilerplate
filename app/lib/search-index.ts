@@ -76,6 +76,7 @@ export const FEATURE_INDEX: FeatureEntry[] = [
 
   // ── Accounts ────────────────────────────────────────────────────────────
   { label: 'Goals', page: 'Accounts › Goals', href: '/accounts', keywords: ['savings', 'mortgage', 'kitchen', 'invest', 'contribute'] },
+  { label: 'Goal spending', page: 'Accounts › Goals', href: '/accounts#goal-spending', keywords: ['spend', 'withdrawal', 'pay with goal', 'goal money', 'where did it go', 'paid from goal'] },
   { label: 'Emergency Fund', page: 'Accounts › Emergency', href: '/accounts/emergency#emergency-fund', keywords: ['chequing', 'balance', 'tfsa'] },
   { label: 'Emergency runway', page: 'Accounts › Emergency', href: '/accounts/emergency#emergency-runway', keywords: ['job loss', 'months', 'scenario'] },
   { label: 'Safe to move to investment', page: 'Accounts › Emergency', href: '/accounts/emergency#safe-to-move-to-investment', keywords: ['cash flow', 'trough', 'transfer'] },

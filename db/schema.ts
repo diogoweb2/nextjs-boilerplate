@@ -368,11 +368,21 @@ export const goalEntries = pgTable(
     transactionId: integer('transaction_id').references(() => transactions.id, {
       onDelete: 'set null',
     }),
+    /** For a goal spend that paid a *specific* purchase: the purchase itself
+     *  (`transactionId` above is the synthetic offsetting income row). Lets the
+     *  Activity row show "paid from <goal>" with an undo, and drives the
+     *  "where did my goal money go" log. See BUSINESS_RULES.md §10b. */
+    spentOnTransactionId: integer('spent_on_transaction_id').references(() => transactions.id, {
+      onDelete: 'cascade',
+    }),
     occurredAt: date('occurred_at').notNull(),
     note: text('note'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
-  (t) => [index('goal_entries_goal_idx').on(t.goalId)]
+  (t) => [
+    index('goal_entries_goal_idx').on(t.goalId),
+    index('goal_entries_spent_on_idx').on(t.spentOnTransactionId),
+  ]
 )
 
 /**

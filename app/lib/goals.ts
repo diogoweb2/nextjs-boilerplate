@@ -118,6 +118,14 @@ export function valueSeries(
  * ≥2 completed months of history first — otherwise there's no real pattern to
  * project, so we return null. It sharpens each month as the pattern grows.
  */
+/**
+ * Average monthly contribution over the completed months since the first one.
+ *
+ * CAUTION: for goals funded by the monthly surplus prompt, this pace IS the
+ * surplus allocations. Never subtract it from `neededPerMonth` to produce a
+ * "top-up" figure — that counts the same money twice and understates the ask.
+ * Show the two side by side instead (as the Goals page does).
+ */
 export function contributionPace(entries: EntryLite[], asOfYm: string): number | null {
   const completed = entries.filter(
     (e) => e.kind === 'contribution' && e.amount > 0 && e.occurredAt.slice(0, 7) < asOfYm,

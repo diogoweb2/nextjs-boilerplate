@@ -21,6 +21,7 @@ import {
   transferBetweenGoals,
   repayGoalBorrow,
   type GoalView,
+  type GoalSpendRow,
 } from '@/app/actions/goals'
 
 const INPUT_CLASS =
@@ -130,17 +131,24 @@ export function GoalsManager({
   suggestNetZero,
   monthStats,
   spendCategories,
+  spendLog = [],
 }: {
   goals: GoalView[]
   asOfYm: string
   suggestNetZero: boolean
   monthStats: { thisMonth: number; lastMonth: number }
   spendCategories: { id: number; name: string }[]
+  spendLog?: GoalSpendRow[]
 }) {
   const active = goals.filter((g) => !g.archived)
   const archived = goals.filter((g) => g.archived)
   const savings = active.filter((g) => g.kind === 'savings')
   const netZeroGoal = active.find((g) => g.kind === 'netzero') ?? null
+  // How many *purchases* each goal has paid for (log rows linked to a transaction).
+  const spentCounts = new Map<number, number>()
+  for (const r of spendLog) {
+    if (r.paidFor) spentCounts.set(r.goalId, (spentCounts.get(r.goalId) ?? 0) + 1)
+  }
   const [showArchived, setShowArchived] = useState(false)
   const orderedActive = useReorder(active)
 
@@ -202,11 +210,14 @@ export function GoalsManager({
               spendCategories={spendCategories}
               savingsGoals={savings}
               netZeroGoal={netZeroGoal}
+              spentCount={spentCounts.get(g.id) ?? 0}
               drag={active.length > 1 ? orderedActive.dragPropsFor(g.id) : undefined}
             />
           ))}
         </div>
       )}
+
+      <GoalSpendingLog rows={spendLog} />
 
       <NewGoalForm />
 
@@ -218,13 +229,95 @@ export function GoalsManager({
           {showArchived && (
             <div className="mt-3 grid grid-cols-1 gap-5 lg:grid-cols-2">
               {archived.map((g) => (
-                <GoalCard key={g.id} goal={g} asOfYm={asOfYm} spendCategories={spendCategories} savingsGoals={savings} netZeroGoal={netZeroGoal} />
+                <GoalCard key={g.id} goal={g} asOfYm={asOfYm} spendCategories={spendCategories} savingsGoals={savings} netZeroGoal={netZeroGoal} spentCount={spentCounts.get(g.id) ?? 0} />
               ))}
             </div>
           )}
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * "Where did my goal money go" — every withdrawal across all goals, newest first,
+ * with the purchase it paid for when it was booked from an Activity row. Filterable
+ * by goal and by free text (merchant, category, note or goal name) so a question
+ * like "what did I spend the trip money on" is one box away.
+ */
+function GoalSpendingLog({ rows }: { rows: GoalSpendRow[] }) {
+  const [query, setQuery] = useState('')
+  const [goalFilter, setGoalFilter] = useState('')
+
+  const q = query.trim().toLowerCase()
+  const shown = rows.filter((r) => {
+    if (goalFilter && String(r.goalId) !== goalFilter) return false
+    if (!q) return true
+    return [r.goalName, r.note, r.paidFor?.merchant ?? '', r.paidFor?.category ?? '']
+      .some((s) => s.toLowerCase().includes(q))
+  })
+  const total = shown.reduce((s, r) => s + r.amount, 0)
+  const goalsInLog = [...new Map(rows.map((r) => [r.goalId, r])).values()]
+
+  if (rows.length === 0) return null
+
+  return (
+    <Card title="Goal spending">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search what goal money paid for…"
+          className={`${INPUT_CLASS} min-w-[220px] flex-1`}
+        />
+        <select value={goalFilter} onChange={(e) => setGoalFilter(e.target.value)} className={INPUT_CLASS}>
+          <option value="">All goals</option>
+          {goalsInLog.map((g) => (
+            <option key={g.goalId} value={g.goalId}>
+              {g.goalEmoji} {g.goalName}
+            </option>
+          ))}
+        </select>
+        <span className="text-xs text-[var(--muted)]">
+          {shown.length} withdrawal{shown.length === 1 ? '' : 's'} · {formatCurrency(total)}
+        </span>
+      </div>
+      <div className="divide-y divide-[var(--border)]">
+        {shown.map((r) => (
+          <div key={r.entryId} className="flex items-center gap-3 py-2">
+            <span
+              className="h-6 w-1 shrink-0 rounded-full"
+              style={{ background: r.goalColor }}
+              aria-hidden
+            />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">
+                {r.paidFor ? r.paidFor.merchant : r.note || 'Goal spend'}
+              </p>
+              <p className="truncate text-xs text-[var(--muted)]">
+                {r.goalEmoji} {r.goalName} · {formatMonth(r.occurredAt.slice(0, 7))}{' '}
+                {r.occurredAt.slice(8)}
+                {r.paidFor && ` · ${r.paidFor.category}`}
+              </p>
+            </div>
+            {r.paidFor && (
+              <a
+                href={`/transactions?goal=${r.goalId}&q=${encodeURIComponent(r.paidFor.merchant)}`}
+                className="shrink-0 text-xs text-[var(--muted)] underline hover:text-[var(--foreground)]"
+              >
+                view
+              </a>
+            )}
+            <span className="shrink-0 text-sm font-medium tabular-nums">
+              {formatCurrency(r.amount)}
+            </span>
+          </div>
+        ))}
+        {shown.length === 0 && (
+          <p className="py-4 text-center text-sm text-[var(--muted)]">No goal spending matches.</p>
+        )}
+      </div>
+    </Card>
   )
 }
 
@@ -236,6 +329,7 @@ function GoalCard({
   spendCategories,
   savingsGoals,
   netZeroGoal,
+  spentCount = 0,
   drag,
 }: {
   goal: GoalView
@@ -243,6 +337,8 @@ function GoalCard({
   spendCategories: { id: number; name: string }[]
   savingsGoals: GoalView[]
   netZeroGoal: GoalView | null
+  /** Purchases paid with this goal's money — drives the "Paid with this" link. */
+  spentCount?: number
   drag?: DragProps
 }) {
   const router = useRouter()
@@ -356,6 +452,16 @@ function GoalCard({
               <button onClick={() => setPanel(panel === 'repay' ? 'none' : 'repay')} className={GHOST_BTN}>
                 Repay
               </button>
+            )}
+            {/* Every purchase paid with this goal's money, across all months. */}
+            {spentCount > 0 && (
+              <a
+                href={`/transactions?goal=${goal.id}`}
+                title={`See the ${spentCount} purchase${spentCount === 1 ? '' : 's'} paid with ${goal.name} money`}
+                className={GHOST_BTN}
+              >
+                ◆ Paid with this ({spentCount})
+              </a>
             )}
           </>
         )}

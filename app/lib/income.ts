@@ -26,11 +26,9 @@ export type IncomeData = {
   incomeLines: IncomeLine[]
   totalIncome: IncomeLine
   spending: IncomeLine
-  /** Net with salary levelled to its monthly equivalent (see `levelSalary`). */
+  /** Net = income − spending, both exactly as posted. */
   net: IncomeLine
-  /** Net on raw income, matching the bank statement. */
-  netActual: IncomeLine
-  /** Months that received more salary deposits than the norm (3-cheque months). */
+  /** Months that received more paydays than the norm (3-cheque months). */
   extraPayMonths: string[]
   totalIncomeSum: number
   totalSpendSum: number
@@ -96,27 +94,13 @@ const PAY_MIN_COUNT = 6
 /** A real cheque is at least this share of the source's typical deposit. */
 const PAY_MIN_SHARE = 0.5
 
-/**
- * Levels paycheque income to its monthly equivalent. Biweekly pay means 26
- * cheques a year, so **most months get 2 and a few get 3** — and a 3-cheque month
- * shows up as a huge fake surplus while its neighbours look like losses. That
- * sawtooth is payroll's calendar, not the family's behaviour.
- *
- * Everything that isn't a paycheque — tax refunds, child benefit, insurance
- * reimbursements, family support, goal offsets — is lumpy *in reality*, so it
- * stays exactly as it posted.
- *
- * Each month with a deposit is credited `avg(recent cheque) × cheques-per-month`.
- * A trailing average (rather than the window total) means a raise flows through
- * within a cheque or two instead of smearing backwards over the whole chart.
- */
 type Pay = { date: string; amount: number }
 type PaySource = { merchantId: number; pays: Pay[]; paysPerMonth: number }
 
 /**
  * The income merchants that qualify as paycheque sources, with their inferred
- * cadence. Single source of truth for both the levelling and the "extra
- * paycheque" flag, so the two can never disagree.
+ * cadence. Single source of truth for the "extra paycheque" flag on the Net
+ * chart and for `paydayContext` (the surplus prompt's 2-cheque figure).
  */
 function paySources(rows: EnrichedTxn[]): PaySource[] {
   const byMerchant = new Map<number, Pay[]>()
@@ -161,32 +145,6 @@ function paySources(rows: EnrichedTxn[]): PaySource[] {
     if (sd / mean > PAY_MAX_CV) continue
 
     out.push({ merchantId, pays: cheques, paysPerMonth: DAYS_PER_MONTH / cadence })
-  }
-  return out
-}
-
-/** ym → levelled paycheque income for that month. */
-function levelSalary(sources: PaySource[], labels: string[]): Map<string, number> {
-  const out = new Map<string, number>()
-  for (const src of sources) {
-    // A month is only levelled once it holds a *full* complement of cheques.
-    // This keeps the edges honest: the first month of imported history and the
-    // in-progress current month often hold one cheque, and crediting them a full
-    // month's equivalent would invent income that hasn't arrived.
-    const minPays = Math.floor(src.paysPerMonth)
-    for (const ym of labels) {
-      const inMonth = src.pays.filter((p) => monthKey(p.date) === ym).length
-      if (inMonth < minPays) {
-        // Leave it as posted.
-        const actual = sum(src.pays.filter((p) => monthKey(p.date) === ym).map((p) => p.amount))
-        if (actual) out.set(ym, (out.get(ym) ?? 0) + actual)
-        continue
-      }
-      // Trailing average of the last 3 cheques up to and including this month.
-      const upTo = src.pays.filter((p) => monthKey(p.date) <= ym).slice(-3)
-      const avgPay = sum(upTo.map((p) => p.amount)) / upTo.length
-      out.set(ym, (out.get(ym) ?? 0) + avgPay * src.paysPerMonth)
-    }
   }
   return out
 }
@@ -276,34 +234,15 @@ export function buildIncome(
     spending.total += t.amount
   }
 
-  // Salary levelled to its monthly equivalent, so 3-paycheque months stop
-  // reading as windfalls. Non-salary income is left exactly as it posted.
+  // Net = income − spending per month, on income exactly as it posted. Salary is
+  // deliberately NOT levelled here: the chart answers "what actually happened
+  // that month", and a 3-paycheque month really did bank three cheques. The
+  // 3-cheque months are flagged instead (`extraPayMonths`) so a tall bar is
+  // explainable without the underlying figure being adjusted.
   const sources = paySources(rows)
-  const levelled = levelSalary(sources, labels)
-  // Only the cheques themselves are swapped for their levelled equivalent — any
-  // stray deposit under the same employer stays in the actuals untouched.
-  const actualSalary = zeros()
-  for (const src of sources) {
-    for (const p of src.pays) {
-      const i = idx.get(monthKey(p.date))
-      if (i !== undefined) actualSalary[i] += p.amount
-    }
-  }
-  const levelledIncome = labels.map(
-    (ym, i) => totalIncome.values[i] - actualSalary[i] + (levelled.get(ym) ?? 0)
-  )
-
-  // Net = income − spending per month, on the levelled income.
-  const netValues = labels.map((_, i) => levelledIncome[i] - spending.values[i])
+  const netValues = labels.map((_, i) => totalIncome.values[i] - spending.values[i])
   const net: IncomeLine = { name: 'Net', color: '#0ea5e9', values: netValues, total: sum(netValues) }
-  // The same net on raw, unlevelled income — what the bank statement says.
-  const netActualValues = labels.map((_, i) => totalIncome.values[i] - spending.values[i])
-  const netActual: IncomeLine = {
-    name: 'Net (as posted)',
-    color: '#0ea5e9',
-    values: netActualValues,
-    total: sum(netActualValues),
-  }
+
   // Months with more paydays than the norm — the bars worth explaining. Counted
   // in *paydays* (not deposits), so two employers paying on the same Thursday
   // count once.
@@ -344,16 +283,15 @@ export function buildIncome(
     totalIncome,
     spending,
     net,
-    netActual,
     extraPayMonths,
     totalIncomeSum: totalIncome.total,
     totalSpendSum: spending.total,
     // Headline totals stay on real money — levelling is a per-month display aid,
     // and over a window it drifts (12 × 2.17 cheques ≠ the 26 actually banked).
-    netSum: netActual.total,
+    netSum: net.total,
     avgIncome,
     avgSpend,
-    savingsRate: totalIncome.total ? netActual.total / totalIncome.total : 0,
+    savingsRate: totalIncome.total ? net.total / totalIncome.total : 0,
     best,
     worst,
     bySource,

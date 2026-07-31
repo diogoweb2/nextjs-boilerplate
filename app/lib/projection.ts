@@ -256,6 +256,22 @@ export function monthlyUnavoidable(
 
 // ---------- burn-down builders ----------
 
+/**
+ * A synthetic goal-funding row (`externalId` `goal:…`, payee "Goal Funding") —
+ * written by `addContribution({ asExpense: true })` when the surplus prompt
+ * carves a slice into a savings goal.
+ *
+ * It's an `expense` flow so the 50/30/20 Savings bucket picks it up, but it is
+ * **not discretionary consumption**: it's money moved into savings. The
+ * discretionary pool is already `monthlyCap − unavoidable`, and the savings
+ * target is carved out of `monthlyCap` upstream (`B = I + (baseline − target)/n`),
+ * so counting it again here charged the same dollars twice — allocating a surplus
+ * made the dashboard report overspending.
+ */
+function isSavingsMove(t: EnrichedTxn): boolean {
+  return t.synthetic === true
+}
+
 /** Cumulative discretionary spend, bucketed by `keyFn`, over an ordered keyset. */
 function cumulativeSpend(
   all: EnrichedTxn[],
@@ -269,6 +285,7 @@ function cumulativeSpend(
   let lastKeyWithData: string | null = null
   for (const t of all) {
     if (t.flow !== 'expense' || t.amount <= 0 || !inWindow(t)) continue
+    if (isSavingsMove(t)) continue
     if (unavoidable.has(t.merchantId) || fixedCats.has(t.categoryName)) continue
     const k = keyFn(t)
     perKey.set(k, (perKey.get(k) ?? 0) + t.amount)
@@ -301,6 +318,7 @@ export function computeMonthBurndown(
   let lastDay = 0
   for (const t of all) {
     if (t.flow !== 'expense' || t.amount <= 0 || monthKey(t.txnDate) !== ym) continue
+    if (isSavingsMove(t)) continue
     if (merchantIds.has(t.merchantId) || fixedSet.has(t.categoryName)) continue
     const d = dayOf(t.txnDate)
     perDay[d - 1] += t.amount

@@ -156,13 +156,12 @@ export function IncomeCharts({
         <NetBars
           labels={fmtLabels}
           values={data.net.values}
-          actual={data.netActual.values}
           extraPay={data.labels.map((ym) => data.extraPayMonths.includes(ym))}
         />
         <p className="mt-3 text-xs text-[var(--muted)]">
-          Salary is levelled to its monthly equivalent, so a 3-paycheque month doesn&apos;t look like a
-          windfall. Other income (refunds, benefits, insurance) is shown as it posted. Hover a bar
-          marked <span className="font-semibold text-[var(--foreground)]">3×</span> to see the raw figure.
+          Every dollar exactly as it posted — nothing averaged. Bars marked{' '}
+          <span className="font-semibold text-[var(--foreground)]">3×</span> are 3-paycheque months, so
+          they run high; the months either side of them run low.
         </p>
       </div>
     </div>
@@ -173,14 +172,11 @@ export function IncomeCharts({
 function NetBars({
   labels,
   values,
-  actual,
   extraPay,
 }: {
   labels: string[]
   values: number[]
-  /** Net before salary levelling — surfaced on hover so nothing is hidden. */
-  actual: number[]
-  /** Per-month flag: this month had an extra paycheque. */
+  /** Per-month flag: this month had an extra paycheque (explains a tall bar). */
   extraPay: boolean[]
 }) {
   const max = Math.max(1, ...values.map((v) => Math.abs(v)))
@@ -213,7 +209,7 @@ function NetBars({
             </div>
             <span className="pointer-events-none absolute -top-1 left-1/2 z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded bg-[var(--foreground)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--background)] opacity-0 group-hover:opacity-100">
               {labels[i]}: {formatCurrency(v)}
-              {extraPay[i] && <> · as posted {formatCurrency(actual[i])}</>}
+              {extraPay[i] && <> · 3 paycheques</>}
             </span>
             <span className="mt-1 w-full truncate text-center text-[9px] text-[var(--muted)]">
               {formatCurrencyCompact(v)}

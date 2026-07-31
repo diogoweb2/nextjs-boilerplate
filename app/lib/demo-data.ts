@@ -752,11 +752,13 @@ export function demoSurplusPrompts(): SurplusPrompt[] {
       netZeroLabel: null,
       minNetZero: null,
       goals: [
-        { id: 1, name: 'Family Vacation', emoji: '🏖️', color: '#06b6d4', autoContribute: 500 },
-        { id: 2, name: 'Emergency Fund', emoji: '🛟', color: '#16a34a', autoContribute: null },
+        { id: 1, name: 'Family Vacation', emoji: '🏖️', color: '#06b6d4', autoContribute: 500, saved: 2400, target: 6000 },
+        { id: 2, name: 'Emergency Fund', emoji: '🛟', color: '#16a34a', autoContribute: null, saved: 9100, target: 15000 },
       ],
       // 500 auto to Vacation; the rest of last month's split scaled across the rest.
       preselect: { '1': (500 / 1840) * 100, '2': (1340 / 1840) * 100 },
+      extraCheque: 0,
+      typicalNet: null,
     },
   ]
 }

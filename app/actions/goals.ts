@@ -2,7 +2,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { revalidatePath } from 'next/cache'
-import { and, asc, desc, eq, ilike, inArray, isNull, or } from 'drizzle-orm'
+import { and, asc, desc, eq, ilike, inArray, isNotNull, isNull, or } from 'drizzle-orm'
 import { db } from '@/db'
 import {
   goals,
@@ -54,6 +54,7 @@ function prevMonth(ym: string): string {
 
 function revalidateGoals() {
   revalidatePath('/goals')
+  revalidatePath('/accounts')
   revalidatePath('/')
 }
 
@@ -886,6 +887,8 @@ export async function spendFromGoal(input: {
    *  into "Home" so it lands in the right category. Falls back to the generic
    *  "Goal Spend" bucket when omitted. Only used when `asIncome` is not false. */
   categoryId?: number | null
+  /** The purchase this spend pays for (see `payTransactionFromGoal`). */
+  spentOnTransactionId?: number | null
 }): Promise<void> {
   await requireAuth()
   const requested = Math.round(input.amount * 100) / 100
@@ -924,11 +927,229 @@ export async function spendFromGoal(input: {
     kind: 'contribution',
     amount: (-amount).toFixed(2),
     transactionId,
+    spentOnTransactionId: input.spentOnTransactionId ?? null,
     occurredAt,
     note: input.note?.trim() || 'Goal spend',
   })
   await notifyGoalChange(goal, before, before - amount)
   revalidateGoals()
+}
+
+/**
+ * "Pay this transaction with goal money" (Activity row → Pay with goal).
+ *
+ * A shortcut over `spendFromGoal` that reads amount, **date** and category off the
+ * purchase itself, so the offsetting `Goal Spend` income lands on the *same day* as
+ * the expense — which keeps a goal spend for a **past month** inside that month
+ * (net for that month stays correct instead of leaking into today's).
+ *
+ * Only real expenses can be paid this way (not transfers/income, not card payments,
+ * not the synthetic goal rows themselves). Repeated calls are allowed and split the
+ * purchase across goals: each one is capped at what the purchase still has unpaid
+ * *and* at what the goal holds. Undo with `undoGoalPayment`.
+ */
+export async function payTransactionFromGoal(input: {
+  transactionId: number
+  goalId: number
+  /** Defaults to the purchase's remaining unpaid amount. */
+  amount?: number
+}): Promise<void> {
+  await requireAuth()
+  if (await isDemoSession()) return
+  const [txn] = await db
+    .select()
+    .from(transactions)
+    .where(eq(transactions.id, input.transactionId))
+    .limit(1)
+  if (!txn) return
+  if (txn.flow !== 'expense' || txn.isPayment) return
+  // Never pay a goal row with goal money (that would loop the ledger).
+  if (txn.externalId?.startsWith('goal:')) return
+
+  const total = Math.abs(Number(txn.amount))
+  if (!(total > 0)) return
+  const alreadyPaid = await goalPaidTotal(txn.id)
+  const remaining = Math.round((total - alreadyPaid) * 100) / 100
+  if (remaining <= 0) return
+
+  const requested = input.amount == null ? remaining : Math.round(input.amount * 100) / 100
+  if (!Number.isFinite(requested) || requested <= 0) return
+
+  await spendFromGoal({
+    goalId: input.goalId,
+    amount: Math.min(requested, remaining),
+    occurredAt: txn.txnDate,
+    categoryId: txn.categoryId,
+    note: `Paid ${txn.rawDescription}`.slice(0, 200),
+    asIncome: true,
+    spentOnTransactionId: txn.id,
+  })
+  revalidatePath('/transactions')
+}
+
+/**
+ * Undo a "pay with goal": removes the negative contribution (the goal gets its
+ * money back) and deletes the offsetting income row, so both halves disappear
+ * together and nothing is left double-counted. `entryId` targets one payment when
+ * a purchase was split across goals; omit it to undo all of them.
+ */
+export async function undoGoalPayment(transactionId: number, entryId?: number): Promise<void> {
+  await requireAuth()
+  if (await isDemoSession()) return
+  const rows = await db
+    .select()
+    .from(goalEntries)
+    .where(eq(goalEntries.spentOnTransactionId, transactionId))
+  const targets = entryId == null ? rows : rows.filter((r) => r.id === entryId)
+  if (targets.length === 0) return
+
+  await db.delete(goalEntries).where(inArray(goalEntries.id, targets.map((r) => r.id)))
+  const offsetIds = targets.map((r) => r.transactionId).filter((id): id is number => id != null)
+  if (offsetIds.length > 0) {
+    await db.delete(transactions).where(inArray(transactions.id, offsetIds))
+  }
+  revalidateGoals()
+  revalidatePath('/transactions')
+}
+
+/** How much of a purchase is already covered by goal money (absolute dollars). */
+async function goalPaidTotal(transactionId: number): Promise<number> {
+  const rows = await db
+    .select({ amount: goalEntries.amount })
+    .from(goalEntries)
+    .where(eq(goalEntries.spentOnTransactionId, transactionId))
+  return Math.round(rows.reduce((s, r) => s + Math.abs(Number(r.amount)), 0) * 100) / 100
+}
+
+export type GoalPayment = {
+  entryId: number
+  goalId: number
+  goalName: string
+  goalEmoji: string
+  goalColor: string
+  amount: number
+}
+
+/**
+ * Every goal payment keyed by the purchase it paid for, so the Activity table can
+ * badge those rows without an N+1 query.
+ */
+export async function loadGoalPaymentsByTxn(): Promise<Record<number, GoalPayment[]>> {
+  if (await isDemoSession()) return {}
+  const rows = await db
+    .select({
+      entryId: goalEntries.id,
+      txnId: goalEntries.spentOnTransactionId,
+      amount: goalEntries.amount,
+      goalId: goals.id,
+      goalName: goals.name,
+      goalEmoji: goals.emoji,
+      goalColor: goals.color,
+    })
+    .from(goalEntries)
+    .innerJoin(goals, eq(goalEntries.goalId, goals.id))
+    .where(isNotNull(goalEntries.spentOnTransactionId))
+  const byTxn: Record<number, GoalPayment[]> = {}
+  for (const r of rows) {
+    if (r.txnId == null) continue
+    ;(byTxn[r.txnId] ??= []).push({
+      entryId: r.entryId,
+      goalId: r.goalId,
+      goalName: r.goalName,
+      goalEmoji: r.goalEmoji,
+      goalColor: r.goalColor,
+      amount: Math.abs(Number(r.amount)),
+    })
+  }
+  return byTxn
+}
+
+export type GoalPickerItem = { id: number; name: string; emoji: string; color: string; value: number }
+
+/** Active savings goals with their current value — the "Pay with goal" picker. */
+export async function loadGoalPickerItems(): Promise<GoalPickerItem[]> {
+  if (await isDemoSession()) return []
+  const rows = await db
+    .select()
+    .from(goals)
+    .where(and(eq(goals.kind, 'savings'), eq(goals.archived, false)))
+    .orderBy(asc(goals.sortOrder), asc(goals.id))
+  const items: GoalPickerItem[] = []
+  for (const g of rows) {
+    items.push({
+      id: g.id,
+      name: g.name,
+      emoji: g.emoji,
+      color: g.color,
+      value: await currentSavingsValue(g.id),
+    })
+  }
+  return items
+}
+
+export type GoalSpendRow = {
+  entryId: number
+  goalId: number
+  goalName: string
+  goalEmoji: string
+  goalColor: string
+  occurredAt: string
+  amount: number
+  note: string
+  /** The purchase it paid for, when it was booked from an Activity row. */
+  paidFor: { id: number; merchant: string; category: string } | null
+}
+
+/**
+ * "Where did my goal money go" — every goal *withdrawal* (negative contribution),
+ * newest first, with the purchase it paid for when there is one. Powers the Goal
+ * spending log on the Goals page.
+ */
+export async function loadGoalSpendLog(): Promise<GoalSpendRow[]> {
+  if (await isDemoSession()) return []
+  const rows = await db
+    .select({
+      entryId: goalEntries.id,
+      amount: goalEntries.amount,
+      occurredAt: goalEntries.occurredAt,
+      note: goalEntries.note,
+      goalId: goals.id,
+      goalName: goals.name,
+      goalEmoji: goals.emoji,
+      goalColor: goals.color,
+      paidForId: transactions.id,
+      paidForDescription: transactions.rawDescription,
+      merchantName: merchants.name,
+      categoryName: categories.name,
+    })
+    .from(goalEntries)
+    .innerJoin(goals, eq(goalEntries.goalId, goals.id))
+    .leftJoin(transactions, eq(goalEntries.spentOnTransactionId, transactions.id))
+    .leftJoin(merchants, eq(transactions.merchantId, merchants.id))
+    .leftJoin(categories, eq(transactions.categoryId, categories.id))
+    .where(eq(goalEntries.kind, 'contribution'))
+    .orderBy(desc(goalEntries.occurredAt), desc(goalEntries.id))
+    .limit(500)
+  return rows
+    .filter((r) => Number(r.amount) < 0)
+    .map((r) => ({
+      entryId: r.entryId,
+      goalId: r.goalId,
+      goalName: r.goalName,
+      goalEmoji: r.goalEmoji,
+      goalColor: r.goalColor,
+      occurredAt: r.occurredAt,
+      amount: Math.abs(Number(r.amount)),
+      note: r.note ?? '',
+      paidFor:
+        r.paidForId == null
+          ? null
+          : {
+              id: r.paidForId,
+              merchant: r.merchantName ?? r.paidForDescription ?? 'Transaction',
+              category: r.categoryName ?? 'Uncategorized',
+            },
+    }))
 }
 
 /**

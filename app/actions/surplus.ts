@@ -1,9 +1,9 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { and, asc, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray } from 'drizzle-orm'
 import { db } from '@/db'
-import { goals, monthAllocations } from '@/db/schema'
+import { goals, goalEntries, monthAllocations } from '@/db/schema'
 import { requireAuth } from '@/app/lib/auth-guard'
 import { isDemoSession } from '@/app/lib/demo'
 import { loadAllFlows, anchorMonth, netOverRange } from '@/app/lib/analytics'
@@ -13,9 +13,12 @@ import {
   autoContributePreselect,
   allocationAmounts,
   totalPercent,
+  isLastDayOfMonth,
   SURPLUS_START_MONTH,
 } from '@/app/lib/surplus'
 import { addContribution } from '@/app/actions/goals'
+import { savingsValue } from '@/app/lib/goals'
+import { paydayContext } from '@/app/lib/income'
 
 const EPS = 0.005
 
@@ -36,9 +39,25 @@ export type SurplusPrompt = {
   minNetZero: number | null
   /** Eligible savings goals to allocate to (mortgage & net-zero excluded), in
    *  priority order (goal sortOrder). `autoContribute` is the fixed monthly rule. */
-  goals: { id: number; name: string; emoji: string; color: string; autoContribute: number | null }[]
+  goals: {
+    id: number
+    name: string
+    emoji: string
+    color: string
+    autoContribute: number | null
+    /** Current balance and target, so a slice can be shown as progress. */
+    saved: number
+    target: number | null
+  }[]
   /** Preselected savings-goal percentages ({ "<goalId>": pct }, may be fractional). */
   preselect: Record<string, number>
+  /**
+   * Decision context — a 3-paycheque month's surplus is not repeatable capacity.
+   * `typicalNet` is the month's net minus the whole extra cheque (what a normal
+   * 2-cheque month nets); both are null in an ordinary month. See §10b.
+   */
+  extraCheque: number
+  typicalNet: number | null
 }
 
 function lastDayOf(ym: string): string {
@@ -46,6 +65,12 @@ function lastDayOf(ym: string): string {
   // Day 0 of the next month = the last day of month `m` (1-based).
   const d = new Date(y, m, 0).getDate()
   return `${ym}-${String(d).padStart(2, '0')}`
+}
+
+/** Local (not UTC) today as YYYY-MM-DD — the prompt fires on the last local day. */
+function todayIso(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 function revalidate() {
@@ -61,10 +86,33 @@ async function eligibleGoals() {
       emoji: goals.emoji,
       color: goals.color,
       autoContribute: goals.autoContribute,
+      targetAmount: goals.targetAmount,
     })
     .from(goals)
     .where(and(eq(goals.kind, 'savings'), eq(goals.archived, false)))
     .orderBy(asc(goals.sortOrder), asc(goals.createdAt))
+}
+
+/**
+ * Current balance per savings goal, so the prompt can show what a slice actually
+ * does ("$1,200 of $5,000 → $1,900"). Deciding where money goes is much easier
+ * when each goal's distance from its target is visible at the point of decision.
+ */
+async function goalBalances(ids: number[]): Promise<Map<number, number>> {
+  if (ids.length === 0) return new Map()
+  const rows = await db
+    .select({ goalId: goalEntries.goalId, kind: goalEntries.kind, amount: goalEntries.amount, occurredAt: goalEntries.occurredAt })
+    .from(goalEntries)
+    .where(inArray(goalEntries.goalId, ids))
+  const byGoal = new Map<number, { kind: string; amount: number; occurredAt: string }[]>()
+  for (const r of rows) {
+    const list = byGoal.get(r.goalId) ?? []
+    list.push({ kind: r.kind, amount: Number(r.amount), occurredAt: r.occurredAt })
+    byGoal.set(r.goalId, list)
+  }
+  const out = new Map<number, number>()
+  for (const [id, list] of byGoal) out.set(id, savingsValue(list as Parameters<typeof savingsValue>[0]))
+  return out
 }
 
 async function activeNetZero() {
@@ -104,7 +152,7 @@ export async function reconcileSurplusAllocations(): Promise<void> {
   if (!nz) return
   const flows = await loadAllFlows()
   const anchor = anchorMonth(flows.filter((t) => t.flow === 'expense'))
-  const candidates = completedNetPositiveMonths(flows, anchor)
+  const candidates = completedNetPositiveMonths(flows, anchor, SURPLUS_START_MONTH, todayIso())
   if (candidates.length === 0) return
   const actioned = await actionedMonths()
   const open = candidates.filter((c) => !actioned.has(c.ym)) // newest first
@@ -127,7 +175,7 @@ export async function loadSurplusPrompts(): Promise<SurplusPrompt[]> {
 
   const flows = await loadAllFlows()
   const anchor = anchorMonth(flows.filter((t) => t.flow === 'expense'))
-  const candidates = completedNetPositiveMonths(flows, anchor)
+  const candidates = completedNetPositiveMonths(flows, anchor, SURPLUS_START_MONTH, todayIso())
   if (candidates.length === 0) return []
 
   if (!anchor) return []
@@ -140,6 +188,7 @@ export async function loadSurplusPrompts(): Promise<SurplusPrompt[]> {
     activeNetZero(),
     prevAllocatedPercents(),
   ])
+  const balances = await goalBalances(elig.map((g) => g.id))
   const hasNetZero = nz !== null
   // With Net-Zero, only the most recent month prompts; otherwise all stack.
   const months = hasNetZero ? open.slice(0, 1) : open
@@ -155,6 +204,8 @@ export async function loadSurplusPrompts(): Promise<SurplusPrompt[]> {
     emoji: g.emoji,
     color: g.color,
     autoContribute: g.autoContribute === null ? null : Number(g.autoContribute),
+    saved: balances.get(g.id) ?? 0,
+    target: g.targetAmount === null ? null : Number(g.targetAmount),
   }))
 
   // For the Net-Zero on-track indicator: the required monthly improvement is the
@@ -179,6 +230,11 @@ export async function loadSurplusPrompts(): Promise<SurplusPrompt[]> {
       }
     }
 
+    // A 3-cheque month's surplus is the buffer for the 2-cheque months around
+    // it, so the prompt shows what a normal month nets alongside the headline.
+    const pay = paydayContext(flows, m.ym)
+    const extra = pay && pay.paydays > pay.typicalPaydays ? pay.extraCheque : 0
+
     return {
       month: m.ym,
       net: m.net,
@@ -187,6 +243,8 @@ export async function loadSurplusPrompts(): Promise<SurplusPrompt[]> {
       minNetZero,
       goals: goalsView,
       preselect,
+      extraCheque: Math.round(extra * 100) / 100,
+      typicalNet: extra > 0 ? Math.round((m.net - extra) * 100) / 100 : null,
     }
   })
 }
@@ -224,7 +282,10 @@ async function validatedMonth(month: string): Promise<number | null> {
   if (actioned.has(month)) return null
   const flows = await loadAllFlows()
   const anchor = anchorMonth(flows.filter((t) => t.flow === 'expense'))
-  if (!anchor || month >= anchor) return null
+  // The anchor (in-progress) month is actionable on its last day only — the
+  // one-day-early prompt.
+  if (!anchor || month > anchor) return null
+  if (month === anchor && !isLastDayOfMonth(anchor, todayIso())) return null
   const net = netOverRange(flows, month, month)
   return net > EPS ? net : null
 }

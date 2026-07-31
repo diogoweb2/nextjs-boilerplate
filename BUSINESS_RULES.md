@@ -549,6 +549,12 @@ categories.
   `(remainingNow − paceNow) / budget`. `great` (green, ≥ 5% cushion) → "On pace ✓", `close`
   (amber/`--warning`, 0–5%) → "Cutting it close ⚠", `below` (red, negative) → "Behind pace ✗".
   Drives every panel's colour + status chip; colour is never alone — the ✓/⚠/✗ glyph ships with it.
+- **Goal-funding rows are excluded** (`isSavingsMove` — synthetic `goal:…` rows written by
+  `addContribution({ asExpense: true })`, §10b). They're `expense` flow so the 50/30/20 Savings
+  bucket sees them, but they are money *moved into savings*, not discretionary consumption. The
+  savings target is already carved out of `monthlyCap` upstream (`B = I + (baseline − target)/n`),
+  so counting them here charged the same dollars twice: allocating a surplus flipped the widget to
+  "overspending" (Jul 2026: $4,200 of allocations turned $296.75 left into −$3,903.25).
 - **Pace line**: after day *d* of a `days`-long month you're allowed `d/days` of the budget, so
   `pace[d] = budget·(days − d)/days` — day 1 already grants one day's spend, and the line reaches
   $0 on the last day. (Same shape month-by-month: `budget·(n − 1 − i)/n`.)
@@ -612,29 +618,17 @@ Answers "are we ahead or behind, and which way is it trending?" Logic is pure in
   **Spending** line. Self/partner labels come from `SELF_NAME`/`PARTNER_NAME` in `.env.local`
   (privacy: never hardcoded). `incomeSourceOf()` maps (category, source) → line.
 - **Net per month** = income − spending, drawn as a diverging bar chart (green ahead / red
-  behind), with **paycheque income levelled** (below). KPIs: total income, total spend, net,
-  **savings rate** (net/income), **best** and **worst** month (by net, over complete months),
-  avg income/spend per month. KPI totals use **as-posted** income, never levelled — headline
-  money must match the bank.
-- **Paycheque levelling** (`paySources` + `levelSalary`): biweekly pay is 26 cheques a year, so
-  most months get 2 and a few get **3**. Left raw, a 3-cheque month reads as a windfall and its
-  neighbours as losses — the chart plots payroll's calendar, not the family's behaviour. Each
-  month with a full complement of cheques is credited `avg(last 3 cheques) × cheques-per-month`
-  instead of what posted. A **trailing** average (not the window total) lets a raise flow through
-  in a cheque or two rather than smearing backwards.
-  - **What counts as a paycheque** — income rows are largely uncategorised, so it's detected
-    structurally, per merchant: median gap **6–16 days** (weekly/biweekly/semi-monthly; monthly
-    sources already align, so they're left alone), amount **CV ≤ 0.35**, **≥ 6** deposits. On real
-    data this selects exactly the two payroll sources. Same-day deposits merge (one split direct
-    deposit = one payday); deposits **< 50%** of the source's typical cheque are dropped as
-    strays, since an employer's stray $27 adjustment otherwise fakes an extra payday.
-  - **Everything else stays as posted** — tax refunds, child benefit, insurance reimbursements,
-    family support, goal offsets. Those are lumpy in reality, and smoothing them would hide it.
-  - **Edges stay honest**: a month holding fewer than `floor(cheques-per-month)` cheques (the
-    first month of imported history, the in-progress current month) is left as posted rather than
-    credited income that hasn't arrived.
-  - Months with more paydays than the norm are tagged **3×** on the bar; hovering shows the
-    as-posted figure alongside the levelled one, so nothing is hidden.
+  behind). KPIs: total income, total spend, net, **savings rate** (net/income), **best** and
+  **worst** month (by net, over complete months), avg income/spend per month.
+- **Nothing is averaged.** Net is income − spending exactly as posted. Biweekly pay means 26 cheques
+  a year, so a few months bank **3** and run high while their neighbours run low; those months are
+  tagged **3×** on the bar (hover shows "3 paycheques") rather than having their figure adjusted.
+  `paySources` detects paycheque merchants structurally (income rows are largely uncategorised):
+  median gap **6–16 days**, amount **CV ≤ 0.35**, **≥ 6** deposits; same-day deposits merge (one split
+  direct deposit = one payday) and deposits **< 50%** of the source's typical cheque are dropped as
+  strays (an employer's $27 adjustment would otherwise fake a payday). On real data this selects
+  exactly the two payroll sources. The same detection feeds `paydayContext` → the surplus prompt's
+  "on 2 paycheques" figure (§10b).
 - **Filters** (URL-driven, server recomputes): range (`1|2|3|6|12|ytd|all`, reusing
   `monthsForRange`), account (Both / Tangerine / Scotia), exclude-special. Line visibility is
   local UI state.
@@ -660,7 +654,9 @@ transfer was *for*, track progress to a target, and handle market-valued and mor
   deposit), `adjustment` (savings market reconcile; `amount` = signed delta so the running Σ
   equals the new value), `balance` (mortgage only; `amount` = the absolute statement balance), and
   **`transfer`** (a rebalance between goals — signed, no `transactionId`; moves value but is **not**
-  new savings — see below).
+  new savings — see below). `spentOnTransactionId` marks a withdrawal that paid a **specific
+  purchase** (§10b "Pay with goal"): `transactionId` is the synthetic offsetting income row,
+  `spentOnTransactionId` is the purchase itself (cascade-deleted with it).
 - **`goal_transfers`** — records money moved between two savings goals so the "owed back" figure can
   be computed. `fromGoalId` (lender/source), `toGoalId` (borrower/dest), `amount`, and
   **`kind: 'transfer' | 'borrow' | 'repay'`** (`transfer` = permanent rebalance, `borrow` = creates a
@@ -686,6 +682,14 @@ target date shows the full remaining gap and is always Behind pace), and **Your 
 $/mo. Null once the target is reached. The "needed/mo" figure is intended to feed auto-contribute
 defaults (§10b).
 
+**Never net the pace against the need.** For goals funded by the surplus prompt, the learned pace
+*is* those allocations, so "needed − pace = top-up" counts the same dollars twice and understates
+what to contribute. The dashboard **Goals summary** therefore shows the full `neededPerMonth`
+(`$700/mo for 9 months to hit target`); the Goals page shows **Needed** and **Your pace** as two
+separate stats so they can be compared without being confused. (Insurance, Jul 2026: $7,000 by
+Apr 2027 with $700 saved → $700/mo needed. The old netted line showed **$469.02**, which over the
+9 remaining months would have landed ~$2,000 short.)
+
 ### Transfers & borrows between goals (`transferBetweenGoals` / `repayGoalBorrow`, `app/actions/goals.ts`)
 The owner can move money from one savings goal to another (e.g. Trip → Insurance) from the goal
 card's **Move money** panel. A plain **transfer** just rebalances; ticking **Borrow** records a debt
@@ -709,6 +713,23 @@ new **`Goal Spend`** income category, so it shows on the Income page as its own 
   `contribution` (capped at the goal's value) and, when "count as income" is on (default), inserts the
   offsetting `Goal Spend` income transaction. Use it when you paid by card and no bank transfer will be
   imported. `totalContributed` still counts positive contributions only, so withdrawals don't inflate it.
+- **"Pay with goal" on an Activity row** (`payTransactionFromGoal`) — the shortcut over the
+  above: pick a goal on an expense row and it books the spend with the **purchase's own amount,
+  date and category**. Dating it to the purchase (not today) is what makes paying for a **past
+  month's** expense net out *in that month*. Only real expenses qualify (no income/transfer rows,
+  no card payments, no `goal:…` rows — that would loop the ledger). Repeat calls **split one
+  purchase across goals**: each is capped at the purchase's still-unpaid remainder *and* at the
+  goal's value. The link is stored on `goal_entries.spent_on_transaction_id` (the row's `◆ goal`
+  badge), and `undoGoalPayment` deletes the entry **and** its offsetting income row together.
+- **Goal spending log** (`loadGoalSpendLog` → `<Card title="Goal spending">` on `/accounts`) —
+  every withdrawal across all goals, newest first, with the purchase it paid for; filter by goal
+  or free text. This is the "where did my goal money go" answer. Per goal, the card's
+  **"◆ Paid with this (n)"** link opens `/transactions?goal=<id>` — the Activity page filtered to
+  the purchases that goal paid for. That filter **overrides the period selector** (it hides it):
+  goal spending spans arbitrary months, so scoping it to one month would usually show nothing.
+  The Activity filter bar also carries a **goal dropdown** (only when some goal has paid for
+  something) listing each goal with its purchase count; it defaults to **"◆ All goals"** = no goal
+  filter, and switching navigates rather than filtering client-side.
 - **Inbound transfer review** — when the real money lands (see below).
 
 ### Import hook (`app/actions/import.ts` → `createTransferReviews` / `createWithdrawalReviews` / `createInboundReviews`)
@@ -847,6 +868,16 @@ the client converts its dollar sliders to `amount/net·100` on confirm, which ro
 exact dollars via `allocationAmounts` (`net·pct/100`, `round2`) — so an auto rule like $700 lands
 exactly. Net-Zero is the implicit remainder.
 
+### When it fires — one day early
+The prompt appears on the **last calendar day** of the month, not the 1st. By that day the owner
+knows what's left to spend, so they're ready to move the money. Mechanically: the in-progress
+`anchor` month is normally excluded (`ym < anchor`), but `completedNetPositiveMonths(flows, anchor,
+minMonth, todayIso)` also admits `ym === anchor` when `isLastDayOfMonth(anchor, todayIso)`
+(`app/lib/surplus.ts`). `validatedMonth` in `app/actions/surplus.ts` applies the same rule on the
+write path, so a month can never be allocated earlier than its final day. Local date, not UTC.
+While that prompt is up, the "Available to give a job" card for the same month is hidden so the
+surplus isn't shown twice with two different asks.
+
 ### The accounting principle (why it works the way it does)
 - **Net-Zero is the implicit remainder, never an explicit share.** Net-Zero's value **is** the
   year's cumulative net (§10), so a positive month already reduces it with no action. Allocating any
@@ -861,6 +892,15 @@ exactly. Net-Zero is the implicit remainder.
   Net-Zero share + two **$200** Investment/Savings contributions. Total wealth position unchanged.
 - **Mortgage is excluded** (controlled via Scotia prepayments) — only `kind='savings'`, non-archived
   goals are eligible.
+- **Decision strip** (top of the prompt, live as the sliders move): **Surplus** (the ceiling) ·
+  **On 2 paycheques** (`typicalNet`, hidden in normal months) · **Keep for Net-Zero** (`minNetZero`,
+  the same figure the remainder row shows) · **Free to move** = surplus − that minimum, which turns
+  amber once the sliders eat into it. The first two say *whether* the surplus is repeatable, the
+  last two say *how much* of it is genuinely spare.
+- **Per-goal progress**: each slider shows `saved of target → after`, a percentage, and a two-tone
+  bar (grey = current balance, green = the slice being added). Without it the sliders are a choice
+  between names rather than between "nearly there" and "barely started". Balances come from
+  `savingsValue` over `goal_entries`, the same basis as the Goals page.
 - **"Available to give a job"** (`computePendingSurplus` → `app/components/PendingSurplusCard.tsx`),
   the card beside the Net-trajectory (Year) chart: a **preview** of the surplus the prompt will
   offer when the in-progress month closes. The chart says how far the year is from its Dec 31

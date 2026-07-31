@@ -19,8 +19,26 @@ import {
   createProject,
   type ProjectPickerItem,
 } from '@/app/actions/projects'
+import {
+  payTransactionFromGoal,
+  undoGoalPayment,
+  type GoalPickerItem,
+  type GoalPayment,
+} from '@/app/actions/goals'
 import { formatCurrency, formatLongDate } from '@/app/lib/format'
 import type { CategoryOption } from '@/app/components/MerchantsManager'
+
+/**
+ * Row label. Goal moves all share one payee ("Goal Funding" / "Goal Withdrawal")
+ * so they don't pollute the real investment payee's history — which leaves seven
+ * identical rows after a surplus allocation. The goal's own name lives in
+ * `rawDescription` (`Goal contribution — Camping`, written by `addContribution`),
+ * so surface it on the row: "Goal Funding — Camping".
+ */
+export function displayName(t: { merchantName: string; rawDescription: string }): string {
+  const m = /^Goal (?:contribution|spend) — (.+)$/.exec(t.rawDescription)
+  return m ? `${t.merchantName} — ${m[1]}` : t.merchantName
+}
 
 export type TxnRow = {
   id: number
@@ -56,6 +74,10 @@ export function TransactionsTable({
   initialQuery = '',
   projects = [],
   membershipsByTxn = {},
+  goalOptions = [],
+  goalPaymentsByTxn = {},
+  goalFilterOptions = [],
+  activeGoalFilter = null,
 }: {
   transactions: TxnRow[]
   categories: CategoryOption[]
@@ -63,6 +85,12 @@ export function TransactionsTable({
   initialQuery?: string
   projects?: ProjectPickerItem[]
   membershipsByTxn?: Record<number, ProjectPickerItem[]>
+  goalOptions?: GoalPickerItem[]
+  goalPaymentsByTxn?: Record<number, GoalPayment[]>
+  /** Goals that have paid for at least one purchase (the goal dropdown). */
+  goalFilterOptions?: { id: number; name: string; emoji: string; count: number }[]
+  /** The goal currently filtered on via ?goal=, or null for "All goals". */
+  activeGoalFilter?: number | null
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -168,6 +196,30 @@ export function TransactionsTable({
               </option>
             ))}
           </select>
+          {goalFilterOptions.length > 0 && (
+            <select
+              value={activeGoalFilter ?? ''}
+              // Server-side filter (it spans all months), so switching goals is a
+              // navigation, not local state. Empty = don't filter by goal at all.
+              onChange={(e) => {
+                const v = e.target.value
+                router.push(v ? `/transactions?goal=${v}` : '/transactions')
+              }}
+              title="Show only purchases paid with a goal's money"
+              className={`rounded-lg border px-2 py-1.5 text-sm ${
+                activeGoalFilter
+                  ? 'border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-[var(--accent)]'
+                  : 'border-[var(--border)] bg-[var(--surface)]'
+              }`}
+            >
+              <option value="">◆ All goals</option>
+              {goalFilterOptions.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.emoji} {g.name} ({g.count})
+                </option>
+              ))}
+            </select>
+          )}
           {sources.length > 1 && (
             <select
               value={sourceFilter}
@@ -227,6 +279,12 @@ export function TransactionsTable({
             selected={selected.has(t.id)}
             onToggleSelect={() => toggleSelect(t.id)}
             memberships={membershipsByTxn[t.id] ?? []}
+            goalOptions={goalOptions}
+            goalPayments={goalPaymentsByTxn[t.id] ?? []}
+            onPayWithGoal={(goalId, amount) =>
+              run(() => payTransactionFromGoal({ transactionId: t.id, goalId, amount }))
+            }
+            onUndoGoalPayment={(entryId) => run(() => undoGoalPayment(t.id, entryId))}
             onCategory={(cid) => run(() => setTxnCategory(t.id, t.merchantId, cid))}
             onFlags={(flags) => run(() => setTxnFlags(t.id, t.merchantId, flags))}
             onAnnual={(annual) => run(() => setMerchantFlags(t.merchantId, { recurringAnnual: annual }))}
@@ -391,6 +449,10 @@ function TxnRowView({
   onAmountRule,
   onSplit,
   onUnsplit,
+  goalOptions,
+  goalPayments,
+  onPayWithGoal,
+  onUndoGoalPayment,
 }: {
   t: TxnRow
   categories: CategoryOption[]
@@ -408,10 +470,21 @@ function TxnRowView({
   onAmountRule: (enable: boolean, note: string | null) => void
   onSplit: (parts: SplitPart[]) => void
   onUnsplit: () => void
+  goalOptions: GoalPickerItem[]
+  goalPayments: GoalPayment[]
+  onPayWithGoal: (goalId: number, amount: number) => void
+  onUndoGoalPayment: (entryId: number) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const [splitting, setSplitting] = useState(false)
+  const [payingWithGoal, setPayingWithGoal] = useState(false)
   const [noteValue, setNoteValue] = useState(t.note ?? '')
+
+  // Goal money can only cover a real expense — never income, an internal
+  // transfer, a card payment, or one of the synthetic goal rows themselves.
+  const goalPayable = t.flow === 'expense' && !t.isPayment
+  const goalPaid = goalPayments.reduce((s, p) => s + p.amount, 0)
+  const goalUnpaid = Math.round((Math.abs(t.amount) - goalPaid) * 100) / 100
 
   return (
     <div className={`flex flex-col gap-2 p-3 ${selected ? 'bg-[color-mix(in_srgb,var(--accent)_8%,transparent)]' : ''}`}>
@@ -431,7 +504,7 @@ function TxnRowView({
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <span className="truncate text-sm font-medium">{t.merchantName}</span>
+            <span className="truncate text-sm font-medium">{displayName(t)}</span>
             {t.note && (
               <span className="truncate text-sm text-[var(--muted)]">({t.note})</span>
             )}
@@ -465,6 +538,20 @@ function TxnRowView({
                 payment
               </span>
             )}
+            {goalPayments.map((p) => (
+              <span
+                key={p.entryId}
+                title={`Paid from goal: ${p.goalName} — ${formatCurrency(p.amount)}`}
+                className="rounded px-1 text-[10px] font-medium"
+                style={{
+                  background: `color-mix(in srgb, ${p.goalColor} 20%, transparent)`,
+                  color: p.goalColor,
+                }}
+              >
+                ◆ {p.goalEmoji} {p.goalName}
+                {p.amount < Math.abs(t.amount) - 0.004 && ` ${formatCurrency(p.amount)}`}
+              </span>
+            ))}
             {memberships.map((m) => (
               <span
                 key={m.id}
@@ -618,6 +705,29 @@ function TxnRowView({
               ⑂ Split
             </button>
           )}
+          {goalPayable && goalOptions.length > 0 && goalUnpaid > 0.004 && (
+            <button
+              onClick={() => setPayingWithGoal((v) => !v)}
+              title={`Cover ${formatCurrency(goalUnpaid)} of this purchase with money you already saved in a goal`}
+              className={`rounded-md px-2 py-1 text-xs font-medium ${
+                payingWithGoal
+                  ? 'bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] text-[var(--accent)]'
+                  : 'text-[var(--muted)] hover:bg-[var(--surface-2)]'
+              }`}
+            >
+              ◆ Pay with goal
+            </button>
+          )}
+          {goalPayments.map((p) => (
+            <button
+              key={p.entryId}
+              onClick={() => onUndoGoalPayment(p.entryId)}
+              title={`Undo — return ${formatCurrency(p.amount)} to ${p.goalName} and remove the offsetting income row`}
+              className="rounded-md px-2 py-1 text-xs font-medium text-[var(--muted)] hover:bg-[var(--surface-2)]"
+            >
+              ↩ Undo {p.goalEmoji} {p.goalName}
+            </button>
+          ))}
           {t.isSplitParent && (
             <button
               onClick={onUnsplit}
@@ -640,6 +750,19 @@ function TxnRowView({
         </div>
       )}
 
+      {expanded && payingWithGoal && (
+        <PayWithGoalForm
+          goals={goalOptions}
+          max={goalUnpaid}
+          date={t.txnDate}
+          onCancel={() => setPayingWithGoal(false)}
+          onSubmit={(goalId, amount) => {
+            setPayingWithGoal(false)
+            onPayWithGoal(goalId, amount)
+          }}
+        />
+      )}
+
       {expanded && splitting && (
         <SplitForm
           t={t}
@@ -651,6 +774,93 @@ function TxnRowView({
           }}
         />
       )}
+    </div>
+  )
+}
+
+/**
+ * Pay a purchase with money already saved in a goal. Picks the goal and (optionally)
+ * a partial amount — the offsetting income is booked on the *purchase's* date, so
+ * paying for something from a past month stays in that month.
+ *
+ * Goals holding less than the full amount stay selectable: the server caps the
+ * spend at the goal's value, and the rest of the purchase can be paid from another
+ * goal or left as a normal expense.
+ */
+function PayWithGoalForm({
+  goals,
+  max,
+  date,
+  onCancel,
+  onSubmit,
+}: {
+  goals: GoalPickerItem[]
+  max: number
+  date: string
+  onCancel: () => void
+  onSubmit: (goalId: number, amount: number) => void
+}) {
+  const funded = goals.filter((g) => g.value > 0)
+  const [goalId, setGoalId] = useState<string>(String(funded[0]?.id ?? ''))
+  const [amount, setAmount] = useState<string>(max.toFixed(2))
+
+  const chosen = funded.find((g) => String(g.id) === goalId)
+  const value = Number(amount)
+  const valid = Boolean(chosen) && value > 0 && value <= max + 0.004
+
+  if (funded.length === 0) {
+    return (
+      <p className="rounded-lg bg-[var(--surface-2)] p-3 text-xs text-[var(--muted)]">
+        No savings goal has money in it yet.
+      </p>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-lg bg-[var(--surface-2)] p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={goalId}
+          onChange={(e) => setGoalId(e.target.value)}
+          className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs"
+        >
+          {funded.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.emoji} {g.name} — {formatCurrency(g.value)} available
+            </option>
+          ))}
+        </select>
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          max={max}
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          className="w-28 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs"
+        />
+        <button
+          disabled={!valid}
+          onClick={() => onSubmit(Number(goalId), value)}
+          className="rounded-lg bg-[var(--accent)] px-3 py-1 text-xs font-medium text-[var(--accent-fg)] disabled:opacity-40"
+        >
+          Pay from goal
+        </button>
+        <button
+          onClick={onCancel}
+          className="rounded-lg px-2 py-1 text-xs text-[var(--muted)] hover:bg-[var(--surface)]"
+        >
+          Cancel
+        </button>
+      </div>
+      <p className="text-[11px] text-[var(--muted)]">
+        Lowers the goal by this amount and books a matching{' '}
+        <strong>Goal Spend</strong> income on {formatLongDate(date)} — the same day as
+        the purchase — so the month nets out instead of counting twice.
+        {chosen && chosen.value < Number(amount) - 0.004 && (
+          <> Only {formatCurrency(chosen.value)} is available, so that&apos;s all that will be used.</>
+        )}
+      </p>
     </div>
   )
 }

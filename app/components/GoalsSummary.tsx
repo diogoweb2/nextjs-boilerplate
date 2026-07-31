@@ -47,13 +47,17 @@ function GoalRow({ goal }: { goal: GoalView }) {
 
   const value = isNetZero && goal.netZero && goal.netZero.value >= -0.005 ? 0 : goal.value
 
-  // For a savings goal with a target date, how much extra to put in this month
-  // to stay on schedule = the on-time monthly need above your learned pace.
+  // For a savings goal with a target date: what to put in THIS month to stay on
+  // schedule — the full monthly need (remaining ÷ months left).
+  //
+  // This deliberately does NOT subtract `currentPace`. That pace is computed from
+  // past contributions, which are themselves surplus allocations — the same money
+  // this line is asking you to allocate. Netting them counted it twice and
+  // understated the ask (Insurance: $469 shown vs $700 actually needed, a ~$2,000
+  // shortfall by the target date). The Goals page shows need and pace as two
+  // separate stats, which is the honest way to compare them.
   const pace = goal.targetPace
-  const extra =
-    !isMortgage && !isNetZero && pace && pace.monthsLeft > 0
-      ? Math.max(0, round2(pace.neededPerMonth - (pace.currentPace ?? 0)))
-      : 0
+  const needed = !isMortgage && !isNetZero && pace && pace.monthsLeft > 0 ? round2(pace.neededPerMonth) : 0
 
   return (
     <li className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
@@ -72,9 +76,10 @@ function GoalRow({ goal }: { goal: GoalView }) {
         ) : (
           <p className="mt-0.5 truncate text-xs text-[var(--muted)]">{goal.milestone}</p>
         )}
-        {extra > 0 && (
+        {needed > 0 && pace && (
           <p className="mt-1 truncate text-xs font-medium text-[var(--accent)]">
-            +{formatCurrency(extra)} this month to stay on track
+            {formatCurrency(needed)}/mo for {pace.monthsLeft} {pace.monthsLeft === 1 ? 'month' : 'months'} to hit
+            target
           </p>
         )}
       </div>

@@ -90,6 +90,8 @@ function PromptCard({ prompt }: { prompt: SurplusPrompt }) {
         Split last month&apos;s surplus across your goals (in dollars). This preselects next month too.
       </p>
 
+      <DecisionStrip prompt={prompt} allocated={total} remainder={remainder} />
+
       <div className="flex flex-col gap-2.5">
         {prompt.goals.map((g) => {
           const amt = amounts[String(g.id)] ?? 0
@@ -116,6 +118,7 @@ function PromptCard({ prompt }: { prompt: SurplusPrompt }) {
                 </span>
                 <span className="tabular-nums text-sm text-[var(--muted)]">{formatCurrency(amt)}</span>
               </div>
+              <GoalProgress saved={g.saved} target={g.target} adding={amt} />
               <div className="flex items-center gap-3">
                 <input
                   type="range"
@@ -206,5 +209,109 @@ function PromptCard({ prompt }: { prompt: SurplusPrompt }) {
         </button>
       </div>
     </section>
+  )
+}
+
+/**
+ * The numbers needed to decide *how much* to move, above the sliders that decide
+ * *where*. Four facts, live as the sliders change:
+ *
+ *  - **Surplus** — the month's net, the ceiling on what can be allocated.
+ *  - **On 2 paycheques** — the same month minus the extra cheque, i.e. what a
+ *    normal month nets. A 3-cheque month's surplus is the buffer for the lean
+ *    months around it, not repeatable capacity (§10b). Hidden in normal months.
+ *  - **Keep for Net-Zero** — the required-path slice, matching the remainder
+ *    row's "Dec 31 path" figure.
+ *  - **Free to move** — surplus − that minimum: the honest budget for goals.
+ *    Turns amber once the sliders eat into the Net-Zero minimum.
+ */
+function DecisionStrip({
+  prompt,
+  allocated,
+  remainder,
+}: {
+  prompt: SurplusPrompt
+  allocated: number
+  remainder: number
+}) {
+  const min = prompt.minNetZero ?? 0
+  const freeToMove = round2(Math.max(0, prompt.net - min))
+  const overspending = min > 0 && remainder < min - EPS
+
+  return (
+    <div className="mb-3 grid grid-cols-2 gap-x-4 gap-y-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3 sm:grid-cols-4">
+      <Fact label="Surplus" value={formatCurrency(prompt.net)} />
+      {prompt.typicalNet !== null && (
+        <Fact
+          label="On 2 paycheques"
+          value={formatCurrency(prompt.typicalNet)}
+          hint={`3-cheque month · extra ${formatCurrency(prompt.extraCheque)}`}
+        />
+      )}
+      {min > 0 && <Fact label="Keep for Net-Zero" value={formatCurrency(min)} hint="stays on the Dec 31 path" />}
+      <Fact
+        label="Free to move"
+        value={formatCurrency(freeToMove)}
+        tone={overspending ? 'var(--warning)' : 'var(--positive)'}
+        hint={
+          overspending
+            ? `${formatCurrency(round2(allocated - freeToMove))} over`
+            : `${formatCurrency(round2(Math.max(0, freeToMove - allocated)))} left`
+        }
+      />
+    </div>
+  )
+}
+
+function Fact({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[10px] uppercase tracking-wide text-[var(--muted)]">{label}</div>
+      <div className="text-base font-bold tabular-nums" style={{ color: tone ?? 'var(--foreground)' }}>
+        {value}
+      </div>
+      {hint && <div className="truncate text-[10px] text-[var(--muted)]">{hint}</div>}
+    </div>
+  )
+}
+
+/**
+ * What this slice does to the goal: current balance, the target, and where the
+ * allocation lands it. Without this the sliders are abstract — you're choosing
+ * between names, not between "nearly there" and "barely started".
+ */
+function GoalProgress({ saved, target, adding }: { saved: number; target: number | null; adding: number }) {
+  if (target === null || target <= 0) {
+    return (
+      <div className="mb-1.5 text-[11px] text-[var(--muted)]">
+        {formatCurrency(saved)} saved
+        {adding > 0 && <span className="text-[var(--positive)]"> → {formatCurrency(saved + adding)}</span>}
+      </div>
+    )
+  }
+  const pct = Math.min(100, (saved / target) * 100)
+  const after = Math.min(100, ((saved + adding) / target) * 100)
+  const done = saved + adding >= target - EPS
+  return (
+    <div className="mb-1.5">
+      <div className="flex items-baseline justify-between gap-2 text-[11px] text-[var(--muted)]">
+        <span>
+          {formatCurrency(saved)} of {formatCurrency(target)}
+          {adding > 0 && (
+            <span className="text-[var(--positive)]"> → {formatCurrency(saved + adding)}</span>
+          )}
+        </span>
+        <span className="tabular-nums">
+          {done ? 'complete ✓' : `${Math.round(after)}%`}
+        </span>
+      </div>
+      <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-[var(--border)]">
+        {/* current balance, then the slice this allocation would add */}
+        <div className="flex h-full">
+          <div style={{ width: `${pct}%`, background: 'var(--muted)' }} />
+          <div style={{ width: `${Math.max(0, after - pct)}%`, background: 'var(--positive)' }} />
+        </div>
+      </div>
+    </div>
   )
 }

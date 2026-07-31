@@ -405,7 +405,6 @@ export default async function Home({
         todayIso,
         ytdNet: budget.ytdNet,
         targetNet: budget.targetNet,
-        completedBaseline: budget.completedBaseline,
         monthsRemaining: budget.monthsRemaining,
       })
     : null
@@ -627,7 +626,9 @@ export default async function Home({
                   />
                 </Card>
               </div>
-              {pendingSurplus && (
+              {/* Hidden once the prompt for this same month is up (its last day),
+                  so the surplus isn't shown twice with two different asks. */}
+              {pendingSurplus && !surplusPrompts.some((p) => p.month === pendingSurplus.month) && (
                 <Card title="Available to give a job">
                   <PendingSurplusCard data={pendingSurplus} />
                 </Card>

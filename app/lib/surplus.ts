@@ -28,20 +28,36 @@ function round2(n: number): number {
 export type SurplusMonth = { ym: string; net: number }
 
 /**
- * Completed months (≥ `minMonth`, strictly before the in-progress `anchor`)
- * whose net (income − spend) is positive. Newest first. These are the
- * candidates that may need a surplus-allocation decision.
+ * True on the LAST calendar day of `ym`. The prompt fires a day early: by the
+ * final day the owner knows what's left to spend, so they're ready to move the
+ * money then rather than waiting for midnight.
+ */
+export function isLastDayOfMonth(ym: string, todayIso: string): boolean {
+  if (todayIso.slice(0, 7) !== ym) return false
+  const [y, m] = ym.split('-').map(Number)
+  return Number(todayIso.slice(8, 10)) === new Date(y, m, 0).getDate()
+}
+
+/**
+ * Completed months (≥ `minMonth`, before the in-progress `anchor`) whose net
+ * (income − spend) is positive. Newest first. These are the candidates that may
+ * need a surplus-allocation decision.
+ *
+ * Pass `todayIso` to include the anchor month itself on its last day — the
+ * one-day-early prompt (see `isLastDayOfMonth`).
  */
 export function completedNetPositiveMonths(
   flows: EnrichedTxn[],
   anchor: string | null,
   minMonth: string = SURPLUS_START_MONTH,
+  todayIso?: string,
 ): SurplusMonth[] {
   if (!anchor) return []
+  const includeAnchor = todayIso ? isLastDayOfMonth(anchor, todayIso) : false
   const months = new Set<string>()
   for (const t of flows) {
     const ym = t.txnDate.slice(0, 7)
-    if (ym >= minMonth && ym < anchor) months.add(ym)
+    if (ym >= minMonth && (ym < anchor || (includeAnchor && ym === anchor))) months.add(ym)
   }
   return Array.from(months)
     .map((ym) => ({ ym, net: netOverRange(flows, ym, ym) }))
@@ -203,8 +219,7 @@ export function computePendingSurplus(
     /** Year-to-date net (the trajectory chart's "current net"). */
     ytdNet: number
     targetNet: number
-    /** Net over the year's *completed* months, and months left including this one. */
-    completedBaseline: number
+    /** Months left including this one. */
     monthsRemaining: number
   },
 ): PendingSurplus | null {
@@ -219,9 +234,13 @@ export function computePendingSurplus(
   const gapToTarget = Math.max(0, round2(opts.targetNet - opts.ytdNet))
   const gapIfAllocated = Math.max(0, round2(gapToTarget - Math.max(0, net)))
 
+  // Must match `loadSurplusPrompts`' `minNetZero` exactly — the card previews the
+  // number the prompt will then ask for, so the two disagreeing is a bug. Both
+  // use the year-to-date baseline (which already includes this month) spread over
+  // the months left, i.e. the trajectory chart's required-path slope.
   let minForTarget: number | null = null
-  if (opts.monthsRemaining > 0 && opts.completedBaseline < 0) {
-    minForTarget = round2(-opts.completedBaseline / opts.monthsRemaining)
+  if (opts.monthsRemaining > 0 && opts.ytdNet < opts.targetNet) {
+    minForTarget = round2((opts.targetNet - opts.ytdNet) / opts.monthsRemaining)
   }
 
   // A 3-cheque month's surplus isn't repeatable capacity — it's what funds the

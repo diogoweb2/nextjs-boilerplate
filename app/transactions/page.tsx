@@ -10,6 +10,7 @@ import { addMonths } from '@/app/lib/analytics'
 import { bucketForTxn } from '@/app/lib/fifty-thirty-twenty'
 import { isDemoSession } from '@/app/lib/demo'
 import { loadProjectsForPicker, loadProjectMemberships } from '@/app/actions/projects'
+import { loadGoalPickerItems, loadGoalPaymentsByTxn } from '@/app/actions/goals'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,6 +32,11 @@ export default async function TransactionsPage({
   const rawQuery = Array.isArray(sp.q) ? sp.q[0] : sp.q
   const rawMonths = Number(Array.isArray(sp.months) ? sp.months[0] : sp.months)
   const monthsWindow = [1, 2, 3, 6, 12].includes(rawMonths) ? rawMonths : null
+  // ?goal=<id> — "what did I pay with this goal's money" (Goals page → Spending).
+  // Purchases paid from a goal span whatever months you spent in, so this filter
+  // ignores the period selector entirely rather than showing an empty month.
+  const rawGoal = Number(Array.isArray(sp.goal) ? sp.goal[0] : sp.goal)
+  const goalFilterId = Number.isInteger(rawGoal) && rawGoal > 0 ? rawGoal : null
 
   const [rows, catRows, monthRows] = (await isDemoSession())
     ? await (async () => {
@@ -68,10 +74,12 @@ export default async function TransactionsPage({
         db.select({ txnDate: transactions.txnDate }).from(transactions),
       ])
 
-  const [projectItems, memberships, amountRuleRows] = await Promise.all([
+  const [projectItems, memberships, amountRuleRows, goalOptions, goalPaymentsByTxn] = await Promise.all([
     loadProjectsForPicker(),
     loadProjectMemberships(),
     (await isDemoSession()) ? [] : db.select({ merchantId: merchantAmountRules.merchantId, amount: merchantAmountRules.amount }).from(merchantAmountRules),
+    loadGoalPickerItems(),
+    loadGoalPaymentsByTxn(),
   ])
   const amountRuleSet = new Set(amountRuleRows.map((r) => `${r.merchantId}:${r.amount}`))
 
@@ -109,6 +117,29 @@ export default async function TransactionsPage({
     }
   })
 
+  // Name for the ?goal= banner — from the picker, falling back to a payment row
+  // so an archived goal still labels its own history.
+  const goalFilterName = goalFilterId
+    ? goalOptions.find((g) => g.id === goalFilterId)?.name ??
+      Object.values(goalPaymentsByTxn).flat().find((p) => p.goalId === goalFilterId)?.goalName ??
+      null
+    : null
+
+  // Goals that have actually paid for something — the Activity "goal" dropdown.
+  // Built from every transaction (not the filtered set) so switching goals from
+  // inside a goal filter still lists them all.
+  const goalFilterOptions = [
+    ...Object.values(goalPaymentsByTxn)
+      .flat()
+      .reduce((m, p) => {
+        const cur = m.get(p.goalId)
+        if (cur) cur.count += 1
+        else m.set(p.goalId, { id: p.goalId, name: p.goalName, emoji: p.goalEmoji, count: 1 })
+        return m
+      }, new Map<number, { id: number; name: string; emoji: string; count: number }>())
+      .values(),
+  ].sort((a, b) => a.name.localeCompare(b.name))
+
   const months_available = Array.from(new Set(monthRows.map((r) => r.txnDate.slice(0, 7)))).sort().reverse()
   const anchor = months_available[0] ?? null
 
@@ -117,7 +148,11 @@ export default async function TransactionsPage({
   // a window (2M/3M/6M/12M) → that many months ending at the anchor;
   // nothing chosen → the current (latest) month by default.
   let txns: TxnRow[]
-  if (rawMonth === 'all' || rawPeriod === 'all' || !anchor) {
+  if (goalFilterId) {
+    txns = allTxns.filter((t) =>
+      (goalPaymentsByTxn[t.id] ?? []).some((p) => p.goalId === goalFilterId)
+    )
+  } else if (rawMonth === 'all' || rawPeriod === 'all' || !anchor) {
     txns = allTxns
   } else if (rawMonth && /^\d{4}-\d{2}$/.test(rawMonth)) {
     txns = allTxns.filter((t) => t.txnDate.slice(0, 7) === rawMonth)
@@ -161,18 +196,20 @@ export default async function TransactionsPage({
             )}
           </h1>
           <p className="text-sm text-[var(--muted)]">
-            {bucket
+            {goalFilterId
+              ? <>Paid with <strong>{goalFilterName ?? 'goal'}</strong> money — {txns.length} purchase{txns.length === 1 ? '' : 's'}, all months. <a href="/transactions" className="underline">Clear filter</a></>
+              : bucket
               ? <>Showing <strong>{bucket}</strong> transactions. <a href="/transactions" className="underline">Clear filter</a></>
               : 'Every transaction. Tap a row to override its category or mark it as a subscription or special purchase.'}
           </p>
         </div>
-        <PeriodSelector
+        {!goalFilterId && <PeriodSelector
           showSpecialToggle={false}
           currentMonthDefault
           availableMonths={months_available}
           leadingExtraOptions={[{ label: 'YTD', period: 'year' }]}
           extraOptions={[{ label: 'ALL', period: 'all' }]}
-        />
+        />}
       </div>
 
       {txns.length === 0 ? (
@@ -189,6 +226,10 @@ export default async function TransactionsPage({
           categories={catRows.map((c) => ({ id: c.id, name: c.name, color: c.color }))}
           projects={projectItems}
           membershipsByTxn={memberships}
+          goalOptions={goalOptions}
+          goalPaymentsByTxn={goalPaymentsByTxn}
+          goalFilterOptions={goalFilterOptions}
+          activeGoalFilter={goalFilterId}
           initialQuery={rawQuery ?? ''}
           initialCategoryFilter={
             category
