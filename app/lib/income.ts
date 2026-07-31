@@ -26,7 +26,12 @@ export type IncomeData = {
   incomeLines: IncomeLine[]
   totalIncome: IncomeLine
   spending: IncomeLine
+  /** Net with salary levelled to its monthly equivalent (see `levelSalary`). */
   net: IncomeLine
+  /** Net on raw income, matching the bank statement. */
+  netActual: IncomeLine
+  /** Months that received more salary deposits than the norm (3-cheque months). */
+  extraPayMonths: string[]
   totalIncomeSum: number
   totalSpendSum: number
   netSum: number
@@ -56,6 +61,134 @@ function monthKey(d: string) {
 }
 function sum(ns: number[]) {
   return ns.reduce((a, b) => a + b, 0)
+}
+/** Mean days per month over a year — converts a pay cadence into pays/month. */
+const DAYS_PER_MONTH = 30.436875
+
+function median(ns: number[]): number {
+  if (!ns.length) return 0
+  const s = [...ns].sort((a, b) => a - b)
+  return s[Math.floor(s.length / 2)]
+}
+
+function daysBetween(a: string, b: string): number {
+  return Math.round((Date.parse(b) - Date.parse(a)) / 86400000)
+}
+
+/**
+ * A paycheque source: deposits that arrive on a **sub-monthly cadence** with a
+ * **steady amount**. Income rows are largely uncategorised in practice, so this
+ * is detected structurally rather than from a "Salary" category.
+ *
+ *  - cadence 6–16 days → weekly / biweekly / semi-monthly. Monthly sources (child
+ *    benefit, interest) are excluded: they already land once per month, so they
+ *    cause no sawtooth and need no levelling.
+ *  - amount CV ≤ 0.35 → a paycheque is roughly the same every time. Insurance
+ *    reimbursements (CV > 2) and one-off deposits fail this.
+ *  - ≥ 6 deposits → enough history for the cadence to mean anything.
+ *
+ * On real data this selects exactly the two payroll sources and nothing else.
+ */
+const PAY_MIN_GAP = 6
+const PAY_MAX_GAP = 16
+const PAY_MAX_CV = 0.35
+const PAY_MIN_COUNT = 6
+/** A real cheque is at least this share of the source's typical deposit. */
+const PAY_MIN_SHARE = 0.5
+
+/**
+ * Levels paycheque income to its monthly equivalent. Biweekly pay means 26
+ * cheques a year, so **most months get 2 and a few get 3** — and a 3-cheque month
+ * shows up as a huge fake surplus while its neighbours look like losses. That
+ * sawtooth is payroll's calendar, not the family's behaviour.
+ *
+ * Everything that isn't a paycheque — tax refunds, child benefit, insurance
+ * reimbursements, family support, goal offsets — is lumpy *in reality*, so it
+ * stays exactly as it posted.
+ *
+ * Each month with a deposit is credited `avg(recent cheque) × cheques-per-month`.
+ * A trailing average (rather than the window total) means a raise flows through
+ * within a cheque or two instead of smearing backwards over the whole chart.
+ */
+type Pay = { date: string; amount: number }
+type PaySource = { merchantId: number; pays: Pay[]; paysPerMonth: number }
+
+/**
+ * The income merchants that qualify as paycheque sources, with their inferred
+ * cadence. Single source of truth for both the levelling and the "extra
+ * paycheque" flag, so the two can never disagree.
+ */
+function paySources(rows: EnrichedTxn[]): PaySource[] {
+  const byMerchant = new Map<number, Pay[]>()
+  for (const t of rows) {
+    if (t.flow !== 'income') continue
+    const amount = -t.amount // income stored negative
+    if (amount <= 0) continue
+    const list = byMerchant.get(t.merchantId) ?? []
+    list.push({ date: t.txnDate, amount })
+    byMerchant.set(t.merchantId, list)
+  }
+
+  const out: PaySource[] = []
+  for (const [merchantId, pays] of byMerchant) {
+    pays.sort((a, b) => (a.date < b.date ? -1 : 1))
+    // Two deposits on one day are one payday split in two (a split direct
+    // deposit) — merge before measuring the cadence.
+    const merged: Pay[] = []
+    for (const p of pays) {
+      const last = merged[merged.length - 1]
+      if (last && last.date === p.date) last.amount += p.amount
+      else merged.push({ ...p })
+    }
+    if (merged.length < PAY_MIN_COUNT) continue
+
+    // Employers occasionally post a small one-off under the same name (a $27
+    // adjustment among $2,900 cheques). Left in, it fakes an extra payday and
+    // corrupts the cadence, so drop anything well under a normal cheque.
+    const typical = median(merged.map((p) => p.amount))
+    const cheques = merged.filter((p) => p.amount >= typical * PAY_MIN_SHARE)
+    if (cheques.length < PAY_MIN_COUNT) continue
+
+    const gaps: number[] = []
+    for (let i = 1; i < cheques.length; i++) gaps.push(daysBetween(cheques[i - 1].date, cheques[i].date))
+    const cadence = median(gaps)
+    if (cadence < PAY_MIN_GAP || cadence > PAY_MAX_GAP) continue
+
+    const amounts = cheques.map((p) => p.amount)
+    const mean = sum(amounts) / amounts.length
+    if (mean <= 0) continue
+    const sd = Math.sqrt(sum(amounts.map((a) => (a - mean) ** 2)) / amounts.length)
+    if (sd / mean > PAY_MAX_CV) continue
+
+    out.push({ merchantId, pays: cheques, paysPerMonth: DAYS_PER_MONTH / cadence })
+  }
+  return out
+}
+
+/** ym → levelled paycheque income for that month. */
+function levelSalary(sources: PaySource[], labels: string[]): Map<string, number> {
+  const out = new Map<string, number>()
+  for (const src of sources) {
+    // A month is only levelled once it holds a *full* complement of cheques.
+    // This keeps the edges honest: the first month of imported history and the
+    // in-progress current month often hold one cheque, and crediting them a full
+    // month's equivalent would invent income that hasn't arrived.
+    const minPays = Math.floor(src.paysPerMonth)
+    for (const ym of labels) {
+      const inMonth = src.pays.filter((p) => monthKey(p.date) === ym).length
+      if (inMonth < minPays) {
+        // Leave it as posted.
+        const actual = sum(src.pays.filter((p) => monthKey(p.date) === ym).map((p) => p.amount))
+        if (actual) out.set(ym, (out.get(ym) ?? 0) + actual)
+        continue
+      }
+      // Trailing average of the last 3 cheques up to and including this month.
+      const upTo = src.pays.filter((p) => monthKey(p.date) <= ym).slice(-3)
+      const avgPay = sum(upTo.map((p) => p.amount)) / upTo.length
+      out.set(ym, (out.get(ym) ?? 0) + avgPay * src.paysPerMonth)
+    }
+  }
+  return out
 }
 
 /**
@@ -143,9 +276,44 @@ export function buildIncome(
     spending.total += t.amount
   }
 
-  // Net = income − spending per month.
-  const netValues = labels.map((_, i) => totalIncome.values[i] - spending.values[i])
+  // Salary levelled to its monthly equivalent, so 3-paycheque months stop
+  // reading as windfalls. Non-salary income is left exactly as it posted.
+  const sources = paySources(rows)
+  const levelled = levelSalary(sources, labels)
+  // Only the cheques themselves are swapped for their levelled equivalent — any
+  // stray deposit under the same employer stays in the actuals untouched.
+  const actualSalary = zeros()
+  for (const src of sources) {
+    for (const p of src.pays) {
+      const i = idx.get(monthKey(p.date))
+      if (i !== undefined) actualSalary[i] += p.amount
+    }
+  }
+  const levelledIncome = labels.map(
+    (ym, i) => totalIncome.values[i] - actualSalary[i] + (levelled.get(ym) ?? 0)
+  )
+
+  // Net = income − spending per month, on the levelled income.
+  const netValues = labels.map((_, i) => levelledIncome[i] - spending.values[i])
   const net: IncomeLine = { name: 'Net', color: '#0ea5e9', values: netValues, total: sum(netValues) }
+  // The same net on raw, unlevelled income — what the bank statement says.
+  const netActualValues = labels.map((_, i) => totalIncome.values[i] - spending.values[i])
+  const netActual: IncomeLine = {
+    name: 'Net (as posted)',
+    color: '#0ea5e9',
+    values: netActualValues,
+    total: sum(netActualValues),
+  }
+  // Months with more paydays than the norm — the bars worth explaining. Counted
+  // in *paydays* (not deposits), so two employers paying on the same Thursday
+  // count once.
+  const payCounts = labels.map((ym) => {
+    const days = new Set<string>()
+    for (const src of sources) for (const p of src.pays) if (monthKey(p.date) === ym) days.add(p.date)
+    return days.size
+  })
+  const normalPays = median(payCounts.filter((n) => n > 0))
+  const extraPayMonths = labels.filter((_, i) => payCounts[i] > normalPays)
 
   // Best/worst & averages over complete (non-anchor) months when possible.
   const completeCount = labels.length > 1 ? labels.length - 1 : labels.length
@@ -176,14 +344,59 @@ export function buildIncome(
     totalIncome,
     spending,
     net,
+    netActual,
+    extraPayMonths,
     totalIncomeSum: totalIncome.total,
     totalSpendSum: spending.total,
-    netSum: net.total,
+    // Headline totals stay on real money — levelling is a per-month display aid,
+    // and over a window it drifts (12 × 2.17 cheques ≠ the 26 actually banked).
+    netSum: netActual.total,
     avgIncome,
     avgSpend,
-    savingsRate: totalIncome.total ? net.total / totalIncome.total : 0,
+    savingsRate: totalIncome.total ? netActual.total / totalIncome.total : 0,
     best,
     worst,
     bySource,
   }
+}
+
+/**
+ * Paycheque timing for one month. Biweekly pay gives most months 2 cheques and a
+ * few 3 — and a 3-cheque month's surplus is not repeatable capacity, it's the
+ * buffer that funds the 2-cheque months either side of it.
+ *
+ * The surplus card uses this to say so out loud, rather than levelling the
+ * figure: allocation moves real dollars, so the headline must stay as-posted or
+ * the extra cheque would never get a job.
+ */
+export type PaydayContext = {
+  /** Distinct paydays landing in this month. */
+  paydays: number
+  /** The usual count for this pay cadence (2 for biweekly). */
+  typicalPaydays: number
+  /** Value of the surplus cheque(s) beyond the usual count — 0 in normal months. */
+  extraCheque: number
+}
+
+export function paydayContext(all: EnrichedTxn[], ym: string): PaydayContext | null {
+  const rows = all.filter((t) => t.flow === 'income')
+  const sources = paySources(rows)
+  if (!sources.length) return null
+
+  const days = new Set<string>()
+  let extraCheque = 0
+  let typicalPaydays = 0
+  for (const src of sources) {
+    const inMonth = src.pays.filter((p) => monthKey(p.date) === ym)
+    for (const p of inMonth) days.add(p.date)
+    const typical = Math.floor(src.paysPerMonth)
+    typicalPaydays = Math.max(typicalPaydays, typical)
+    const surplusCheques = inMonth.length - typical
+    if (surplusCheques > 0) {
+      // Value the extra at this source's recent cheque, not the month's average.
+      const recent = src.pays.filter((p) => monthKey(p.date) <= ym).slice(-3)
+      extraCheque += (sum(recent.map((p) => p.amount)) / recent.length) * surplusCheques
+    }
+  }
+  return { paydays: days.size, typicalPaydays, extraCheque: Math.round(extraCheque * 100) / 100 }
 }

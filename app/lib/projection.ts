@@ -42,7 +42,7 @@ export type UnavoidableLine = {
 
 export type Unavoidable = { total: number; lines: UnavoidableLine[] }
 
-/** Generic two-line burn-down series consumed by <BurndownTrajectory>. */
+/** Generic two-line burn-down series consumed by <PaceSummary>. */
 export type BurndownData = {
   /** Axis labels — day numbers ("1".."30") or month labels for multi-month. */
   labels: string[]
@@ -288,7 +288,9 @@ export function computeMonthBurndown(
   rules: ProjectionRule[],
   ym: string,
   monthBudget: number,
-  fixedCats: string[]
+  fixedCats: string[],
+  /** YYYY-MM-DD "today"; anchors the as-of point to the calendar, not the last txn. */
+  todayIso?: string
 ): BurndownData {
   const { merchantIds, fixedCats: fixedSet } = unavoidableMerchantIds(all, rules, fixedCats)
   const days = daysInMonth(ym)
@@ -310,12 +312,24 @@ export function computeMonthBurndown(
     return round2(running)
   })
 
-  // If the month is fully in the past (its last calendar day has data context),
-  // plot the whole month; otherwise stop at the latest day with data.
-  const asOfDay = lastDay > 0 ? lastDay : 1
+  // As-of is a calendar position, not "last day that happened to have a charge":
+  // a quiet stretch at the end of the month must still count as elapsed days.
+  // Past month → the whole month; current month → today; no date given → last
+  // day with data (legacy behaviour).
+  const todayYm = todayIso?.slice(0, 7)
+  const asOfDay = !todayYm
+    ? Math.max(1, lastDay)
+    : ym < todayYm
+      ? days
+      : ym === todayYm
+        ? Math.min(dayOf(todayIso!), days)
+        : Math.max(1, lastDay)
   const asOfIndex = asOfDay - 1
 
-  const pace = labels.map((_, i) => round2((monthBudget * (days - (i + 1))) / Math.max(1, days - 1)))
+  // Even pace: after day d of the month you may have spent d/days of the budget,
+  // so day 1 already allows one day's worth (dividing by days-1 made the line a
+  // full day stricter than reality).
+  const pace = labels.map((_, i) => round2((monthBudget * (days - (i + 1))) / days))
   const remaining = cumulative.map((c, i) => (i <= asOfIndex ? round2(monthBudget - c) : null))
   const spentToDate = cumulative[asOfIndex] ?? 0
   const onPace = (remaining[asOfIndex] ?? monthBudget) >= (pace[asOfIndex] ?? 0)
@@ -347,7 +361,7 @@ export function computePeriodBurndown(
     labels
   )
   const asOfIndex = lastKeyWithData ? Math.max(0, labels.indexOf(lastKeyWithData)) : n - 1
-  const pace = labels.map((_, i) => round2((budget * (n - 1 - i)) / Math.max(1, n - 1)))
+  const pace = labels.map((_, i) => round2((budget * (n - 1 - i)) / n))
   const remaining = cumulative.map((c, i) => (i <= asOfIndex ? round2(budget - c) : null))
   const spentToDate = cumulative[asOfIndex] ?? 0
   const onPace = (remaining[asOfIndex] ?? budget) >= (pace[asOfIndex] ?? 0)

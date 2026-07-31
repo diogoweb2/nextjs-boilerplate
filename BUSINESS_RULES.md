@@ -533,16 +533,27 @@ CC Payment, Investment, Cash, Bank Fees, Transfer). Infers cadence from occurren
 **Add** / **Dismiss** (dismiss sets `projection_dismissed`). Annual/rare bills seen in a single
 month (e.g. Belair) can't be inferred, so Settings also has a **manual add** of any merchant.
 
-### Dashboard "Net trajectory" (discretionary burn-down)
-On `/` (`app/components/BurndownTrajectory.tsx`), scoped to the selected period. **Money left to
+### Dashboard "Where am I this month?" (discretionary pace)
+On `/` (`app/components/PaceSummary.tsx`), scoped to the selected period. **Money left to
 spend** = `(B − F) − cumulative discretionary spend`, burning toward $0, vs a straight **pace**
 line (budget → 0 across the window). Discretionary spend **excludes** unavoidable merchants/
 categories.
+- **Three panels, no history.** The old day-by-day line chart was replaced: where you stood ten
+  days ago is noise, and "below the pace line" was misread as "negative". Each panel restates the
+  same as-of numbers a different way — **Speedometer** (burn rate vs even pace, 1× centred),
+  **Runway** (today's `$/day` straight-lined to the date the money runs out), **Sentence** (plain
+  English: what we can spend per day for the days left). Card footer keeps the "new since last
+  report" charge list and the unavoidable-spend breakdown.
 - **Pace % + three levels** (`pacePercent` in `app/lib/projection.ts`, shared with the push
   digest): headroom vs the pace line at the as-of point as a signed % of budget —
   `(remainingNow − paceNow) / budget`. `great` (green, ≥ 5% cushion) → "On pace ✓", `close`
   (amber/`--warning`, 0–5%) → "Cutting it close ⚠", `below` (red, negative) → "Behind pace ✗".
-  Drives the remaining-line color, the % shown next to the dollar figure, and the badge.
+  Drives every panel's colour + status chip; colour is never alone — the ✓/⚠/✗ glyph ships with it.
+- **Pace line**: after day *d* of a `days`-long month you're allowed `d/days` of the budget, so
+  `pace[d] = budget·(days − d)/days` — day 1 already grants one day's spend, and the line reaches
+  $0 on the last day. (Same shape month-by-month: `budget·(n − 1 − i)/n`.)
+- **As-of point** = the calendar, not the last transaction: today for the current month, the last
+  day for a past month. A quiet stretch at month-end still counts as elapsed days.
 - **Current / 1M / a single picked month** → **day-by-day** (`computeMonthBurndown`).
 - **3M/6M/12M** → month-by-month over the window (`computePeriodBurndown`, budget = `(B−F)·months`).
 - The budget reflects live `/budget` settings (target, goals), so editing the budget moves the widget.
@@ -601,8 +612,29 @@ Answers "are we ahead or behind, and which way is it trending?" Logic is pure in
   **Spending** line. Self/partner labels come from `SELF_NAME`/`PARTNER_NAME` in `.env.local`
   (privacy: never hardcoded). `incomeSourceOf()` maps (category, source) → line.
 - **Net per month** = income − spending, drawn as a diverging bar chart (green ahead / red
-  behind). KPIs: total income, total spend, net, **savings rate** (net/income), **best** and
-  **worst** month (by net, over complete months), avg income/spend per month.
+  behind), with **paycheque income levelled** (below). KPIs: total income, total spend, net,
+  **savings rate** (net/income), **best** and **worst** month (by net, over complete months),
+  avg income/spend per month. KPI totals use **as-posted** income, never levelled — headline
+  money must match the bank.
+- **Paycheque levelling** (`paySources` + `levelSalary`): biweekly pay is 26 cheques a year, so
+  most months get 2 and a few get **3**. Left raw, a 3-cheque month reads as a windfall and its
+  neighbours as losses — the chart plots payroll's calendar, not the family's behaviour. Each
+  month with a full complement of cheques is credited `avg(last 3 cheques) × cheques-per-month`
+  instead of what posted. A **trailing** average (not the window total) lets a raise flow through
+  in a cheque or two rather than smearing backwards.
+  - **What counts as a paycheque** — income rows are largely uncategorised, so it's detected
+    structurally, per merchant: median gap **6–16 days** (weekly/biweekly/semi-monthly; monthly
+    sources already align, so they're left alone), amount **CV ≤ 0.35**, **≥ 6** deposits. On real
+    data this selects exactly the two payroll sources. Same-day deposits merge (one split direct
+    deposit = one payday); deposits **< 50%** of the source's typical cheque are dropped as
+    strays, since an employer's stray $27 adjustment otherwise fakes an extra payday.
+  - **Everything else stays as posted** — tax refunds, child benefit, insurance reimbursements,
+    family support, goal offsets. Those are lumpy in reality, and smoothing them would hide it.
+  - **Edges stay honest**: a month holding fewer than `floor(cheques-per-month)` cheques (the
+    first month of imported history, the in-progress current month) is left as posted rather than
+    credited income that hasn't arrived.
+  - Months with more paydays than the norm are tagged **3×** on the bar; hovering shows the
+    as-posted figure alongside the levelled one, so nothing is hidden.
 - **Filters** (URL-driven, server recomputes): range (`1|2|3|6|12|ytd|all`, reusing
   `monthsForRange`), account (Both / Tangerine / Scotia), exclude-special. Line visibility is
   local UI state.
@@ -829,6 +861,27 @@ exactly. Net-Zero is the implicit remainder.
   Net-Zero share + two **$200** Investment/Savings contributions. Total wealth position unchanged.
 - **Mortgage is excluded** (controlled via Scotia prepayments) — only `kind='savings'`, non-archived
   goals are eligible.
+- **"Available to give a job"** (`computePendingSurplus` → `app/components/PendingSurplusCard.tsx`),
+  the card beside the Net-trajectory (Year) chart: a **preview** of the surplus the prompt will
+  offer when the in-progress month closes. The chart says how far the year is from its Dec 31
+  target; this says what's in hand to close it. Shows the month's net so far, the countdown to
+  close, and the gap **before vs after** sending it to the year's target (send it elsewhere and the
+  gap is unchanged) — plus whether it clears `minForTarget`, the required-path slice
+  (`-completedBaseline / monthsRemaining`, the trajectory chart's dashed slope). Nothing is written:
+  allocation only happens through the prompt itself.
+  - Uses **as-posted** net, never the Income page's levelled figure (§Income): allocation moves real
+    dollars, and a 3-paycheque month genuinely has the third cheque in the bank. Levelling the
+    headline would be actively wrong here — the prompt offers one figure per month, so the
+    unoffered remainder would never get a job.
+  - Instead, a 3-cheque month is **called out**: `paydayContext` values the extra cheque and the
+    card reports what an actual **2-paycheque month** nets, so the surplus isn't mistaken for
+    repeatable capacity (it's what funds the 2-cheque months around it).
+  - **This figure differs from the Income page's levelled bar for the same month, on purpose.**
+    Levelling credits every month `26/12 = 2.179` cheques so months compare fairly; the card
+    subtracts a **whole** extra cheque, because "how much can I give away and still cover a lean
+    month?" wants the conservative answer. Jul 2026: levelled **$3,176.78** vs 2-cheque
+    **$2,209.32** — exactly 0.179 of a cheque apart. Labels must stay distinct ("A 2-paycheque
+    month" vs the chart's levelled bars) so the two are never read as the same quantity.
 
 ### Behaviour
 - **Dating:** carved contributions are dated (`occurredAt`) to the **completed source month** (its

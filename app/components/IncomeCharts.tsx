@@ -153,14 +153,36 @@ export function IncomeCharts({
           <h2 className="text-sm font-semibold">Net per month (income − spending)</h2>
           <span className="text-xs text-[var(--muted)]">green = ahead · red = behind</span>
         </div>
-        <NetBars labels={fmtLabels} values={data.net.values} />
+        <NetBars
+          labels={fmtLabels}
+          values={data.net.values}
+          actual={data.netActual.values}
+          extraPay={data.labels.map((ym) => data.extraPayMonths.includes(ym))}
+        />
+        <p className="mt-3 text-xs text-[var(--muted)]">
+          Salary is levelled to its monthly equivalent, so a 3-paycheque month doesn&apos;t look like a
+          windfall. Other income (refunds, benefits, insurance) is shown as it posted. Hover a bar
+          marked <span className="font-semibold text-[var(--foreground)]">3×</span> to see the raw figure.
+        </p>
       </div>
     </div>
   )
 }
 
 /** Simple diverging bar chart for monthly net (handles negatives). */
-function NetBars({ labels, values }: { labels: string[]; values: number[] }) {
+function NetBars({
+  labels,
+  values,
+  actual,
+  extraPay,
+}: {
+  labels: string[]
+  values: number[]
+  /** Net before salary levelling — surfaced on hover so nothing is hidden. */
+  actual: number[]
+  /** Per-month flag: this month had an extra paycheque. */
+  extraPay: boolean[]
+}) {
   const max = Math.max(1, ...values.map((v) => Math.abs(v)))
   return (
     <div className="flex items-stretch gap-1" style={{ height: 180 }}>
@@ -191,9 +213,11 @@ function NetBars({ labels, values }: { labels: string[]; values: number[] }) {
             </div>
             <span className="pointer-events-none absolute -top-1 left-1/2 z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded bg-[var(--foreground)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--background)] opacity-0 group-hover:opacity-100">
               {labels[i]}: {formatCurrency(v)}
+              {extraPay[i] && <> · as posted {formatCurrency(actual[i])}</>}
             </span>
             <span className="mt-1 w-full truncate text-center text-[9px] text-[var(--muted)]">
               {formatCurrencyCompact(v)}
+              {extraPay[i] && <span className="ml-0.5 opacity-70">3×</span>}
             </span>
           </div>
         )

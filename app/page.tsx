@@ -11,8 +11,10 @@ import { backupStale } from '@/app/lib/backup'
 import { SYNC_SOURCES, mostRecentIso, formatSyncAge, syncStale } from '@/app/lib/sync'
 import { SpendSummaryGrid } from '@/app/components/charts/SpendSummaryGrid'
 import { InsightCard } from '@/app/components/InsightCard'
-import { BurndownTrajectory } from '@/app/components/BurndownTrajectory'
 import { NetBudgetTrajectory } from '@/app/components/NetBudgetTrajectory'
+import { PaceSummary } from '@/app/components/PaceSummary'
+import { PendingSurplusCard } from '@/app/components/PendingSurplusCard'
+import { computePendingSurplus } from '@/app/lib/surplus'
 import { loadAllFlows, buildOverview, availableMonths, anchorMonth, categoryCredits } from '@/app/lib/analytics'
 import { buildInsights, type InsightCard as InsightCardData } from '@/app/lib/insights'
 import { loadAlertDismissals, loadRenewalDismissals } from '@/app/actions/subscriptions'
@@ -387,13 +389,26 @@ export default async function Home({
       ? monthlyUnavoidable(allFlows, rules, burndownMonth, FIXED_CATEGORIES)
       : budget.unavoidable
   const monthBudget = budget.monthlyCap - burndownUnavoidable.total
+  const todayIso = new Date().toISOString().slice(0, 10)
   let burndown: BurndownData | null = null
   if (budget.hasData && burndownMonth) {
-    burndown = computeMonthBurndown(allFlows, rules, burndownMonth, monthBudget, FIXED_CATEGORIES)
+    burndown = computeMonthBurndown(allFlows, rules, burndownMonth, monthBudget, FIXED_CATEGORIES, todayIso)
   }
   const newCharges = burndown
     ? await recentCharges(Date.now(), unavoidableMerchantIds(allFlows, rules, FIXED_CATEGORIES))
     : []
+
+  // What the in-progress month has spare for the year's target — shown beside
+  // the trajectory chart, allocated only when the surplus prompt fires.
+  const pendingSurplus = budget.hasData
+    ? computePendingSurplus(allFlows, budget.anchor, {
+        todayIso,
+        ytdNet: budget.ytdNet,
+        targetNet: budget.targetNet,
+        completedBaseline: budget.completedBaseline,
+        monthsRemaining: budget.monthsRemaining,
+      })
+    : null
 
   const emergency = await loadEmergencyFund()
   const goalsSummary = await loadGoalsData()
@@ -404,7 +419,6 @@ export default async function Home({
 
   // Bills & recurring calendar (§19): every projected bill on its expected day,
   // plus a top-of-page reminder for bills expected within the next 2 days.
-  const todayIso = new Date().toISOString().slice(0, 10)
   const ccPayments = demo ? [] : await loadCcPaymentHistory()
   const ccExpected = demo ? null : await loadCcExpectedPayment()
   const billCalendar =
@@ -574,42 +588,48 @@ export default async function Home({
             }))}
           />
 
-          {/* Net trajectory — burndown + year trajectory side by side */}
-          {(burndown || budget.hasData) && (
-            <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-              {burndown && (
-                <Card
-                  title="Net trajectory (Month)"
-                  action={
-                    <a href="/budget" className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]">
-                      goal from budget →
-                    </a>
-                  }
-                >
-                  <BurndownTrajectory
-                    data={burndown}
-                    periodLabel={ov.periodLabel}
-                    newCharges={newCharges}
-                    unavoidableTotal={burndownUnavoidable.total}
+          {/* This month's pace — three glanceable panels, no day-by-day history. */}
+          {burndown && burndownMonth && (
+            <Card
+              title="Where am I this month?"
+              action={
+                <a href="/budget" className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]">
+                  goal from budget →
+                </a>
+              }
+            >
+              <PaceSummary
+                data={burndown}
+                monthIso={burndownMonth}
+                periodLabel={ov.periodLabel}
+                newCharges={newCharges}
+                unavoidableTotal={burndownUnavoidable.total}
+              />
+            </Card>
+          )}
+
+          {/* Year trajectory + what's in hand to close its gap. */}
+          {budget.hasData && (
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+            <div className="lg:col-span-2">
+            <Card
+              title="Net trajectory (Year)"
+              action={<span className="text-xs text-[var(--muted)]">cumulative net → Dec 31 target</span>}
+            >
+              <NetBudgetTrajectory
+                labels={budget.monthly.labels}
+                cumulativeNet={budget.monthly.cumulativeNet}
+                currentIndex={budget.currentMonthIndex}
+                completedBaseline={budget.completedBaseline}
+                targetNet={budget.targetNet}
+                monthsRemaining={budget.monthsRemaining}
+                onTrack={budget.completedBaseline + budget.monthsRemaining * (budget.income - budget.categories.reduce((s, c) => s + (savedGoals.get(c.categoryId) ?? c.goal), 0)) >= budget.targetNet - 0.5}
                   />
                 </Card>
-              )}
-              {budget.hasData && (
-                <Card
-                  title="Net trajectory (Year)"
-                  action={
-                    <span className="text-xs text-[var(--muted)]">cumulative net → Dec 31 target</span>
-                  }
-                >
-                  <NetBudgetTrajectory
-                    labels={budget.monthly.labels}
-                    cumulativeNet={budget.monthly.cumulativeNet}
-                    currentIndex={budget.currentMonthIndex}
-                    completedBaseline={budget.completedBaseline}
-                    targetNet={budget.targetNet}
-                    monthsRemaining={budget.monthsRemaining}
-                    onTrack={budget.completedBaseline + budget.monthsRemaining * (budget.income - budget.categories.reduce((s, c) => s + (savedGoals.get(c.categoryId) ?? c.goal), 0)) >= budget.targetNet - 0.5}
-                  />
+              </div>
+              {pendingSurplus && (
+                <Card title="Available to give a job">
+                  <PendingSurplusCard data={pendingSurplus} />
                 </Card>
               )}
             </div>

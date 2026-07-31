@@ -200,7 +200,14 @@ export async function buildDigest(now: number = Date.now(), failedSources: strin
   let pace: DigestPace | null = null
   if (budget.hasData && anchor) {
     const monthBudget = budget.monthlyCap - budget.unavoidable.total
-    const bd = computeMonthBurndown(allFlows, rules, anchor, monthBudget, FIXED_CATEGORIES)
+    const bd = computeMonthBurndown(
+      allFlows,
+      rules,
+      anchor,
+      monthBudget,
+      FIXED_CATEGORIES,
+      new Date().toISOString().slice(0, 10)
+    )
     const asOfDay = bd.asOfIndex + 1
     // Straight-line the month-to-date discretionary burn to a month-end estimate.
     const projected = asOfDay > 0 ? round2((bd.spentToDate / asOfDay) * daysInMonth(anchor)) : bd.spentToDate

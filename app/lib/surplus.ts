@@ -1,4 +1,5 @@
 import { netOverRange, type EnrichedTxn } from '@/app/lib/analytics'
+import { paydayContext } from '@/app/lib/income'
 
 /**
  * Pure helpers for the monthly surplus-allocation prompt (the dashboard
@@ -152,4 +153,92 @@ export function allocationAmounts(
 /** Sum of a percents map (savings-goal shares only; Net-Zero = 100 − this). */
 export function totalPercent(percents: Record<string, number>): number {
   return Object.values(percents).reduce((s, p) => s + (p > 0 ? p : 0), 0)
+}
+
+/**
+ * The in-progress month's surplus — money that isn't allocated yet and that the
+ * surplus prompt will offer to give a job the moment the month closes.
+ *
+ * The dashboard's Net-trajectory (Year) chart answers "how far off the Dec 31
+ * target are we?"; this answers "and what have we got in hand to close it?".
+ * Nothing here is committed: the owner may send it to Net-Zero (shrinking the
+ * year's gap) or to any savings goal (leaving the gap where it is).
+ */
+export type PendingSurplus = {
+  /** The in-progress month, YYYY-MM. */
+  month: string
+  /** Income − spend so far this month. Negative = no surplus to give away yet. */
+  net: number
+  /** Days until the month closes and the prompt fires (0 = closes tonight). */
+  daysToClose: number
+  /** Still needed to reach the Dec 31 target (0 once the target is met). */
+  gapToTarget: number
+  /** What the gap becomes if the whole surplus goes to Net-Zero. */
+  gapIfAllocated: number
+  /**
+   * The slice this month must leave for Net-Zero to stay on the required-path
+   * slope (`-completedBaseline / monthsRemaining`), matching the dashed line on
+   * the trajectory chart. Null when the year is already in the black.
+   */
+  minForTarget: number | null
+  /** Value of this month's extra paycheque (0 in a normal 2-cheque month). */
+  extraCheque: number
+  /**
+   * Net excluding the extra cheque entirely — what an actual **2-paycheque**
+   * month looks like. Deliberately NOT the Income page's levelled figure, which
+   * credits every month 26/12 = 2.179 cheques so months compare fairly. Here the
+   * question is "how much can I give away and still cover a lean month?", so the
+   * conservative whole-cheque figure is the right one. The two differ by ~0.18 of
+   * a cheque; see BUSINESS_RULES §10b.
+   */
+  typicalNet: number | null
+}
+
+export function computePendingSurplus(
+  flows: EnrichedTxn[],
+  anchor: string | null,
+  opts: {
+    /** YYYY-MM-DD today — dates the countdown. */
+    todayIso: string
+    /** Year-to-date net (the trajectory chart's "current net"). */
+    ytdNet: number
+    targetNet: number
+    /** Net over the year's *completed* months, and months left including this one. */
+    completedBaseline: number
+    monthsRemaining: number
+  },
+): PendingSurplus | null {
+  if (!anchor) return null
+  const net = netOverRange(flows, anchor, anchor)
+
+  const [y, m] = anchor.split('-').map(Number)
+  const lastDay = new Date(y, m, 0).getDate()
+  const today = opts.todayIso.slice(0, 7) === anchor ? Number(opts.todayIso.slice(8, 10)) : lastDay
+  const daysToClose = Math.max(0, lastDay - today)
+
+  const gapToTarget = Math.max(0, round2(opts.targetNet - opts.ytdNet))
+  const gapIfAllocated = Math.max(0, round2(gapToTarget - Math.max(0, net)))
+
+  let minForTarget: number | null = null
+  if (opts.monthsRemaining > 0 && opts.completedBaseline < 0) {
+    minForTarget = round2(-opts.completedBaseline / opts.monthsRemaining)
+  }
+
+  // A 3-cheque month's surplus isn't repeatable capacity — it's what funds the
+  // 2-cheque months around it. Say so rather than levelling the headline, which
+  // would leave the extra cheque with no prompt and no job.
+  const pay = paydayContext(flows, anchor)
+  const extraCheque = pay && pay.paydays > pay.typicalPaydays ? pay.extraCheque : 0
+  const typicalNet = extraCheque > 0 ? round2(net - extraCheque) : null
+
+  return {
+    month: anchor,
+    net,
+    daysToClose,
+    gapToTarget,
+    gapIfAllocated,
+    minForTarget,
+    extraCheque: round2(extraCheque),
+    typicalNet,
+  }
 }

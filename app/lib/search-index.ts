@@ -51,8 +51,9 @@ type FeatureEntry = {
 export const FEATURE_INDEX: FeatureEntry[] = [
   // ── Overview ────────────────────────────────────────────────────────────
   { label: 'Overview', page: 'Overview', href: '/', keywords: ['dashboard', 'home'] },
-  { label: 'Net trajectory (Month)', page: 'Overview', href: '/#net-trajectory-month', keywords: ['burndown', 'pace'] },
+  { label: 'Where am I this month?', page: 'Overview', href: '/#where-am-i-this-month', keywords: ['pace', 'burndown', 'gauge', 'speedometer', 'runway', 'safe to spend', 'per day', 'allowance', 'discretionary'] },
   { label: 'Net trajectory (Year)', page: 'Overview', href: '/#net-trajectory-year', keywords: ['cumulative', 'target', 'december'] },
+  { label: 'Available to give a job', page: 'Overview', href: '/#available-to-give-a-job', keywords: ['surplus', 'allocate', 'spare', 'net zero', 'goal', 'every dollar a job'] },
   { label: 'Bills calendar', page: 'Overview', href: '/#bills-calendar', keywords: ['recurring', 'due', 'payments', 'subscriptions', 'mortgage', 'payday', 'month grid'] },
   { label: 'Goals summary', page: 'Overview', href: '/#goals', keywords: ['savings'] },
   { label: 'Top insights', page: 'Overview', href: '/', keywords: ['cards', 'highlights'] },
