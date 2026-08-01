@@ -324,6 +324,26 @@ export function PlannedSplitsManager({
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
+                      {row.status === 'pending' && (
+                        <button
+                          onClick={() => {
+                            // Same place + same floor = the same bill, so the two
+                            // rules split one purchase between them.
+                            setDraft({
+                              ...EMPTY,
+                              merchantLabel: row.merchantLabel,
+                              minAmount: row.minAmount != null ? String(row.minAmount) : '',
+                            })
+                            document
+                              .getElementById('ps-place')
+                              ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                          }}
+                          className="rounded-full border border-[var(--border)] px-2.5 py-1 text-xs text-[var(--muted)] hover:bg-[var(--surface)]"
+                          title="Add another split to this same purchase"
+                        >
+                          + Same bill
+                        </button>
+                      )}
                       <button
                         onClick={() => {
                           setEditingId(row.id)
