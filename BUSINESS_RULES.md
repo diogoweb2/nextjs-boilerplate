@@ -1882,8 +1882,13 @@ bar). Table `planned_splits`; CRUD in `app/actions/planned-splits.ts`; matching 
 
 ### Matching (end of `ingestStatement`, after the amount rules)
 Over the rows **just inserted**: `flow = expense`, not a payment, positive amount, merchant
-matches, and `|amount| ≥ max(minAmount, splitAmount)`. The **oldest** matching charge wins and
-each charge is consumed by at most one rule per run. Then:
+matches, and `|amount| ≥ max(minAmount, splitAmount)`. The **oldest** matching charge wins.
+
+**Several rules can hit the same bill** — one Metro run can hide a $100 gift card *and* a $30
+shirt, each with its own category and its own (or no) goal. Rules are applied oldest-first and
+each peels off what the charge still has **left**; the "only if more than" floor is always read
+against the charge **as imported**. A charge already partly split must keep a remainder, so only
+a whole untouched charge can be consumed exactly. Then, per rule:
 
 - **Remainder > 0** → peel the split amount into a child transaction (`split_parent_id`,
   reusing an existing merchant with that name, no `merchant_rule` — it stays a one-off) and

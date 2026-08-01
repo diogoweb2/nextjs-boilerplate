@@ -18,7 +18,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { and, eq, ilike, inArray } from 'drizzle-orm'
+import { and, asc, eq, ilike, inArray } from 'drizzle-orm'
 import { db } from '@/db'
 import {
   plannedSplits,
@@ -113,10 +113,19 @@ async function payFromGoal(input: {
  * Called at the end of `ingestStatement`, so both the manual upload and the
  * nightly sync go through it. Each rule fires at most once (the oldest matching
  * charge wins) and then flips to 'applied'.
+ *
+ * Several rules CAN land on the same charge — one bill often hides more than one
+ * thing (a $100 gift card *and* a $30 shirt inside the Metro run). Rules are
+ * applied oldest-first, each peeling its amount off what the charge has left, so
+ * the parent shrinks once per rule and the totals still add up.
  */
 export async function applyPlannedSplits(insertedIds: number[]): Promise<void> {
   if (insertedIds.length === 0) return
-  const rules = await db.select().from(plannedSplits).where(eq(plannedSplits.status, 'pending'))
+  const rules = await db
+    .select()
+    .from(plannedSplits)
+    .where(eq(plannedSplits.status, 'pending'))
+    .orderBy(asc(plannedSplits.createdAt))
   if (rules.length === 0) return
 
   const rows = await db
@@ -145,8 +154,9 @@ export async function applyPlannedSplits(insertedIds: number[]): Promise<void> {
     .filter((r) => r.flow === 'expense' && !r.isPayment && Number(r.amount) > 0)
     .sort((a, b) => a.txnDate.localeCompare(b.txnDate))
 
-  // A charge already consumed by one rule can't be split twice in the same run.
-  const used = new Set<number>()
+  // What each charge still has left after earlier rules peeled their parts off,
+  // so two rules on the same bill each take their own slice.
+  const left = new Map<number, number>(candidates.map((r) => [r.id, Number(r.amount)]))
 
   for (const rule of rules) {
     const split = Number(rule.splitAmount)
@@ -155,19 +165,25 @@ export async function applyPlannedSplits(insertedIds: number[]): Promise<void> {
     const wanted = rule.merchantLabel.trim().toLowerCase()
 
     const match = candidates.find((r) => {
-      if (used.has(r.id)) return false
       const sameMerchant =
         rule.merchantId != null
           ? r.merchantId === rule.merchantId
           : r.merchantName.trim().toLowerCase() === wanted
       if (!sameMerchant) return false
-      return Number(r.amount) >= min - 0.005 && Number(r.amount) >= split - 0.005
+      // The "only if more than" floor reads the charge as it was imported; what
+      // is still available to peel off is what's left after earlier rules.
+      if (Number(r.amount) < min - 0.005) return false
+      const available = left.get(r.id) ?? 0
+      // A charge already partly split must keep a remainder — only a whole,
+      // untouched charge can be consumed exactly (relabelled in place below).
+      const untouched = Math.abs(available - Number(r.amount)) < 0.005
+      return untouched ? available >= split - 0.005 : available - split > 0.0049
     })
     if (!match) continue
 
-    used.add(match.id)
-    const total = Number(match.amount)
+    const total = left.get(match.id)!
     const remainder = Math.round((total - split) * 100) / 100
+    left.set(match.id, remainder)
 
     let targetId: number
     if (remainder <= 0.0049) {

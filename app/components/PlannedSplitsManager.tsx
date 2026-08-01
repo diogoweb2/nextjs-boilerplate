@@ -248,7 +248,8 @@ export function PlannedSplitsManager({
         <p className="mb-4 text-sm text-[var(--muted)]">
           Bought something that will post under the wrong name — a gift card at the supermarket,
           a friend&apos;s share on your card? Write it down here <em>before</em> the charge shows
-          up and the next import will split it for you.
+          up and the next import will split it for you. Add one rule per thing — several rules
+          can come out of the same bill, each with its own category and goal.
         </p>
         <Form
           draft={draft}
