@@ -1,0 +1,252 @@
+/**
+ * Planned splits — the "future custom import" rules (BUSINESS_RULES.md §22).
+ *
+ * The owner declares, before the charge posts, that the next Metro purchase over
+ * $500 really contains a $500 Amazon gift card. The daily import then carves it
+ * out automatically, so the money never sits in the wrong category waiting to be
+ * fixed by hand.
+ *
+ * This module is deliberately auth-free: the importer runs from the cron/API
+ * token path (`app/api/ingest`) where there is no cookie session. The Server
+ * Actions in `app/actions/planned-splits.ts` wrap the CRUD with `requireAuth`.
+ *
+ * The goal-spend half is written here rather than calling `spendFromGoal` for
+ * the same reason (that action is auth-gated). It writes the identical ledger
+ * pair — a negative `contribution` plus an offsetting `manual`/`income` row —
+ * so undo from the Activity row still works. The only thing it skips is the
+ * optional per-goal push notification.
+ */
+
+import { randomUUID } from 'node:crypto'
+import { and, eq, ilike, inArray } from 'drizzle-orm'
+import { db } from '@/db'
+import {
+  plannedSplits,
+  transactions,
+  merchants,
+  categories,
+  goals,
+  goalEntries,
+} from '@/db/schema'
+import { savingsValue } from '@/app/lib/goals'
+
+/** A rule matches a charge at or above this; defaults to the split amount. */
+function threshold(rule: { minAmount: string | null; splitAmount: string }): number {
+  const min = rule.minAmount != null ? Number(rule.minAmount) : NaN
+  return Number.isFinite(min) && min > 0 ? min : Number(rule.splitAmount)
+}
+
+/**
+ * Reduce a goal by `amount` and post the offsetting income row against
+ * `spentOnTransactionId` — the same shape `spendFromGoal` writes. Capped at what
+ * the goal actually holds; a non-savings/empty goal is a no-op.
+ */
+async function payFromGoal(input: {
+  goalId: number
+  amount: number
+  occurredAt: string
+  categoryId: number | null
+  note: string
+  spentOnTransactionId: number
+}): Promise<void> {
+  const [goal] = await db.select().from(goals).where(eq(goals.id, input.goalId)).limit(1)
+  if (!goal || goal.kind !== 'savings') return
+
+  const entries = await db
+    .select({ kind: goalEntries.kind, amount: goalEntries.amount, occurredAt: goalEntries.occurredAt })
+    .from(goalEntries)
+    .where(eq(goalEntries.goalId, goal.id))
+  const value = savingsValue(
+    entries.map((e) => ({ kind: e.kind, amount: Number(e.amount), occurredAt: e.occurredAt }))
+  )
+  if (value <= 0) return
+  const amount = Math.min(Math.round(input.amount * 100) / 100, value)
+  if (amount <= 0) return
+
+  const [goalSpendCat] = await db
+    .select({ id: categories.id })
+    .from(categories)
+    .where(eq(categories.name, 'Goal Spend'))
+    .limit(1)
+  const categoryId = input.categoryId ?? goalSpendCat?.id ?? null
+
+  let [payee] = await db
+    .select({ id: merchants.id })
+    .from(merchants)
+    .where(ilike(merchants.name, 'Goal Withdrawal'))
+    .limit(1)
+  if (!payee) {
+    ;[payee] = await db
+      .insert(merchants)
+      .values({ name: 'Goal Withdrawal', categoryId: goalSpendCat?.id ?? null })
+      .returning({ id: merchants.id })
+  }
+
+  const [offset] = await db
+    .insert(transactions)
+    .values({
+      source: 'manual',
+      flow: 'income',
+      categoryId,
+      externalId: `goal:${goal.id}:spend:${randomUUID().slice(0, 8)}`,
+      txnDate: input.occurredAt,
+      rawDescription: `Goal spend — ${goal.name}`,
+      merchantId: payee.id,
+      // Income is stored negative (money in); see the sign convention.
+      amount: (-amount).toFixed(2),
+    })
+    .returning({ id: transactions.id })
+
+  await db.insert(goalEntries).values({
+    goalId: goal.id,
+    kind: 'contribution',
+    amount: (-amount).toFixed(2),
+    transactionId: offset.id,
+    spentOnTransactionId: input.spentOnTransactionId,
+    occurredAt: input.occurredAt,
+    note: input.note.slice(0, 200),
+  })
+}
+
+/**
+ * Apply every pending planned split against the transactions just inserted.
+ * Called at the end of `ingestStatement`, so both the manual upload and the
+ * nightly sync go through it. Each rule fires at most once (the oldest matching
+ * charge wins) and then flips to 'applied'.
+ */
+export async function applyPlannedSplits(insertedIds: number[]): Promise<void> {
+  if (insertedIds.length === 0) return
+  const rules = await db.select().from(plannedSplits).where(eq(plannedSplits.status, 'pending'))
+  if (rules.length === 0) return
+
+  const rows = await db
+    .select({
+      id: transactions.id,
+      txnDate: transactions.txnDate,
+      amount: transactions.amount,
+      flow: transactions.flow,
+      isPayment: transactions.isPayment,
+      externalId: transactions.externalId,
+      postedDate: transactions.postedDate,
+      rawDescription: transactions.rawDescription,
+      rawCategory: transactions.rawCategory,
+      cardLast4: transactions.cardLast4,
+      country: transactions.country,
+      batchId: transactions.batchId,
+      source: transactions.source,
+      merchantId: transactions.merchantId,
+      merchantName: merchants.name,
+    })
+    .from(transactions)
+    .innerJoin(merchants, eq(transactions.merchantId, merchants.id))
+    .where(inArray(transactions.id, insertedIds))
+
+  const candidates = rows
+    .filter((r) => r.flow === 'expense' && !r.isPayment && Number(r.amount) > 0)
+    .sort((a, b) => a.txnDate.localeCompare(b.txnDate))
+
+  // A charge already consumed by one rule can't be split twice in the same run.
+  const used = new Set<number>()
+
+  for (const rule of rules) {
+    const split = Number(rule.splitAmount)
+    if (!(split > 0)) continue
+    const min = threshold(rule)
+    const wanted = rule.merchantLabel.trim().toLowerCase()
+
+    const match = candidates.find((r) => {
+      if (used.has(r.id)) return false
+      const sameMerchant =
+        rule.merchantId != null
+          ? r.merchantId === rule.merchantId
+          : r.merchantName.trim().toLowerCase() === wanted
+      if (!sameMerchant) return false
+      return Number(r.amount) >= min - 0.005 && Number(r.amount) >= split - 0.005
+    })
+    if (!match) continue
+
+    used.add(match.id)
+    const total = Number(match.amount)
+    const remainder = Math.round((total - split) * 100) / 100
+
+    let targetId: number
+    if (remainder <= 0.0049) {
+      // The whole charge WAS the planned purchase — relabel it in place; a split
+      // has to leave a remainder on the original.
+      await db
+        .update(transactions)
+        .set({ categoryId: rule.categoryId, note: rule.label })
+        .where(eq(transactions.id, match.id))
+      targetId = match.id
+    } else {
+      // Peel the planned amount off into its own child row, reusing a merchant
+      // with that name when one exists (no merchant_rule — this stays a one-off).
+      let merchantId = match.merchantId
+      const [existing] = await db
+        .select({ id: merchants.id })
+        .from(merchants)
+        .where(ilike(merchants.name, rule.label))
+        .limit(1)
+      if (existing) {
+        merchantId = existing.id
+      } else {
+        const [created] = await db
+          .insert(merchants)
+          .values({ name: rule.label, categoryId: rule.categoryId })
+          .returning({ id: merchants.id })
+        merchantId = created.id
+      }
+
+      const [child] = await db
+        .insert(transactions)
+        .values({
+          source: match.source,
+          flow: 'expense',
+          externalId: `${match.externalId}:split:${randomUUID().slice(0, 8)}`,
+          txnDate: match.txnDate,
+          postedDate: match.postedDate,
+          rawDescription: match.rawDescription,
+          merchantId,
+          categoryId: rule.categoryId,
+          amount: split.toFixed(2),
+          rawCategory: match.rawCategory,
+          cardLast4: match.cardLast4,
+          country: match.country,
+          isPayment: false,
+          batchId: match.batchId,
+          splitParentId: match.id,
+          note: rule.label,
+        })
+        .returning({ id: transactions.id })
+
+      await db
+        .update(transactions)
+        .set({ amount: remainder.toFixed(2) })
+        .where(eq(transactions.id, match.id))
+      targetId = child.id
+    }
+
+    if (rule.goalId != null) {
+      await payFromGoal({
+        goalId: rule.goalId,
+        amount: split,
+        occurredAt: match.txnDate,
+        categoryId: rule.categoryId,
+        note: `Paid ${rule.label}`,
+        spentOnTransactionId: targetId,
+      })
+    }
+
+    await db
+      .update(plannedSplits)
+      .set({ status: 'applied', appliedAt: new Date(), appliedTransactionId: targetId })
+      .where(and(eq(plannedSplits.id, rule.id), eq(plannedSplits.status, 'pending')))
+  }
+}
+
+/** A rule pending this long without a match is reported as "it never fired". */
+export const PLANNED_SPLIT_STALE_DAYS = 7
+
+export function daysSince(iso: Date): number {
+  return Math.floor((Date.now() - iso.getTime()) / 86_400_000)
+}

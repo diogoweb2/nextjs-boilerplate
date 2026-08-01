@@ -202,6 +202,14 @@ export default async function TransactionsPage({
               ? <>Showing <strong>{bucket}</strong> transactions. <a href="/transactions" className="underline">Clear filter</a></>
               : 'Every transaction. Tap a row to override its category or mark it as a subscription or special purchase.'}
           </p>
+          <p className="mt-1 text-sm">
+            <a href="/transactions/planned" className="text-[var(--accent)] hover:underline">
+              Plan a split →
+            </a>{' '}
+            <span className="text-[var(--muted)]">
+              tell the importer about a purchase before it posts.
+            </span>
+          </p>
         </div>
         {!goalFilterId && <PeriodSelector
           showSpecialToggle={false}

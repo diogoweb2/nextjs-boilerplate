@@ -35,6 +35,15 @@ const ICON_PATHS: Record<string, React.ReactNode> = {
       <path d="M13 16H8" />
     </>
   ),
+  planned: (
+    <>
+      <path d="M8 2v4" />
+      <path d="M16 2v4" />
+      <rect x="3" y="4" width="18" height="18" rx="2" />
+      <path d="M3 10h18" />
+      <path d="M9 16h6" />
+    </>
+  ),
   accounts: (
     <>
       <path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1" />
@@ -93,6 +102,7 @@ const LINKS = [
   { href: '/', label: 'Overview', icon: 'overview' },
   { href: '/budget', label: 'Budget', icon: 'budget' },
   { href: '/transactions', label: 'Activity', icon: 'activity' },
+  { href: '/transactions/planned', label: 'Planned', icon: 'planned' },
   { href: '/accounts', label: 'Accounts', icon: 'accounts' },
   { href: '/reports', label: 'Reports', icon: 'reports' },
   { href: '/report', label: 'Recap', icon: 'recap' },
@@ -105,9 +115,18 @@ const MOBILE_PRIMARY_COUNT = 4
 const MOBILE_PRIMARY = LINKS.slice(0, MOBILE_PRIMARY_COUNT)
 const MOBILE_MORE = LINKS.slice(MOBILE_PRIMARY_COUNT)
 
-function isActive(pathname: string, href: string): boolean {
+function matches(pathname: string, href: string): boolean {
   if (href === '/') return pathname === '/'
   return pathname === href || pathname.startsWith(href + '/')
+}
+
+/**
+ * Only the most specific matching link lights up, so /transactions/planned
+ * highlights "Planned" without also highlighting its parent "Activity".
+ */
+function isActive(pathname: string, href: string): boolean {
+  if (!matches(pathname, href)) return false
+  return !LINKS.some((l) => l.href !== href && l.href.length > href.length && matches(pathname, l.href))
 }
 
 export function NavBar({

@@ -30,6 +30,8 @@ import { loadPendingReviews, loadGoalsData, mortgageSyncHealth } from '@/app/act
 import { loadSurplusPrompts } from '@/app/actions/surplus'
 import { loadDashboardProjects } from '@/app/actions/projects'
 import { ProjectReminderBanner } from '@/app/components/ProjectReminderBanner'
+import { PlannedSplitBanner } from '@/app/components/PlannedSplitBanner'
+import { loadPlannedSplitAlerts } from '@/app/actions/planned-splits'
 import { loadEmergencyFund } from '@/app/actions/emergency'
 import { loadCcPaymentHistory, loadBillDismissals, loadCcExpectedPayment } from '@/app/actions/bills'
 import { buildBillCalendar, buildBillReminders } from '@/app/lib/bill-calendar'
@@ -412,6 +414,9 @@ export default async function Home({
   const emergency = await loadEmergencyFund()
   const goalsSummary = await loadGoalsData()
   const dashboardProjects = demo ? [] : await loadDashboardProjects()
+  // Planned splits that just fired (confirmation) or have been waiting a week
+  // without matching anything (§22).
+  const plannedSplitAlerts = demo ? [] : await loadPlannedSplitAlerts()
   // The latest holdings-snapshot date to nag about (only if it's ~a month past
   // the prior snapshot) — the device-local investment report reminder (§16b).
   const investmentReportDue = demo ? null : await loadInvestmentReportDue()
@@ -527,6 +532,12 @@ export default async function Home({
       <YearReportReminder year={reminderReportYear} />
       <ReportReminder month={reminderReportMonth} />
       <InvestmentReportReminder snapshotDate={investmentReportDue} />
+
+      {plannedSplitAlerts.length > 0 && (
+        <div className="mb-5">
+          <PlannedSplitBanner alerts={plannedSplitAlerts} />
+        </div>
+      )}
 
       {dashboardProjects.length > 0 && (
         <div className="mb-5">

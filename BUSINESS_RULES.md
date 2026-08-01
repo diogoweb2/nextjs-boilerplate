@@ -1856,3 +1856,53 @@ is simplified (no surtax, no dividend credits). A planning model, not advice.
 `npx tsx scripts/check-canada-rules.ts` and `npx tsx scripts/check-retirement.ts` assert
 golden-value plausibility bands over the pure math (CPP/OAS/HOOPP/tax/RRIF and the year-by-year
 plan). Run them after touching either engine file.
+
+---
+
+## 22. Planned splits — "future custom imports" (`/transactions/planned`)
+
+Some purchases are wrong the moment they post: a **$500 Amazon gift card bought at Metro**
+alongside the groceries imports as one Metro charge in *Groceries*. Fixing it by hand means
+waiting days for the statement and remembering to do it. A **planned split** is written
+*before* the charge arrives — at the till, from the phone — and the next import applies it.
+
+**Where:** Activity › Planned (`/transactions/planned`, own nav entry, in the mobile bottom
+bar). Table `planned_splits`; CRUD in `app/actions/planned-splits.ts`; matching in
+`app/lib/planned-splits.ts` (auth-free — the importer also runs from the API-token sync path).
+
+### A rule
+| Field | Meaning |
+| --- | --- |
+| Place | Merchant to watch. Picked from the payee list (`merchant_id`) or typed (`merchant_label`), so a rule can name a merchant that doesn't exist yet — matching falls back to a case-insensitive name compare. |
+| Only if more than | Optional floor: ignore smaller charges at that place. Defaults to the split amount. |
+| Split off | The amount to carve out. |
+| Call it | Name of the carved-out part (merchant + note), e.g. "Amazon gift card". |
+| Category | Category for the carved-out part. Blank keeps the merchant's. |
+| Take the money from | Optional savings goal — the carved-out part is then paid from that goal. |
+
+### Matching (end of `ingestStatement`, after the amount rules)
+Over the rows **just inserted**: `flow = expense`, not a payment, positive amount, merchant
+matches, and `|amount| ≥ max(minAmount, splitAmount)`. The **oldest** matching charge wins and
+each charge is consumed by at most one rule per run. Then:
+
+- **Remainder > 0** → peel the split amount into a child transaction (`split_parent_id`,
+  reusing an existing merchant with that name, no `merchant_rule` — it stays a one-off) and
+  reduce the parent. Same shape as a manual split, so totals never double-count.
+- **Charge equals the split** → relabel the row in place (a split must leave a remainder).
+- **Goal set** → the carved-out part is paid from the goal: a negative `contribution` plus the
+  offsetting `manual`/`income` "Goal spend" row, `spent_on_transaction_id` = the part. Identical
+  to `payTransactionFromGoal`, so the Activity row shows "paid from <goal>" with an undo. Capped
+  at what the goal holds; skips the optional per-goal push.
+
+The rule then flips to `status = 'applied'` (with `applied_at` + `applied_transaction_id`) — it
+is **not** deleted, because it doubles as the confirmation.
+
+### Dashboard feedback (`PlannedSplitBanner`)
+- **Applied** → green "split $X out of your Metro charge as …". **Dismiss deletes the rule**
+  (it's done).
+- **Pending ≥ 7 days** (`PLANNED_SPLIT_STALE_DAYS`) → amber "still waiting … nothing matched",
+  so a typo'd payee or a charge that never posted doesn't sit unnoticed. **Dismiss only mutes
+  the warning** (`dismissed_at`); the rule keeps watching.
+
+Dismissals live in the DB, never localStorage, so they clear on every device. Editing a rule
+resets it to pending and clears the dismissal — a fixed rule should fire on the next import.

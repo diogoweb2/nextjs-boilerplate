@@ -21,6 +21,7 @@ import { normalizeKey, prettify, masterCategoryFor } from '@/app/lib/normalize'
 import { reconcileNetZeroGoals } from '@/app/actions/goals'
 import { runAutoFillForAllProjects } from '@/app/actions/projects'
 import { maybeTriggerDigest } from '@/app/lib/digest'
+import { applyPlannedSplits } from '@/app/lib/planned-splits'
 
 export type ImportResult =
   | { ok: true; source: ImportSource; inserted: number; skipped: number; period: string }
@@ -263,6 +264,10 @@ export async function ingestStatement(
   await createTransferReviews(unexplained)
   await createWithdrawalReviews(unexplained)
   await createInboundReviews(unexplained)
+
+  // Carve out anything the owner planned ahead of time (a $500 gift card inside
+  // the Metro grocery run) before it can pollute the merchant's category.
+  await applyPlannedSplits(inserted.map((r) => r.id))
 
   // Keep the net-zero recovery goal in sync (auto-complete / revive on new data).
   await reconcileNetZeroGoals()

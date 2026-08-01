@@ -73,6 +73,8 @@ export const FEATURE_INDEX: FeatureEntry[] = [
 
   // ── Activity ────────────────────────────────────────────────────────────
   { label: 'Activity', page: 'Activity', href: '/transactions', keywords: ['transactions', 'search', 'list', 'history'] },
+  { label: 'Planned splits', page: 'Activity › Planned', href: '/transactions/planned', keywords: ['future custom import', 'gift card', 'split ahead', 'pre split', 'rule', 'upcoming purchase'] },
+  { label: 'Plan a split', page: 'Activity › Planned', href: '/transactions/planned#plan-a-split', keywords: ['add rule', 'future import', 'gift card', 'split before import', 'pay from goal'] },
 
   // ── Accounts ────────────────────────────────────────────────────────────
   { label: 'Goals', page: 'Accounts › Goals', href: '/accounts', keywords: ['savings', 'mortgage', 'kitchen', 'invest', 'contribute'] },

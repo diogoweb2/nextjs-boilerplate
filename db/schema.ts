@@ -968,6 +968,49 @@ export const billReminderDismissals = pgTable('bill_reminder_dismissals', {
 })
 
 /**
+ * "Planned split" — a rule the owner writes BEFORE a purchase posts, so the
+ * daily import carves it up automatically instead of leaving a wrong lump sum
+ * (e.g. a $500 Amazon gift card bought at Metro alongside the groceries: without
+ * this, the whole charge lands in Groceries and stays wrong for days).
+ *
+ * Match = same merchant AND |amount| ≥ minAmount (the "more than $500" helper,
+ * defaulting to splitAmount). On the first matching freshly-imported expense the
+ * importer peels off `splitAmount` into a child transaction named `label` in
+ * `categoryId`; when the charge equals the split exactly, the row itself is
+ * relabelled instead (a split must leave a remainder). If `goalId` is set, the
+ * carved-off part is then paid from that goal (the usual goal-spend ledger pair).
+ *
+ * The row is NOT deleted on match: status flips to 'applied' and it becomes the
+ * dashboard confirmation ("it worked"). Dismissing an applied row deletes it. A
+ * rule still 'pending' a week later warns on the dashboard instead;
+ * `dismissedAt` silences that warning (DB-backed, so it syncs across devices)
+ * while the rule keeps waiting. See BUSINESS_RULES.md §22.
+ */
+export const plannedSplits = pgTable('planned_splits', {
+  id: serial('id').primaryKey(),
+  // The merchant to watch. merchantId is set when the owner picked an existing
+  // payee; merchantLabel always holds the typed text and matches by name too, so
+  // a rule written before the merchant exists still fires once it is created.
+  merchantId: integer('merchant_id').references(() => merchants.id, { onDelete: 'set null' }),
+  merchantLabel: text('merchant_label').notNull(),
+  minAmount: numeric('min_amount', { precision: 10, scale: 2 }),
+  splitAmount: numeric('split_amount', { precision: 10, scale: 2 }).notNull(),
+  label: text('label').notNull(),
+  categoryId: integer('category_id').references(() => categories.id, { onDelete: 'set null' }),
+  goalId: integer('goal_id').references(() => goals.id, { onDelete: 'set null' }),
+  status: text('status', { enum: ['pending', 'applied'] })
+    .notNull()
+    .default('pending'),
+  appliedAt: timestamp('applied_at'),
+  // The carved-off child (or the relabelled row), so the dashboard can link to it.
+  appliedTransactionId: integer('applied_transaction_id').references(() => transactions.id, {
+    onDelete: 'set null',
+  }),
+  dismissedAt: timestamp('dismissed_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+
+/**
  * Single-row marker for the header NotificationBell's "seen" state. `signature`
  * is a fingerprint of the problem set (ids + details) last acknowledged by
  * opening the panel; the badge shows only when the current set's signature
