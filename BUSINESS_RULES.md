@@ -570,6 +570,28 @@ from day 1 — and **defaults to it** when no period is chosen (`app/lib/params.
 `PeriodSelector` `showCurrent`). It scopes the page like picking that exact month, and the widget
 renders day-by-day.
 
+### Dashboard "Net trajectory (Year)" — "At this pace"
+`app/components/NetBudgetTrajectory.tsx`. The red line is the year's **cumulative** net Jan→anchor;
+the last point is the **in-progress month**, labelled "Current net (month in progress)".
+- **Pace excludes the in-progress month, and averages the last up-to-3 completed months.** Early in
+  a month income has posted but most spending hasn't, so a partial month reads as a large surplus:
+  extrapolating it claimed "net $0 by Aug 2026" in mid-Jul 2026 off a `-$3,533` July that closed at
+  `-$8,047`. A single completed month is also too swingy (one heavy-bill month moves the crossing by
+  years), hence the 3-month mean. The badge names the window (`At this pace (3-mo avg)`).
+- The dashed projection ray therefore starts at the **last completed** month's dot, not the live
+  one. Before any month has closed (January) there's no pace: the badge reads "too early to project".
+- **The in-progress point is drawn as in-progress**: dashed + faded final segment, hollow dot, a
+  "… so far" value label, a legend note, and a sub-line under the headline reading
+  `Aug 2026 so far −$682 · day 5 of 31` (`asOfDay` / `daysInMonth` = `budget.anchorAsOfDay` /
+  `anchorDaysInMonth`). Because the line is **cumulative**, a part-month always drags the last dot
+  below the closed month behind it — spending posts daily, paycheques land mid/end month — so a
+  month that will finish in surplus still reads as a dip on day 5. Without this the owner reads
+  "August is worse than July" off five days of data.
+- Same math as `projectNetZeroDate` (§ monthly report) — keep the two in sync.
+- The other dashed line is the **required path** to the Dec 31 target (slope
+  `(targetNet − completedBaseline)/monthsRemaining`); it is unrelated to pace and gets steeper as the
+  year runs out, so the required monthly amount rises even when nothing else changed.
+
 ## 8d. 50/30/20 rule (dashboard card)
 
 A dashboard card comparing the **Needs / Wants / Savings** split to the classic 50/30/20 targets,
@@ -1419,8 +1441,9 @@ dashboard/budget.
   `Cash`, `Bank Fees`, `Investment` (a savings transfer, not a budget overrun) and `Uncategorized` are
   excluded (`DISCRETIONARY_EXCLUDE`).
 - **Net-$0 trajectory shift** — `projectNetZeroDate` (`app/lib/budget.ts`, extracted from
-  `NetBudgetTrajectory`) projects the year's net-$0 crossing as of `M` and `M-1` using the latest
-  month's net as pace; the difference is reported as **days earlier (good) / later (bad)**. Only
+  `NetBudgetTrajectory`) projects the year's net-$0 crossing as of `M` and `M-1` using the average
+  net of the last up-to-3 months as pace; the difference is reported as **days earlier (good) /
+  later (bad)**. Only
   computed when both months are negative-but-reachable; if `M` is already in the black it shows "in
   the black" instead.
 - **Extras** — no-spend days, net-positive-month streak, top merchant, deterministic quote of the

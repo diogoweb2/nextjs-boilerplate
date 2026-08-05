@@ -633,6 +633,8 @@ export default async function Home({
                 completedBaseline={budget.completedBaseline}
                 targetNet={budget.targetNet}
                 monthsRemaining={budget.monthsRemaining}
+                asOfDay={budget.anchorAsOfDay}
+                daysInMonth={budget.anchorDaysInMonth}
                 onTrack={budget.completedBaseline + budget.monthsRemaining * (budget.income - budget.categories.reduce((s, c) => s + (savedGoals.get(c.categoryId) ?? c.goal), 0)) >= budget.targetNet - 0.5}
                   />
                 </Card>

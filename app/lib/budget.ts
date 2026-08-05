@@ -254,7 +254,7 @@ export type NetZeroProjection = {
 /**
  * Project when the year's cumulative net crosses $0, as of the end of `asOfYm`.
  * Mirrors the "At this pace → net $0 by …" math in NetBudgetTrajectory: pace is
- * the latest month's net (the last month-over-month step of the cumulative line).
+ * the average net of the last up-to-3 months.
  * Pure (db-free) so the monthly report can run it for two consecutive as-of
  * months and diff the result.
  */
@@ -269,8 +269,18 @@ export function projectNetZeroDate(all: EnrichedTxn[], asOfYm: string): NetZeroP
     currentNet += incomeOver(all, new Set([ym]), () => true) - spendOver(all, new Set([ym]))
   }
   currentNet = round2(currentNet)
-  // Pace = the last month's net (the final step of the cumulative line).
-  const pace = round2(incomeOver(all, new Set([asOfYm]), () => true) - spendOver(all, new Set([asOfYm])))
+  // Pace = average net over the last up-to-3 months, so one heavy-bill month
+  // doesn't swing the crossing by years. Matches NetBudgetTrajectory.
+  const paceMonths: string[] = []
+  for (let m = anchorMonthNum; m >= 1 && paceMonths.length < 3; m--) {
+    paceMonths.push(`${year}-${String(m).padStart(2, '0')}`)
+  }
+  const pace = round2(
+    paceMonths.reduce(
+      (s, ym) => s + incomeOver(all, new Set([ym]), () => true) - spendOver(all, new Set([ym])),
+      0,
+    ) / paceMonths.length,
+  )
 
   if (currentNet >= -0.005) {
     return { currentNet, reached: true, crossingIndexFloat: asOfIndex, crossingDate: isoFromMonthFloat(asOfIndex) }
