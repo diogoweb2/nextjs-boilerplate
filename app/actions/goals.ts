@@ -83,7 +83,7 @@ export type GoalView = {
   name: string
   emoji: string
   color: string
-  kind: 'savings' | 'mortgage' | 'netzero'
+  kind: 'savings' | 'mortgage' | 'netzero' | 'giftcard'
   notify: boolean
   archived: boolean
   sortOrder: number
@@ -719,6 +719,8 @@ export async function createGoal(input: {
   targetAmount?: number | null
   targetDate?: string | null
   autoContribute?: number | null
+  /** 'giftcard' creates a stored-value balance instead of a savings goal (§10c). */
+  kind?: 'savings' | 'giftcard'
 }): Promise<void> {
   await requireAuth()
   const name = input.name.trim()
@@ -733,7 +735,7 @@ export async function createGoal(input: {
     name,
     emoji: input.emoji?.trim() || '🎯',
     color: input.color || '#6366f1',
-    kind: 'savings',
+    kind: input.kind === 'giftcard' ? 'giftcard' : 'savings',
     targetAmount: input.targetAmount != null && input.targetAmount > 0 ? input.targetAmount.toFixed(2) : null,
     targetDate: input.targetDate || null,
     autoContribute: input.autoContribute != null && input.autoContribute > 0 ? input.autoContribute.toFixed(2) : null,
@@ -831,12 +833,15 @@ export async function addContribution(input: {
   const amount = Math.round(input.amount * 100) / 100
   if (!Number.isFinite(amount) || amount === 0) return
   const [goal] = await db.select().from(goals).where(eq(goals.id, input.goalId)).limit(1)
-  if (!goal || goal.kind !== 'savings') return
+  if (!goal || (goal.kind !== 'savings' && goal.kind !== 'giftcard')) return
   const occurredAt = input.occurredAt || todayIso()
   const before = await currentSavingsValue(goal.id)
 
   let transactionId: number | null = null
-  if (input.asExpense && amount > 0) {
+  // A gift-card top-up is never new investing — the money left when the card was
+  // bought (that purchase is flipped to a transfer by `loadGiftCard`), so a manual
+  // add here (a card someone gave you) books no expense.
+  if (input.asExpense && amount > 0 && goal.kind === 'savings') {
     // Dedicated payee (still category Investment, which Savings/50-30-20 key off)
     // so synthetic contributions don't pollute the real iTrade payee's history.
     const merchantId = await merchantIdByName('Goal Funding', 'Investment')
@@ -1273,7 +1278,7 @@ export async function adjustValue(input: {
   const newValue = Math.round(input.newValue * 100) / 100
   if (!Number.isFinite(newValue)) return
   const [goal] = await db.select().from(goals).where(eq(goals.id, input.goalId)).limit(1)
-  if (!goal || goal.kind !== 'savings') return
+  if (!goal || (goal.kind !== 'savings' && goal.kind !== 'giftcard')) return
   const before = await currentSavingsValue(goal.id)
   const delta = Math.round((newValue - before) * 100) / 100
   if (delta === 0) return
@@ -1282,7 +1287,9 @@ export async function adjustValue(input: {
     kind: 'adjustment',
     amount: delta.toFixed(2),
     occurredAt: input.occurredAt || todayIso(),
-    note: input.note?.trim() || 'Market value adjustment',
+    note:
+      input.note?.trim() ||
+      (goal.kind === 'giftcard' ? 'Balance reconcile' : 'Market value adjustment'),
   })
   await notifyGoalChange(goal, before, newValue)
   revalidateGoals()
@@ -1565,4 +1572,195 @@ export async function resolveTransferReview(input: {
   }
   await resolve('resolved')
   revalidateGoals()
+}
+
+// ---------------------------------------------------------------------------
+// Gift cards — stored value (BUSINESS_RULES.md §10c)
+//
+// Buying an Amazon gift card on the Amex is not really *spending* on Amazon; it
+// is moving money into a balance that gets consumed later, silently, with no
+// card record. So the two halves are booked separately:
+//
+//  - LOAD  (`loadGiftCard`): the real card purchase is flipped to `transfer`, so
+//    it leaves spend analytics, and the same amount lands in the gift-card
+//    ledger. Category is left untouched so the undo is lossless.
+//  - SPEND (`spendFromGiftCard`): a manual expense row in the category the money
+//    actually went to, plus a negative ledger entry. No bank/card is involved
+//    (`source: 'manual'`), so balances and the cashflow schedule ignore it while
+//    the category analytics see the real purchase.
+//
+// Net effect: the month you buy the card is neutral, and the months you use it
+// carry the spending, categorised properly. Nothing is counted twice.
+// ---------------------------------------------------------------------------
+
+export type GiftCardOption = { id: number; name: string; emoji: string; color: string; value: number }
+
+/** Active gift cards with their current balance — the "Load gift card" picker. */
+export async function loadGiftCardOptions(): Promise<GiftCardOption[]> {
+  if (await isDemoSession()) return []
+  const rows = await db
+    .select()
+    .from(goals)
+    .where(and(eq(goals.kind, 'giftcard'), eq(goals.archived, false)))
+    .orderBy(asc(goals.sortOrder), asc(goals.id))
+  const items: GiftCardOption[] = []
+  for (const g of rows) {
+    items.push({ id: g.id, name: g.name, emoji: g.emoji, color: g.color, value: await currentSavingsValue(g.id) })
+  }
+  return items
+}
+
+export type GiftCardLoad = { entryId: number; goalId: number; goalName: string; goalEmoji: string; amount: number }
+
+/** Which purchases were booked as gift-card loads, so the Activity row can show
+ *  the badge and offer an undo. Keyed by transaction id. */
+export async function loadGiftCardLoadsByTxn(): Promise<Record<number, GiftCardLoad[]>> {
+  if (await isDemoSession()) return {}
+  const rows = await db
+    .select({
+      entryId: goalEntries.id,
+      goalId: goals.id,
+      goalName: goals.name,
+      goalEmoji: goals.emoji,
+      amount: goalEntries.amount,
+      transactionId: goalEntries.transactionId,
+    })
+    .from(goalEntries)
+    .innerJoin(goals, eq(goals.id, goalEntries.goalId))
+    .where(and(eq(goals.kind, 'giftcard'), isNotNull(goalEntries.transactionId)))
+  const byTxn: Record<number, GiftCardLoad[]> = {}
+  for (const r of rows) {
+    if (r.transactionId == null) continue
+    const amount = Number(r.amount)
+    // Only loads (positive); gift-card spends carry their own manual txn.
+    if (amount <= 0) continue
+    ;(byTxn[r.transactionId] ??= []).push({
+      entryId: r.entryId,
+      goalId: r.goalId,
+      goalName: r.goalName,
+      goalEmoji: r.goalEmoji,
+      amount,
+    })
+  }
+  return byTxn
+}
+
+/**
+ * "This purchase loaded my gift card." Flips the real card charge to a transfer
+ * (out of spend analytics) and credits the gift-card balance with the same
+ * amount. The transaction keeps its category so `undoGiftCardLoad` can restore
+ * it exactly. Idempotent: a purchase already loaded onto a card is ignored.
+ */
+export async function loadGiftCard(input: { transactionId: number; goalId: number }): Promise<void> {
+  await requireAuth()
+  if (await isDemoSession()) return
+  const [goal] = await db.select().from(goals).where(eq(goals.id, input.goalId)).limit(1)
+  if (!goal || goal.kind !== 'giftcard') return
+  const [txn] = await db.select().from(transactions).where(eq(transactions.id, input.transactionId)).limit(1)
+  if (!txn || txn.isPayment) return
+  // Never load from a synthetic goal row (that would loop the ledger).
+  if (txn.externalId.startsWith('goal:')) return
+  const amount = Math.round(Math.abs(Number(txn.amount)) * 100) / 100
+  if (!(amount > 0)) return
+
+  const [already] = await db
+    .select({ id: goalEntries.id })
+    .from(goalEntries)
+    .where(and(eq(goalEntries.goalId, goal.id), eq(goalEntries.transactionId, txn.id)))
+    .limit(1)
+  if (already) return
+
+  const before = await currentSavingsValue(goal.id)
+  await db.update(transactions).set({ flow: 'transfer' }).where(eq(transactions.id, txn.id))
+  await db.insert(goalEntries).values({
+    goalId: goal.id,
+    kind: 'contribution',
+    amount: amount.toFixed(2),
+    transactionId: txn.id,
+    occurredAt: txn.txnDate,
+    note: `Loaded from ${txn.rawDescription}`.slice(0, 200),
+  })
+  await notifyGoalChange(goal, before, before + amount)
+  revalidateGoals()
+  revalidatePath('/transactions')
+}
+
+/** Undo a gift-card load: drop the balance again and put the purchase back to a
+ *  normal expense (its original category was never touched). */
+export async function undoGiftCardLoad(transactionId: number, entryId?: number): Promise<void> {
+  await requireAuth()
+  if (await isDemoSession()) return
+  const rows = await db
+    .select({ id: goalEntries.id, goalId: goalEntries.goalId, amount: goalEntries.amount })
+    .from(goalEntries)
+    .innerJoin(goals, eq(goals.id, goalEntries.goalId))
+    .where(and(eq(goals.kind, 'giftcard'), eq(goalEntries.transactionId, transactionId)))
+    // Loads only — a gift-card *spend* also links a (manual) transaction.
+    .then((r) => r.filter((x) => Number(x.amount) > 0))
+  const targets = entryId ? rows.filter((r) => r.id === entryId) : rows
+  if (targets.length === 0) return
+  for (const r of targets) {
+    await db.delete(goalEntries).where(eq(goalEntries.id, r.id))
+  }
+  const left = rows.length - targets.length
+  if (left === 0) {
+    await db.update(transactions).set({ flow: 'expense' }).where(eq(transactions.id, transactionId))
+  }
+  revalidateGoals()
+  revalidatePath('/transactions')
+}
+
+/**
+ * Record what a gift card was actually used for. Unlike `spendFromGoal` (which
+ * offsets a purchase that already hit a card), nothing was imported here — the
+ * balance was consumed invisibly at the merchant — so this *creates* the expense:
+ * a manual row under `merchantName` (default: the card's name) in `categoryId`,
+ * plus a negative ledger entry. Capped at the remaining balance.
+ */
+export async function spendFromGiftCard(input: {
+  goalId: number
+  amount: number
+  occurredAt?: string
+  categoryId?: number | null
+  merchantName?: string
+  note?: string
+}): Promise<void> {
+  await requireAuth()
+  if (await isDemoSession()) return
+  const requested = Math.round(input.amount * 100) / 100
+  if (!Number.isFinite(requested) || requested <= 0) return
+  const [goal] = await db.select().from(goals).where(eq(goals.id, input.goalId)).limit(1)
+  if (!goal || goal.kind !== 'giftcard') return
+  const before = await currentSavingsValue(goal.id)
+  if (before <= 0) return
+  const amount = Math.min(requested, before)
+  const occurredAt = input.occurredAt || todayIso()
+
+  const categoryId = await validCategoryId(input.categoryId)
+  const merchantId = await merchantIdByName(input.merchantName?.trim() || goal.name)
+  const [txn] = await db
+    .insert(transactions)
+    .values({
+      source: 'manual',
+      flow: 'expense',
+      categoryId,
+      externalId: `goal:${goal.id}:giftspend:${randomUUID().slice(0, 8)}`,
+      txnDate: occurredAt,
+      rawDescription: `${goal.name} — ${input.note?.trim() || 'used'}`.slice(0, 200),
+      merchantId,
+      amount: amount.toFixed(2),
+    })
+    .returning({ id: transactions.id })
+
+  await db.insert(goalEntries).values({
+    goalId: goal.id,
+    kind: 'contribution',
+    amount: (-amount).toFixed(2),
+    transactionId: txn.id,
+    occurredAt,
+    note: input.note?.trim() || 'Gift card spend',
+  })
+  await notifyGoalChange(goal, before, before - amount)
+  revalidateGoals()
+  revalidatePath('/transactions')
 }

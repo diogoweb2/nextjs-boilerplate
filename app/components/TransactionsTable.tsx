@@ -22,8 +22,12 @@ import {
 import {
   payTransactionFromGoal,
   undoGoalPayment,
+  loadGiftCard,
+  undoGiftCardLoad,
   type GoalPickerItem,
   type GoalPayment,
+  type GiftCardOption,
+  type GiftCardLoad,
 } from '@/app/actions/goals'
 import { formatCurrency, formatLongDate } from '@/app/lib/format'
 import type { CategoryOption } from '@/app/components/MerchantsManager'
@@ -76,6 +80,8 @@ export function TransactionsTable({
   membershipsByTxn = {},
   goalOptions = [],
   goalPaymentsByTxn = {},
+  giftCardOptions = [],
+  giftCardLoadsByTxn = {},
   goalFilterOptions = [],
   activeGoalFilter = null,
 }: {
@@ -87,6 +93,10 @@ export function TransactionsTable({
   membershipsByTxn?: Record<number, ProjectPickerItem[]>
   goalOptions?: GoalPickerItem[]
   goalPaymentsByTxn?: Record<number, GoalPayment[]>
+  /** Gift cards a purchase can be loaded onto (see BUSINESS_RULES.md §10c). */
+  giftCardOptions?: GiftCardOption[]
+  /** Purchases already booked as a gift-card load, keyed by transaction id. */
+  giftCardLoadsByTxn?: Record<number, GiftCardLoad[]>
   /** Goals that have paid for at least one purchase (the goal dropdown). */
   goalFilterOptions?: { id: number; name: string; emoji: string; count: number }[]
   /** The goal currently filtered on via ?goal=, or null for "All goals". */
@@ -281,6 +291,10 @@ export function TransactionsTable({
             memberships={membershipsByTxn[t.id] ?? []}
             goalOptions={goalOptions}
             goalPayments={goalPaymentsByTxn[t.id] ?? []}
+            giftCardOptions={giftCardOptions}
+            giftCardLoads={giftCardLoadsByTxn[t.id] ?? []}
+            onLoadGiftCard={(goalId) => run(() => loadGiftCard({ transactionId: t.id, goalId }))}
+            onUndoGiftCardLoad={(entryId) => run(() => undoGiftCardLoad(t.id, entryId))}
             onPayWithGoal={(goalId, amount) =>
               run(() => payTransactionFromGoal({ transactionId: t.id, goalId, amount }))
             }
@@ -453,6 +467,10 @@ function TxnRowView({
   goalPayments,
   onPayWithGoal,
   onUndoGoalPayment,
+  giftCardOptions,
+  giftCardLoads,
+  onLoadGiftCard,
+  onUndoGiftCardLoad,
 }: {
   t: TxnRow
   categories: CategoryOption[]
@@ -474,10 +492,15 @@ function TxnRowView({
   goalPayments: GoalPayment[]
   onPayWithGoal: (goalId: number, amount: number) => void
   onUndoGoalPayment: (entryId: number) => void
+  giftCardOptions: GiftCardOption[]
+  giftCardLoads: GiftCardLoad[]
+  onLoadGiftCard: (goalId: number) => void
+  onUndoGiftCardLoad: (entryId: number) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const [splitting, setSplitting] = useState(false)
   const [payingWithGoal, setPayingWithGoal] = useState(false)
+  const [loadingGiftCard, setLoadingGiftCard] = useState(false)
   const [noteValue, setNoteValue] = useState(t.note ?? '')
 
   // Goal money can only cover a real expense — never income, an internal
@@ -485,6 +508,15 @@ function TxnRowView({
   const goalPayable = t.flow === 'expense' && !t.isPayment
   const goalPaid = goalPayments.reduce((s, p) => s + p.amount, 0)
   const goalUnpaid = Math.round((Math.abs(t.amount) - goalPaid) * 100) / 100
+  // Buying stored value (a gift card) isn't spending yet — it can be moved onto a
+  // gift-card balance, which flips this row to a transfer. Not for income, card
+  // payments or the synthetic goal rows.
+  const giftLoadable =
+    giftCardOptions.length > 0 &&
+    giftCardLoads.length === 0 &&
+    t.flow !== 'income' &&
+    !t.isPayment &&
+    Math.abs(t.amount) > 0
 
   return (
     <div className={`flex flex-col gap-2 p-3 ${selected ? 'bg-[color-mix(in_srgb,var(--accent)_8%,transparent)]' : ''}`}>
@@ -718,6 +750,29 @@ function TxnRowView({
               ◆ Pay with goal
             </button>
           )}
+          {giftLoadable && (
+            <button
+              onClick={() => setLoadingGiftCard((v) => !v)}
+              title="This purchase bought stored value — move it onto a gift card instead of counting it as spending now"
+              className={`rounded-md px-2 py-1 text-xs font-medium ${
+                loadingGiftCard
+                  ? 'bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] text-[var(--accent)]'
+                  : 'text-[var(--muted)] hover:bg-[var(--surface-2)]'
+              }`}
+            >
+              🎁 Load gift card
+            </button>
+          )}
+          {giftCardLoads.map((l) => (
+            <button
+              key={l.entryId}
+              onClick={() => onUndoGiftCardLoad(l.entryId)}
+              title={`Undo — take ${formatCurrency(l.amount)} off ${l.goalName} and count this as a normal expense again`}
+              className="rounded-md px-2 py-1 text-xs font-medium text-[var(--muted)] hover:bg-[var(--surface-2)]"
+            >
+              ↩ Undo {l.goalEmoji} {l.goalName} load
+            </button>
+          ))}
           {goalPayments.map((p) => (
             <button
               key={p.entryId}
@@ -759,6 +814,18 @@ function TxnRowView({
           onSubmit={(goalId, amount) => {
             setPayingWithGoal(false)
             onPayWithGoal(goalId, amount)
+          }}
+        />
+      )}
+
+      {expanded && loadingGiftCard && (
+        <LoadGiftCardForm
+          cards={giftCardOptions}
+          amount={Math.abs(t.amount)}
+          onCancel={() => setLoadingGiftCard(false)}
+          onSubmit={(goalId) => {
+            setLoadingGiftCard(false)
+            onLoadGiftCard(goalId)
           }}
         />
       )}
@@ -860,6 +927,61 @@ function PayWithGoalForm({
         {chosen && chosen.value < Number(amount) - 0.004 && (
           <> Only {formatCurrency(chosen.value)} is available, so that&apos;s all that will be used.</>
         )}
+      </p>
+    </div>
+  )
+}
+
+/**
+ * Move a purchase onto a gift-card balance. The whole charge moves (split the row
+ * first if only part of it bought stored value): the transaction becomes an
+ * internal transfer, so it leaves spend analytics, and the card is credited. The
+ * spending gets counted later, when you log what the card actually paid for.
+ */
+function LoadGiftCardForm({
+  cards,
+  amount,
+  onCancel,
+  onSubmit,
+}: {
+  cards: GiftCardOption[]
+  amount: number
+  onCancel: () => void
+  onSubmit: (goalId: number) => void
+}) {
+  const [goalId, setGoalId] = useState<string>(String(cards[0]?.id ?? ''))
+  return (
+    <div className="flex flex-col gap-2 rounded-lg bg-[var(--surface-2)] p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={goalId}
+          onChange={(e) => setGoalId(e.target.value)}
+          className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs"
+        >
+          {cards.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.emoji} {c.name} — {formatCurrency(c.value)} on it
+            </option>
+          ))}
+        </select>
+        <button
+          disabled={!goalId}
+          onClick={() => onSubmit(Number(goalId))}
+          className="rounded-lg bg-[var(--accent)] px-3 py-1 text-xs font-medium text-[var(--accent-fg)] disabled:opacity-40"
+        >
+          Load {formatCurrency(amount)}
+        </button>
+        <button
+          onClick={onCancel}
+          className="rounded-lg px-2 py-1 text-xs text-[var(--muted)] hover:bg-[var(--surface)]"
+        >
+          Cancel
+        </button>
+      </div>
+      <p className="text-[11px] text-[var(--muted)]">
+        Marks this charge as an internal transfer (out of your spending) and adds{' '}
+        {formatCurrency(amount)} to the card. Log purchases against the card as you
+        use it so the spending lands in the right category and month.
       </p>
     </div>
   )

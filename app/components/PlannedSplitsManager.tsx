@@ -170,7 +170,7 @@ function Form({
         </div>
         <div>
           <label className={LABEL_CLASS} htmlFor="ps-goal">
-            Take the money from (optional)
+            Goal or gift card (optional)
           </label>
           <select
             id="ps-goal"
@@ -182,6 +182,7 @@ function Form({
             {options.goals.map((g) => (
               <option key={g.id} value={g.id}>
                 {g.emoji} {g.name}
+                {g.kind === 'giftcard' ? ' — load onto this card' : ' — pay from this goal'}
               </option>
             ))}
           </select>
@@ -211,7 +212,12 @@ function Form({
 function describe(row: PlannedSplitRow): string {
   const min = row.minAmount != null ? ` over ${formatCurrency(row.minAmount)}` : ''
   const cat = row.categoryName ? ` → ${row.categoryName}` : ''
-  const goal = row.goalName ? `, paid from ${row.goalEmoji ?? ''} ${row.goalName}`.trimEnd() : ''
+  const goal = row.goalName
+    ? (row.goalKind === 'giftcard'
+        ? `, loaded onto ${row.goalEmoji ?? ''} ${row.goalName}`
+        : `, paid from ${row.goalEmoji ?? ''} ${row.goalName}`
+      ).trimEnd()
+    : ''
   return `Next ${row.merchantLabel} charge${min}: split off ${formatCurrency(row.splitAmount)} as “${row.label}”${cat}${goal}.`
 }
 

@@ -313,8 +313,13 @@ export const goals = pgTable('goals', {
   color: text('color').notNull().default('#6366f1'),
   // 'savings' = generic/market-valued goal; 'mortgage' = payoff projection;
   // 'netzero' = the year-net recovery tracker (carries a deficit across years
-  // until clawed back, then auto-archives). See BUSINESS_RULES.md §10.
-  kind: text('kind', { enum: ['savings', 'mortgage', 'netzero'] })
+  // until clawed back, then auto-archives); 'giftcard' = stored-value balance
+  // (e.g. an Amazon gift card bought for the Amex cash back). A gift card is NOT
+  // savings: it's money already spent that hasn't been *consumed* yet, so it is
+  // excluded from "invested this month", 50/30/20 savings and the goal transfer
+  // machinery. Loading it flips the card purchase to a transfer; consuming it
+  // books a real manual expense. See BUSINESS_RULES.md §10c.
+  kind: text('kind', { enum: ['savings', 'mortgage', 'netzero', 'giftcard'] })
     .notNull()
     .default('savings'),
   // Optional target. For mortgage this is 0 (payoff); targetDate is the deadline.

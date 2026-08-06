@@ -10,7 +10,12 @@ import { addMonths } from '@/app/lib/analytics'
 import { bucketForTxn } from '@/app/lib/fifty-thirty-twenty'
 import { isDemoSession } from '@/app/lib/demo'
 import { loadProjectsForPicker, loadProjectMemberships } from '@/app/actions/projects'
-import { loadGoalPickerItems, loadGoalPaymentsByTxn } from '@/app/actions/goals'
+import {
+  loadGoalPickerItems,
+  loadGoalPaymentsByTxn,
+  loadGiftCardOptions,
+  loadGiftCardLoadsByTxn,
+} from '@/app/actions/goals'
 
 export const dynamic = 'force-dynamic'
 
@@ -74,12 +79,22 @@ export default async function TransactionsPage({
         db.select({ txnDate: transactions.txnDate }).from(transactions),
       ])
 
-  const [projectItems, memberships, amountRuleRows, goalOptions, goalPaymentsByTxn] = await Promise.all([
+  const [
+    projectItems,
+    memberships,
+    amountRuleRows,
+    goalOptions,
+    goalPaymentsByTxn,
+    giftCardOptions,
+    giftCardLoadsByTxn,
+  ] = await Promise.all([
     loadProjectsForPicker(),
     loadProjectMemberships(),
     (await isDemoSession()) ? [] : db.select({ merchantId: merchantAmountRules.merchantId, amount: merchantAmountRules.amount }).from(merchantAmountRules),
     loadGoalPickerItems(),
     loadGoalPaymentsByTxn(),
+    loadGiftCardOptions(),
+    loadGiftCardLoadsByTxn(),
   ])
   const amountRuleSet = new Set(amountRuleRows.map((r) => `${r.merchantId}:${r.amount}`))
 
@@ -236,6 +251,8 @@ export default async function TransactionsPage({
           membershipsByTxn={memberships}
           goalOptions={goalOptions}
           goalPaymentsByTxn={goalPaymentsByTxn}
+          giftCardOptions={giftCardOptions}
+          giftCardLoadsByTxn={giftCardLoadsByTxn}
           goalFilterOptions={goalFilterOptions}
           activeGoalFilter={goalFilterId}
           initialQuery={rawQuery ?? ''}

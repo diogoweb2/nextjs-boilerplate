@@ -20,6 +20,7 @@ import {
   updateMortgageBalance,
   transferBetweenGoals,
   repayGoalBorrow,
+  spendFromGiftCard,
   type GoalView,
   type GoalSpendRow,
 } from '@/app/actions/goals'
@@ -321,7 +322,7 @@ function GoalSpendingLog({ rows }: { rows: GoalSpendRow[] }) {
   )
 }
 
-type Panel = 'none' | 'add' | 'spend' | 'adjust' | 'balance' | 'edit' | 'transfer' | 'repay'
+type Panel = 'none' | 'add' | 'spend' | 'adjust' | 'balance' | 'edit' | 'transfer' | 'repay' | 'giftspend'
 
 function GoalCard({
   goal,
@@ -354,6 +355,7 @@ function GoalCard({
 
   const isMortgage = goal.kind === 'mortgage'
   const isNetZero = goal.kind === 'netzero'
+  const isGiftCard = goal.kind === 'giftcard'
   const otherSavings = savingsGoals.filter((g) => g.id !== goal.id && !g.archived)
   // A savings goal can also send money back to net-zero (books it as recovery income).
   const transferDestinations =
@@ -363,7 +365,9 @@ function GoalCard({
     ? 'Balance remaining'
     : isNetZero
       ? 'Year-net recovery'
-      : goal.targetAmount
+      : isGiftCard
+        ? 'Gift card balance'
+        : goal.targetAmount
         ? `Goal ${formatCurrency(goal.targetAmount)}`
         : 'No target'
 
@@ -424,6 +428,23 @@ function GoalCard({
           </button>
         ) : isNetZero ? (
           <span className="text-xs text-[var(--muted)]">Updates automatically from your income vs spend ✨</span>
+        ) : isGiftCard ? (
+          <>
+            <button
+              onClick={() => setPanel(panel === 'giftspend' ? 'none' : 'giftspend')}
+              disabled={goal.value <= 0}
+              title="Record what you bought with this balance — it books a real expense in the category you pick"
+              className={`${PRIMARY_BTN} disabled:opacity-40`}
+            >
+              Log a purchase
+            </button>
+            <button onClick={() => setPanel(panel === 'add' ? 'none' : 'add')} className={GHOST_BTN}>
+              Add money
+            </button>
+            <button onClick={() => setPanel(panel === 'adjust' ? 'none' : 'adjust')} className={GHOST_BTN}>
+              Set balance
+            </button>
+          </>
         ) : (
           <>
             <button onClick={() => setPanel(panel === 'add' ? 'none' : 'add')} className={PRIMARY_BTN}>
@@ -472,7 +493,18 @@ function GoalCard({
 
       {/* Inline panels */}
       {panel === 'add' && (
-        <AddMoneyPanel onSubmit={(amount, asExpense, note) => run(() => addContribution({ goalId: goal.id, amount, asExpense, note }))} />
+        <AddMoneyPanel
+          hideExpenseToggle={isGiftCard}
+          onSubmit={(amount, asExpense, note) => run(() => addContribution({ goalId: goal.id, amount, asExpense, note }))}
+        />
+      )}
+      {panel === 'giftspend' && (
+        <GiftCardSpendPanel
+          max={goal.value}
+          categories={spendCategories}
+          defaultMerchant={goal.name.replace(/\s*gift\s*card\s*/i, '').trim() || goal.name}
+          onSubmit={(input) => run(() => spendFromGiftCard({ goalId: goal.id, ...input }))}
+        />
       )}
       {panel === 'spend' && (
         <SpendMoneyPanel
@@ -743,7 +775,85 @@ function Ring({ pct, color }: { pct: number; color: string }) {
   )
 }
 
-function AddMoneyPanel({ onSubmit }: { onSubmit: (amount: number, asExpense: boolean, note: string) => void }) {
+/**
+ * Log what a gift-card balance was actually used for. Nothing was imported (the
+ * balance is consumed silently at the merchant), so this *creates* the expense:
+ * a manual row under the payee and category you pick, dated when you used it.
+ */
+function GiftCardSpendPanel({
+  max,
+  categories,
+  defaultMerchant,
+  onSubmit,
+}: {
+  max: number
+  categories: { id: number; name: string }[]
+  defaultMerchant: string
+  onSubmit: (input: {
+    amount: number
+    occurredAt: string
+    categoryId: number | null
+    merchantName: string
+    note: string
+  }) => void
+}) {
+  const [amount, setAmount] = useState('')
+  const [note, setNote] = useState('')
+  const [categoryId, setCategoryId] = useState('')
+  const [merchantName, setMerchantName] = useState(defaultMerchant)
+  const [occurredAt, setOccurredAt] = useState(() => new Date().toISOString().slice(0, 10))
+  const n = Number(amount)
+  const tooMuch = n > max + 0.005
+  return (
+    <Panel column>
+      <div className="flex flex-wrap items-center gap-2">
+        <input type="number" placeholder="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} className={`${INPUT_CLASS} w-28`} />
+        <button type="button" onClick={() => setAmount(String(Math.round(max * 100) / 100))} className={GHOST_BTN}>
+          All ({formatCurrency(max)})
+        </button>
+        <input type="date" value={occurredAt} onChange={(e) => setOccurredAt(e.target.value)} className={INPUT_CLASS} />
+        <input type="text" placeholder="What did you buy? (optional)" value={note} onChange={(e) => setNote(e.target.value)} className={`${INPUT_CLASS} min-w-0 flex-1`} />
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
+        Payee
+        <input type="text" value={merchantName} onChange={(e) => setMerchantName(e.target.value)} className={`${INPUT_CLASS} w-40`} />
+        category
+        <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className={INPUT_CLASS}>
+          <option value="">Uncategorized</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          disabled={!n || tooMuch || !merchantName.trim()}
+          onClick={() =>
+            onSubmit({
+              amount: n,
+              occurredAt,
+              categoryId: categoryId ? Number(categoryId) : null,
+              merchantName: merchantName.trim(),
+              note,
+            })
+          }
+          className={PRIMARY_BTN}
+        >
+          Log purchase
+        </button>
+        {tooMuch && <span className="text-xs text-[var(--negative)]">More than the card holds.</span>}
+      </div>
+      <p className="text-[11px] text-[var(--muted)]">
+        Books a real expense on that date and lowers the card. The card&apos;s original
+        purchase was already moved out of spending, so nothing counts twice.
+      </p>
+    </Panel>
+  )
+}
+
+function AddMoneyPanel({ onSubmit, hideExpenseToggle = false }: { onSubmit: (amount: number, asExpense: boolean, note: string) => void; hideExpenseToggle?: boolean }) {
   const [amount, setAmount] = useState('')
   const [asExpense, setAsExpense] = useState(false)
   const [note, setNote] = useState('')
@@ -751,10 +861,12 @@ function AddMoneyPanel({ onSubmit }: { onSubmit: (amount: number, asExpense: boo
     <Panel>
       <input type="number" placeholder="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} className={`${INPUT_CLASS} w-28`} />
       <input type="text" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} className={`${INPUT_CLASS} min-w-0 flex-1`} />
-      <label className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
-        <input type="checkbox" checked={asExpense} onChange={(e) => setAsExpense(e.target.checked)} />
-        count as an expense
-      </label>
+      {!hideExpenseToggle && (
+        <label className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
+          <input type="checkbox" checked={asExpense} onChange={(e) => setAsExpense(e.target.checked)} />
+          count as an expense
+        </label>
+      )}
       <button disabled={!Number(amount)} onClick={() => onSubmit(Number(amount), asExpense, note)} className={PRIMARY_BTN}>
         Add
       </button>
@@ -1100,10 +1212,19 @@ function NewGoalForm() {
   const [color, setColor] = useState(COLORS[0])
   const [target, setTarget] = useState('')
   const [date, setDate] = useState('')
+  const [kind, setKind] = useState<'savings' | 'giftcard'>('savings')
+  const isGiftCard = kind === 'giftcard'
 
   const submit = () =>
     startTransition(async () => {
-      await createGoal({ name, emoji, color, targetAmount: target ? Number(target) : null, targetDate: date || null })
+      await createGoal({
+        name,
+        emoji,
+        color,
+        kind,
+        targetAmount: !isGiftCard && target ? Number(target) : null,
+        targetDate: isGiftCard ? null : date || null,
+      })
       setName('')
       setTarget('')
       setDate('')
@@ -1123,11 +1244,40 @@ function NewGoalForm() {
       <div className={`flex flex-col gap-3 ${pending ? 'opacity-60' : ''}`}>
         <div className="flex flex-wrap items-center gap-2">
           <input value={emoji} onChange={(e) => setEmoji(e.target.value)} className={`${INPUT_CLASS} w-14 text-center`} aria-label="Emoji" />
-          <input placeholder="What are you saving for?" value={name} onChange={(e) => setName(e.target.value)} className={`${INPUT_CLASS} min-w-0 flex-1`} />
+          <input
+            placeholder={isGiftCard ? 'Which card? (e.g. Amazon gift card)' : 'What are you saving for?'}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className={`${INPUT_CLASS} min-w-0 flex-1`}
+          />
         </div>
+        <label className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
+          Type
+          <select
+            value={kind}
+            onChange={(e) => {
+              const next = e.target.value as 'savings' | 'giftcard'
+              setKind(next)
+              if (next === 'giftcard' && emoji === '🎯') setEmoji('🎁')
+            }}
+            className={INPUT_CLASS}
+          >
+            <option value="savings">Savings goal — money you&apos;re putting aside</option>
+            <option value="giftcard">Gift card — a balance you&apos;ll spend down</option>
+          </select>
+          {isGiftCard && (
+            <span>
+              Load it from the card purchase in Activity, then log purchases as you use it.
+            </span>
+          )}
+        </label>
         <div className="flex flex-wrap items-center gap-2">
-          <input type="number" placeholder="Target $ (optional)" value={target} onChange={(e) => setTarget(e.target.value)} className={`${INPUT_CLASS} w-40`} />
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={INPUT_CLASS} aria-label="Target date" />
+          {!isGiftCard && (
+            <>
+              <input type="number" placeholder="Target $ (optional)" value={target} onChange={(e) => setTarget(e.target.value)} className={`${INPUT_CLASS} w-40`} />
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={INPUT_CLASS} aria-label="Target date" />
+            </>
+          )}
           <div className="flex gap-1">
             {COLORS.map((c) => (
               <button key={c} onClick={() => setColor(c)} className={`h-6 w-6 rounded-full ${color === c ? 'ring-2 ring-offset-1 ring-[var(--accent)]' : ''}`} style={{ background: c }} aria-label={`Color ${c}`} />
@@ -1136,7 +1286,7 @@ function NewGoalForm() {
         </div>
         <div className="flex gap-2">
           <button disabled={!name.trim()} onClick={submit} className={PRIMARY_BTN}>
-            Create goal
+            {isGiftCard ? 'Create gift card' : 'Create goal'}
           </button>
           <button onClick={() => setOpen(false)} className={GHOST_BTN}>
             Cancel

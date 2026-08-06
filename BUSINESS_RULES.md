@@ -879,6 +879,45 @@ The goal-spend feature adds `transfer_reviews.direction` and a `Goal Spend` inco
 `goals.autoContribute`, the `goal_entries` `transfer` kind, and the `goal_transfers` table — run
 `npm run db:push` (no seed change).
 
+## 10c. Gift cards — stored value (`kind = 'giftcard'`)
+
+Buying an Amazon gift card on the Amex (for the cash back) is **not** spending on Amazon. It moves
+money into a balance that gets consumed later, at the till, with **no card record at all** — the
+purchase never enters the system. So a gift card is its own goal kind: a balance you spend *down*,
+not savings you build *up*.
+
+> Why not planned splits (§22)? Those carve a slice off a **future imported
+> bill** and move it to a goal. A gift card produces no future bill — its use is invisible — so
+> there is nothing to split. That is the whole reason this kind exists.
+
+**Two halves, booked separately** (`app/actions/goals.ts`, gift-card section):
+- **Load** (`loadGiftCard`, Activity row → **🎁 Load gift card**) — the real card charge is flipped
+  to `flow = 'transfer'` so it leaves spend analytics, and the same amount is credited to the card's
+  ledger as a positive `contribution` carrying `transaction_id`. The transaction's **category is
+  left untouched** (unlike `setTxnFlow`, which rewrites it to `Transfer`) so the undo is lossless.
+  The whole charge moves — split the row first (§4) if only part of it bought stored value.
+  Idempotent per (card, transaction); `undoGiftCardLoad` removes the entry and puts the row back to
+  `expense`.
+- **Spend** (`spendFromGiftCard`, card → **Log a purchase**) — nothing was imported, so this
+  **creates** the expense: a `source: 'manual'` expense transaction (`external_id`
+  `goal:<id>:giftspend:<uuid>`) under the payee and category you pick, dated when you used the card,
+  plus a **negative** `contribution`. Capped at the remaining balance. Manual rows belong to no bank
+  account, so balances, the cashflow schedule and per-account filters drop them structurally, while
+  the category analytics see the real purchase.
+
+Net effect: the month you buy the card is **neutral**, and the months you use it carry the spending,
+categorised properly. Nothing is counted twice.
+
+**Deliberate exclusions.** A gift card is money already gone, not money put aside, so it is never
+savings: it is left out of `savingsGoalIds` ("invested this/last month", the Goals hero, the
+50/30/20 savings count, `monthReport`/`yearReport` tracked goals), out of the **"Pay with goal"**
+picker (`loadGoalPickerItems` is `kind = 'savings'` only), out of goal **transfers/borrows**, out of
+the surplus allocation and out of planned splits. `addContribution` on a card never books an expense
+(the money left when the card was bought), and `adjustValue` is allowed — use **Set balance** to
+reconcile against what the retailer actually shows.
+
+No migration: `goals.kind` is a `text` column, so `npm run db:push` is enough (nothing to seed).
+
 ## 10b. Monthly surplus allocation ("give every dollar a job")
 
 A dashboard prompt (`app/components/SurplusAllocation.tsx`, rendered from `app/page.tsx` next to
@@ -1901,7 +1940,7 @@ bar). Table `planned_splits`; CRUD in `app/actions/planned-splits.ts`; matching 
 | Split off | The amount to carve out. |
 | Call it | Name of the carved-out part (merchant + note), e.g. "Amazon gift card". |
 | Category | Category for the carved-out part. Blank keeps the merchant's. |
-| Take the money from | Optional savings goal — the carved-out part is then paid from that goal. |
+| Goal or gift card | Optional. A **savings goal** pays for the carved-out part; a **gift card** (§10c) is *credited* by it instead — the split's own row becomes the card's load. |
 
 ### Matching (end of `ingestStatement`, after the amount rules)
 Over the rows **just inserted**: `flow = expense`, not a payment, positive amount, merchant
@@ -1917,10 +1956,15 @@ a whole untouched charge can be consumed exactly. Then, per rule:
   reusing an existing merchant with that name, no `merchant_rule` — it stays a one-off) and
   reduce the parent. Same shape as a manual split, so totals never double-count.
 - **Charge equals the split** → relabel the row in place (a split must leave a remainder).
-- **Goal set** → the carved-out part is paid from the goal: a negative `contribution` plus the
-  offsetting `manual`/`income` "Goal spend" row, `spent_on_transaction_id` = the part. Identical
-  to `payTransactionFromGoal`, so the Activity row shows "paid from <goal>" with an undo. Capped
-  at what the goal holds; skips the optional per-goal push.
+- **Savings goal set** → the carved-out part is paid from the goal: a negative `contribution`
+  plus the offsetting `manual`/`income` "Goal spend" row, `spent_on_transaction_id` = the part.
+  Identical to `payTransactionFromGoal`, so the Activity row shows "paid from <goal>" with an
+  undo. Capped at what the goal holds; skips the optional per-goal push.
+- **Gift card set** (`kind = 'giftcard'`, `loadOntoGiftCard`) → the opposite: the carved-out row
+  is flipped to `flow = 'transfer'` and the card is **credited** with the amount. This is the
+  $500-Amazon-card-inside-the-Metro-bill case end to end — the money leaves spending now and
+  comes back, categorised, when the card is actually used (§10c). Spending savings for it would
+  be wrong: nothing was ever set aside.
 
 The rule then flips to `status = 'applied'` (with `applied_at` + `applied_transaction_id`) — it
 is **not** deleted, because it doubles as the confirmation.

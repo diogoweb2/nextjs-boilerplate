@@ -7,7 +7,7 @@
  */
 
 import { revalidatePath } from 'next/cache'
-import { and, asc, desc, eq, isNull } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { db } from '@/db'
 import { plannedSplits, merchants, categories, goals } from '@/db/schema'
 import { requireAuth } from '@/app/lib/auth-guard'
@@ -26,6 +26,8 @@ export type PlannedSplitRow = {
   goalId: number | null
   goalName: string | null
   goalEmoji: string | null
+  /** 'giftcard' = the split *credits* the card; anything else pays from savings. */
+  goalKind: 'savings' | 'mortgage' | 'netzero' | 'giftcard' | null
   status: 'pending' | 'applied'
   appliedAt: string | null
   appliedTransactionId: number | null
@@ -36,7 +38,7 @@ export type PlannedSplitRow = {
 export type PlannedSplitOptions = {
   merchants: { id: number; name: string }[]
   categories: { id: number; name: string }[]
-  goals: { id: number; name: string; emoji: string }[]
+  goals: { id: number; name: string; emoji: string; kind: 'savings' | 'mortgage' | 'netzero' | 'giftcard' }[]
 }
 
 function revalidateAll() {
@@ -54,6 +56,7 @@ export async function loadPlannedSplits(): Promise<PlannedSplitRow[]> {
       categoryName: categories.name,
       goalName: goals.name,
       goalEmoji: goals.emoji,
+      goalKind: goals.kind,
     })
     .from(plannedSplits)
     .leftJoin(categories, eq(plannedSplits.categoryId, categories.id))
@@ -61,7 +64,7 @@ export async function loadPlannedSplits(): Promise<PlannedSplitRow[]> {
     // 'pending' > 'applied' alphabetically, so desc puts the live rules on top.
     .orderBy(desc(plannedSplits.status), desc(plannedSplits.createdAt))
 
-  return rows.map(({ r, categoryName, goalName, goalEmoji }) => ({
+  return rows.map(({ r, categoryName, goalName, goalEmoji, goalKind }) => ({
     id: r.id,
     merchantId: r.merchantId,
     merchantLabel: r.merchantLabel,
@@ -73,6 +76,7 @@ export async function loadPlannedSplits(): Promise<PlannedSplitRow[]> {
     goalId: r.goalId,
     goalName: goalName ?? null,
     goalEmoji: goalEmoji ?? null,
+    goalKind: goalKind ?? null,
     status: r.status,
     appliedAt: r.appliedAt ? r.appliedAt.toISOString().slice(0, 10) : null,
     appliedTransactionId: r.appliedTransactionId,
@@ -88,9 +92,11 @@ export async function loadPlannedSplitOptions(): Promise<PlannedSplitOptions> {
     db.select({ id: merchants.id, name: merchants.name }).from(merchants).orderBy(asc(merchants.name)),
     db.select({ id: categories.id, name: categories.name }).from(categories).orderBy(asc(categories.name)),
     db
-      .select({ id: goals.id, name: goals.name, emoji: goals.emoji })
+      .select({ id: goals.id, name: goals.name, emoji: goals.emoji, kind: goals.kind })
       .from(goals)
-      .where(and(eq(goals.kind, 'savings'), eq(goals.archived, false)))
+      // Savings goals pay for the carved-off purchase; gift cards are *credited*
+      // by it instead (the importer branches on kind — see §10c).
+      .where(and(inArray(goals.kind, ['savings', 'giftcard']), eq(goals.archived, false)))
       .orderBy(asc(goals.sortOrder)),
   ])
   return { merchants: merchantRows, categories: categoryRows, goals: goalRows }

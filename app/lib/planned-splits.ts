@@ -109,6 +109,33 @@ async function payFromGoal(input: {
 }
 
 /**
+ * Credit a gift card with the carved-off amount and flip that row to an internal
+ * transfer — the auth-free mirror of `loadGiftCard` (BUSINESS_RULES.md §10c).
+ * Buying stored value inside a grocery bill is exactly the case planned splits
+ * were written for, so the rule can finish the job: the $500 leaves spending now
+ * and comes back, categorised, when the card is actually used.
+ */
+async function loadOntoGiftCard(input: {
+  goal: { id: number; name: string }
+  amount: number
+  occurredAt: string
+  transactionId: number
+  note: string
+}): Promise<void> {
+  const amount = Math.round(input.amount * 100) / 100
+  if (!(amount > 0)) return
+  await db.update(transactions).set({ flow: 'transfer' }).where(eq(transactions.id, input.transactionId))
+  await db.insert(goalEntries).values({
+    goalId: input.goal.id,
+    kind: 'contribution',
+    amount: amount.toFixed(2),
+    transactionId: input.transactionId,
+    occurredAt: input.occurredAt,
+    note: input.note.slice(0, 200),
+  })
+}
+
+/**
  * Apply every pending planned split against the transactions just inserted.
  * Called at the end of `ingestStatement`, so both the manual upload and the
  * nightly sync go through it. Each rule fires at most once (the oldest matching
@@ -243,14 +270,27 @@ export async function applyPlannedSplits(insertedIds: number[]): Promise<void> {
     }
 
     if (rule.goalId != null) {
-      await payFromGoal({
-        goalId: rule.goalId,
-        amount: split,
-        occurredAt: match.txnDate,
-        categoryId: rule.categoryId,
-        note: `Paid ${rule.label}`,
-        spentOnTransactionId: targetId,
-      })
+      const [goal] = await db.select().from(goals).where(eq(goals.id, rule.goalId)).limit(1)
+      if (goal?.kind === 'giftcard') {
+        // Stored value: credit the card and take the row out of spending, rather
+        // than spending savings that were never set aside for it (§10c).
+        await loadOntoGiftCard({
+          goal,
+          amount: split,
+          occurredAt: match.txnDate,
+          transactionId: targetId,
+          note: `Loaded from ${rule.label}`,
+        })
+      } else {
+        await payFromGoal({
+          goalId: rule.goalId,
+          amount: split,
+          occurredAt: match.txnDate,
+          categoryId: rule.categoryId,
+          note: `Paid ${rule.label}`,
+          spentOnTransactionId: targetId,
+        })
+      }
     }
 
     await db
