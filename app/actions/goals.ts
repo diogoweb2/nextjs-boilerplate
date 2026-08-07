@@ -1724,6 +1724,15 @@ export async function spendFromGiftCard(input: {
   categoryId?: number | null
   merchantName?: string
   note?: string
+  /**
+   * Optional savings goal that *funds* this purchase (§10c). The card says where
+   * the money was held; this says which envelope it was earmarked from — buying
+   * camping gear on an Amazon card against the Camping goal. Omit for a plain
+   * expense. `payTransactionFromGoal` refuses `goal:` rows to stop the ledger
+   * looping, so this routes to `spendFromGoal` directly: the giftspend row is a
+   * real purchase, not goal bookkeeping.
+   */
+  payFromGoalId?: number | null
 }): Promise<void> {
   await requireAuth()
   if (await isDemoSession()) return
@@ -1760,6 +1769,22 @@ export async function spendFromGiftCard(input: {
     occurredAt,
     note: input.note?.trim() || 'Gift card spend',
   })
+
+  // Funded from an envelope: books the offsetting income + negative contribution,
+  // capped at what that goal holds. `undoGoalPayment` unwinds it like any other
+  // "paid with goal", since it hangs off `spent_on_transaction_id`.
+  if (input.payFromGoalId != null) {
+    await spendFromGoal({
+      goalId: input.payFromGoalId,
+      amount,
+      occurredAt,
+      categoryId,
+      note: `Paid ${goal.name} — ${input.note?.trim() || 'used'}`.slice(0, 200),
+      asIncome: true,
+      spentOnTransactionId: txn.id,
+    })
+  }
+
   await notifyGoalChange(goal, before, before - amount)
   revalidateGoals()
   revalidatePath('/transactions')

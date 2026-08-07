@@ -503,6 +503,7 @@ function GoalCard({
           max={goal.value}
           categories={spendCategories}
           defaultMerchant={goal.name.replace(/\s*gift\s*card\s*/i, '').trim() || goal.name}
+          fundingGoals={otherSavings}
           onSubmit={(input) => run(() => spendFromGiftCard({ goalId: goal.id, ...input }))}
         />
       )}
@@ -515,9 +516,19 @@ function GoalCard({
           }
         />
       )}
-      {panel === 'adjust' && (
-        <AdjustPanel current={goal.value} onSubmit={(newValue, note) => run(() => adjustValue({ goalId: goal.id, newValue, note }))} />
-      )}
+      {panel === 'adjust' &&
+        (isGiftCard ? (
+          <GiftCardBalancePanel
+            current={goal.value}
+            categories={spendCategories}
+            defaultMerchant={goal.name.replace(/\s*gift\s*card\s*/i, '').trim() || goal.name}
+            fundingGoals={otherSavings}
+            onSpend={(input) => run(() => spendFromGiftCard({ goalId: goal.id, ...input }))}
+            onAdjust={(newValue, note) => run(() => adjustValue({ goalId: goal.id, newValue, note }))}
+          />
+        ) : (
+          <AdjustPanel current={goal.value} onSubmit={(newValue, note) => run(() => adjustValue({ goalId: goal.id, newValue, note }))} />
+        ))}
       {panel === 'balance' && (
         <BalancePanel current={goal.value} onSubmit={(newBalance) => run(() => updateMortgageBalance({ goalId: goal.id, newBalance }))} />
       )}
@@ -784,22 +795,26 @@ function GiftCardSpendPanel({
   max,
   categories,
   defaultMerchant,
+  fundingGoals,
   onSubmit,
 }: {
   max: number
   categories: { id: number; name: string }[]
   defaultMerchant: string
+  fundingGoals: GoalView[]
   onSubmit: (input: {
     amount: number
     occurredAt: string
     categoryId: number | null
     merchantName: string
     note: string
+    payFromGoalId: number | null
   }) => void
 }) {
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
   const [categoryId, setCategoryId] = useState('')
+  const [payFromGoalId, setPayFromGoalId] = useState('')
   const [merchantName, setMerchantName] = useState(defaultMerchant)
   const [occurredAt, setOccurredAt] = useState(() => new Date().toISOString().slice(0, 10))
   const n = Number(amount)
@@ -827,6 +842,7 @@ function GiftCardSpendPanel({
           ))}
         </select>
       </div>
+      <FundedByPicker goals={fundingGoals} value={payFromGoalId} onChange={setPayFromGoalId} />
       <div className="flex items-center gap-2">
         <button
           disabled={!n || tooMuch || !merchantName.trim()}
@@ -837,6 +853,7 @@ function GiftCardSpendPanel({
               categoryId: categoryId ? Number(categoryId) : null,
               merchantName: merchantName.trim(),
               note,
+              payFromGoalId: payFromGoalId ? Number(payFromGoalId) : null,
             })
           }
           className={PRIMARY_BTN}
@@ -848,6 +865,160 @@ function GiftCardSpendPanel({
       <p className="text-[11px] text-[var(--muted)]">
         Books a real expense on that date and lowers the card. The card&apos;s original
         purchase was already moved out of spending, so nothing counts twice.
+      </p>
+    </Panel>
+  )
+}
+
+/**
+ * Which savings envelope a gift-card purchase was earmarked from. The card says
+ * where the money sat; this says which goal it was *for* — camping gear bought on
+ * an Amazon card comes out of Camping. Empty (the default) = an ordinary expense,
+ * nothing released from savings.
+ */
+function FundedByPicker({
+  goals,
+  value,
+  onChange,
+}: {
+  goals: GoalView[]
+  value: string
+  onChange: (v: string) => void
+}) {
+  const funded = goals.filter((g) => g.value > 0)
+  if (funded.length === 0) return null
+  const picked = funded.find((g) => String(g.id) === value)
+  return (
+    <label className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
+      Paid from
+      <select value={value} onChange={(e) => onChange(e.target.value)} className={INPUT_CLASS}>
+        <option value="">— nothing, it&apos;s a normal expense</option>
+        {funded.map((g) => (
+          <option key={g.id} value={g.id}>
+            {g.emoji} {g.name} ({formatCurrency(g.value)})
+          </option>
+        ))}
+      </select>
+      {picked && <span>releases the money from {picked.name}, so the month nets out</span>}
+    </label>
+  )
+}
+
+/**
+ * Reconcile a gift card against what the retailer shows. The drop since the last
+ * reading is normally *spending you never logged one purchase at a time*, so by
+ * default it books a single expense for the whole difference (§10c) instead of a
+ * silent adjustment — same call as "Log a purchase", one lump. Untick to treat it
+ * as a pure correction (a balance that was wrong, not money spent).
+ */
+function GiftCardBalancePanel({
+  current,
+  categories,
+  defaultMerchant,
+  fundingGoals,
+  onSpend,
+  onAdjust,
+}: {
+  current: number
+  categories: { id: number; name: string }[]
+  defaultMerchant: string
+  fundingGoals: GoalView[]
+  onSpend: (input: {
+    amount: number
+    occurredAt: string
+    categoryId: number | null
+    merchantName: string
+    note: string
+    payFromGoalId: number | null
+  }) => void
+  onAdjust: (newValue: number, note: string) => void
+}) {
+  const [value, setValue] = useState(String(Math.round(current * 100) / 100))
+  const [asSpending, setAsSpending] = useState(true)
+  const [note, setNote] = useState('')
+  const [payFromGoalId, setPayFromGoalId] = useState('')
+  const [merchantName, setMerchantName] = useState(defaultMerchant)
+  const [categoryId, setCategoryId] = useState(
+    () => String(categories.find((c) => /shopping/i.test(c.name))?.id ?? '')
+  )
+  const [occurredAt, setOccurredAt] = useState(() => new Date().toISOString().slice(0, 10))
+
+  const next = Number(value)
+  const valid = value.trim() !== '' && Number.isFinite(next) && next >= 0
+  const drop = Math.round((current - next) * 100) / 100
+  // Only a *decrease* can be spending — a higher balance means the card was topped
+  // up or misread, which is an adjustment either way.
+  const spends = asSpending && valid && drop > 0.005
+
+  return (
+    <Panel column>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-[var(--muted)]">New balance</span>
+        <input type="number" value={value} onChange={(e) => setValue(e.target.value)} className={`${INPUT_CLASS} w-32`} />
+        <span className="text-xs text-[var(--muted)]">
+          was {formatCurrency(current)}
+          {valid && drop > 0.005 && ` — ${formatCurrency(drop)} used`}
+        </span>
+      </div>
+      <label className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
+        <input type="checkbox" checked={asSpending} onChange={(e) => setAsSpending(e.target.checked)} />
+        log the difference as spending
+      </label>
+      {spends && (
+        <>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
+            Payee
+            <input type="text" value={merchantName} onChange={(e) => setMerchantName(e.target.value)} className={`${INPUT_CLASS} w-40`} />
+            category
+            <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className={INPUT_CLASS}>
+              <option value="">Uncategorized</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <input type="date" value={occurredAt} onChange={(e) => setOccurredAt(e.target.value)} className={INPUT_CLASS} />
+            <input
+              type="text"
+              placeholder="What was it? (default: multiple items)"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              className={`${INPUT_CLASS} min-w-0 flex-1`}
+            />
+          </div>
+          <FundedByPicker goals={fundingGoals} value={payFromGoalId} onChange={setPayFromGoalId} />
+        </>
+      )}
+      {!spends && (
+        <input type="text" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} className={INPUT_CLASS} />
+      )}
+      <div className="flex items-center gap-2">
+        <button
+          disabled={!valid || (valid && Math.abs(drop) < 0.005)}
+          onClick={() =>
+            spends
+              ? onSpend({
+                  amount: drop,
+                  occurredAt,
+                  categoryId: categoryId ? Number(categoryId) : null,
+                  merchantName: merchantName.trim() || defaultMerchant,
+                  note: note.trim() || 'multiple items',
+                  payFromGoalId: payFromGoalId ? Number(payFromGoalId) : null,
+                })
+              : onAdjust(next, note)
+          }
+          className={PRIMARY_BTN}
+        >
+          {spends ? `Log ${formatCurrency(drop)} as spending` : 'Save'}
+        </button>
+      </div>
+      <p className="text-[11px] text-[var(--muted)]">
+        {spends
+          ? 'Books one real expense for the whole difference, so you don’t have to log each item. The card’s original purchase already left spending — nothing counts twice.'
+          : 'Corrects the balance only — no expense is booked.'}
       </p>
     </Panel>
   )

@@ -84,6 +84,8 @@ function Form({
 }) {
   const set = (patch: Partial<Draft>) => setDraft({ ...draft, ...patch })
   const valid = toInput(draft, options) !== null
+  const targetsGiftCard =
+    options.goals.find((g) => String(g.id) === draft.goalId)?.kind === 'giftcard'
 
   return (
     <div className="flex flex-col gap-3">
@@ -154,19 +156,27 @@ function Form({
           <label className={LABEL_CLASS} htmlFor="ps-cat">
             Category
           </label>
-          <select
-            id="ps-cat"
-            className={INPUT_CLASS}
-            value={draft.categoryId}
-            onChange={(e) => set({ categoryId: e.target.value })}
-          >
-            <option value="">Keep the merchant&apos;s category</option>
-            {options.categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          {/* Loading a gift card is an internal move — the category is decided
+              later, when the balance is actually spent (§10c). */}
+          {targetsGiftCard ? (
+            <p className={`${INPUT_CLASS} text-[var(--muted)]`}>
+              Transfer — set when you spend the card
+            </p>
+          ) : (
+            <select
+              id="ps-cat"
+              className={INPUT_CLASS}
+              value={draft.categoryId}
+              onChange={(e) => set({ categoryId: e.target.value })}
+            >
+              <option value="">Keep the merchant&apos;s category</option>
+              {options.categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
         <div>
           <label className={LABEL_CLASS} htmlFor="ps-goal">

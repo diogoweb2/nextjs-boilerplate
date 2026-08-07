@@ -108,6 +108,16 @@ async function payFromGoal(input: {
   })
 }
 
+/** The neutral `Transfer` category, if it exists — internal moves aren't spending. */
+async function transferCategoryId(): Promise<number | null> {
+  const [row] = await db
+    .select({ id: categories.id })
+    .from(categories)
+    .where(ilike(categories.name, 'Transfer'))
+    .limit(1)
+  return row?.id ?? null
+}
+
 /**
  * Credit a gift card with the carved-off amount and flip that row to an internal
  * transfer — the auth-free mirror of `loadGiftCard` (BUSINESS_RULES.md §10c).
@@ -124,7 +134,16 @@ async function loadOntoGiftCard(input: {
 }): Promise<void> {
   const amount = Math.round(input.amount * 100) / 100
   if (!(amount > 0)) return
-  await db.update(transactions).set({ flow: 'transfer' }).where(eq(transactions.id, input.transactionId))
+  // Unlike `loadGiftCard` — which preserves the imported row's category so its undo
+  // is lossless — this row is *created* by the rule, so there is nothing to
+  // preserve. The rule's category would be a guess at what the card gets spent on
+  // later; the real category is assigned then, by `spendFromGiftCard`. Book it as
+  // the internal move it is.
+  const categoryId = await transferCategoryId()
+  await db
+    .update(transactions)
+    .set({ flow: 'transfer', ...(categoryId != null ? { categoryId } : {}) })
+    .where(eq(transactions.id, input.transactionId))
   await db.insert(goalEntries).values({
     goalId: input.goal.id,
     kind: 'contribution',

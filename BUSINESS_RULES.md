@@ -908,6 +908,26 @@ not savings you build *up*.
 Net effect: the month you buy the card is **neutral**, and the months you use it carry the spending,
 categorised properly. Nothing is counted twice.
 
+**Funded from a savings goal** (optional, both spend paths). A card says *where the money sat*, not
+*what it was for*. Picking a **Paid from** goal on a gift-card spend also releases that amount from
+the envelope: `spendFromGiftCard` calls `spendFromGoal` with `spentOnTransactionId` = the new
+expense, so it books the same negative contribution + offsetting income row as any "Pay with goal",
+capped at what the goal holds, and `undoGoalPayment` unwinds it identically. Camping gear bought on
+an Amazon card comes out of **Camping**; the month nets to zero because the money was already
+recognised when it landed in the goal. Left empty (**the default**) it is an ordinary expense.
+Note this cannot go through `payTransactionFromGoal` — that refuses `goal:` external ids to stop the
+ledger looping — hence the direct call: a `giftspend` row is a real purchase, not goal bookkeeping.
+
+**Catching up in one go** (card → **Set balance**). Logging every till receipt is unrealistic, so the
+gift-card balance panel treats the **drop** since the last reading as spending by default: type the
+balance the retailer now shows and it books **one** expense for the difference — same
+`spendFromGiftCard` call as "Log a purchase", one lump — under the payee and category you pick
+(pre-selected to **Shopping** when such a category exists), noted `multiple items` unless you say
+what it was. "$400 left, so $100 went to Shopping" needs one entry, not five.
+Untick **log the difference as spending** to get the old behaviour — a plain `adjustValue`
+correction with no expense, for when the balance was simply *wrong* rather than *spent*. A balance
+that went **up** is always an adjustment (nothing was consumed); use **Add money** for a real top-up.
+
 **Deliberate exclusions.** A gift card is money already gone, not money put aside, so it is never
 savings: it is left out of `savingsGoalIds` ("invested this/last month", the Goals hero, the
 50/30/20 savings count, `monthReport`/`yearReport` tracked goals), out of the **"Pay with goal"**
@@ -1961,7 +1981,11 @@ a whole untouched charge can be consumed exactly. Then, per rule:
   Identical to `payTransactionFromGoal`, so the Activity row shows "paid from <goal>" with an
   undo. Capped at what the goal holds; skips the optional per-goal push.
 - **Gift card set** (`kind = 'giftcard'`, `loadOntoGiftCard`) → the opposite: the carved-out row
-  is flipped to `flow = 'transfer'` and the card is **credited** with the amount. This is the
+  is flipped to `flow = 'transfer'`, **recategorised to `Transfer`** (the rule's own category is
+  ignored, and the form hides the field — this row is an internal move, and what the money was
+  really for is decided later by `spendFromGiftCard`; unlike `loadGiftCard` there is no imported
+  category to preserve, because the row was created by the rule), and the card is **credited**
+  with the amount. This is the
   $500-Amazon-card-inside-the-Metro-bill case end to end — the money leaves spending now and
   comes back, categorised, when the card is actually used (§10c). Spending savings for it would
   be wrong: nothing was ever set aside.
