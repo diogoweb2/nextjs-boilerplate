@@ -8,6 +8,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm'
+import { alias } from 'drizzle-orm/pg-core'
 import { db } from '@/db'
 import { plannedSplits, merchants, categories, goals } from '@/db/schema'
 import { requireAuth } from '@/app/lib/auth-guard'
@@ -18,11 +19,17 @@ export type PlannedSplitRow = {
   id: number
   merchantId: number | null
   merchantLabel: string
+  /** 'contains' = merchantLabel is a fragment of the posted payee/description. */
+  matchMode: 'exact' | 'contains'
   minAmount: number | null
-  splitAmount: number
+  /** Null while a `useGoalBalance` rule is still waiting — the goal decides. */
+  splitAmount: number | null
+  useGoalBalance: boolean
   label: string
   categoryId: number | null
   categoryName: string | null
+  remainderCategoryId: number | null
+  remainderCategoryName: string | null
   goalId: number | null
   goalName: string | null
   goalEmoji: string | null
@@ -48,31 +55,40 @@ function revalidateAll() {
   revalidatePath('/goals')
 }
 
+/** Second join onto categories, for the "what's left" category. */
+const remainderCategories = alias(categories, 'remainder_categories')
+
 export async function loadPlannedSplits(): Promise<PlannedSplitRow[]> {
   if (await isDemoSession()) return []
   const rows = await db
     .select({
       r: plannedSplits,
       categoryName: categories.name,
+      remainderCategoryName: remainderCategories.name,
       goalName: goals.name,
       goalEmoji: goals.emoji,
       goalKind: goals.kind,
     })
     .from(plannedSplits)
     .leftJoin(categories, eq(plannedSplits.categoryId, categories.id))
+    .leftJoin(remainderCategories, eq(plannedSplits.remainderCategoryId, remainderCategories.id))
     .leftJoin(goals, eq(plannedSplits.goalId, goals.id))
     // 'pending' > 'applied' alphabetically, so desc puts the live rules on top.
     .orderBy(desc(plannedSplits.status), desc(plannedSplits.createdAt))
 
-  return rows.map(({ r, categoryName, goalName, goalEmoji, goalKind }) => ({
+  return rows.map(({ r, categoryName, remainderCategoryName, goalName, goalEmoji, goalKind }) => ({
     id: r.id,
     merchantId: r.merchantId,
     merchantLabel: r.merchantLabel,
+    matchMode: r.matchMode,
     minAmount: r.minAmount != null ? Number(r.minAmount) : null,
-    splitAmount: Number(r.splitAmount),
+    splitAmount: r.splitAmount != null ? Number(r.splitAmount) : null,
+    useGoalBalance: r.useGoalBalance,
     label: r.label,
     categoryId: r.categoryId,
     categoryName: categoryName ?? null,
+    remainderCategoryId: r.remainderCategoryId,
+    remainderCategoryName: remainderCategoryName ?? null,
     goalId: r.goalId,
     goalName: goalName ?? null,
     goalEmoji: goalEmoji ?? null,
@@ -106,7 +122,8 @@ export type PlannedSplitAlert = {
   id: number
   label: string
   merchantLabel: string
-  splitAmount: number
+  /** Null only for a still-waiting "use the goal's balance" rule. */
+  splitAmount: number | null
   goalName: string | null
   status: 'applied' | 'stale'
   appliedTransactionId: number | null
@@ -141,7 +158,7 @@ export async function loadPlannedSplitAlerts(): Promise<PlannedSplitAlert[]> {
       id: r.id,
       label: r.label,
       merchantLabel: r.merchantLabel,
-      splitAmount: Number(r.splitAmount),
+      splitAmount: r.splitAmount != null ? Number(r.splitAmount) : null,
       goalName: goalName ?? null,
       status,
       appliedTransactionId: r.appliedTransactionId,
@@ -154,15 +171,22 @@ export async function loadPlannedSplitAlerts(): Promise<PlannedSplitAlert[]> {
 export type PlannedSplitInput = {
   merchantLabel: string
   merchantId?: number | null
+  matchMode?: 'exact' | 'contains'
   minAmount?: number | null
-  splitAmount: number
+  /** Ignored (and cleared) when `useGoalBalance` is set. */
+  splitAmount?: number | null
+  useGoalBalance?: boolean
   label: string
   categoryId?: number | null
+  remainderCategoryId?: number | null
   goalId?: number | null
 }
 
 /** Resolve the typed payee to an existing merchant (case-insensitive) if there is one. */
 async function resolveMerchant(input: PlannedSplitInput): Promise<number | null> {
+  // A "contains" rule is deliberately not pinned to one payee — the whole point
+  // is that the posted name ("Costco Tire", "COSTCO.CA") isn't known yet.
+  if (input.matchMode === 'contains') return null
   if (input.merchantId != null && Number.isInteger(input.merchantId)) {
     const [m] = await db
       .select({ id: merchants.id })
@@ -181,35 +205,61 @@ async function resolveMerchant(input: PlannedSplitInput): Promise<number | null>
   return byName?.id ?? null
 }
 
-function clean(input: PlannedSplitInput) {
-  const splitAmount = Math.round(Math.abs(input.splitAmount) * 100) / 100
+/**
+ * "Use the goal's balance" only makes sense for a savings goal you spend down —
+ * a gift card is credited by a split, never drained by one.
+ */
+async function usesGoalBalance(input: PlannedSplitInput): Promise<boolean> {
+  if (!input.useGoalBalance || input.goalId == null) return false
+  const [goal] = await db
+    .select({ kind: goals.kind })
+    .from(goals)
+    .where(eq(goals.id, input.goalId))
+    .limit(1)
+  return goal?.kind === 'savings'
+}
+
+function clean(input: PlannedSplitInput, useGoalBalance: boolean) {
+  const raw = input.splitAmount
+  const splitAmount =
+    raw == null || !Number.isFinite(raw) ? null : Math.round(Math.abs(raw) * 100) / 100
   const min =
     input.minAmount == null || !Number.isFinite(input.minAmount) || input.minAmount <= 0
       ? null
       : Math.round(Math.abs(input.minAmount) * 100) / 100
   return {
     merchantLabel: input.merchantLabel.trim(),
+    matchMode: input.matchMode === 'contains' ? ('contains' as const) : ('exact' as const),
     // numeric columns are read/written as strings by drizzle.
     minAmount: min != null ? min.toFixed(2) : null,
-    splitAmount: splitAmount.toFixed(2),
+    // The goal decides the amount at import time, so don't keep a stale number.
+    splitAmount: useGoalBalance || splitAmount == null ? null : splitAmount.toFixed(2),
+    useGoalBalance,
     label: input.label.trim(),
     categoryId: input.categoryId ?? null,
+    remainderCategoryId: input.remainderCategoryId ?? null,
     goalId: input.goalId ?? null,
   }
 }
 
+/** A rule needs a place, a name, and either an amount or a goal to drain. */
+function valid(v: ReturnType<typeof clean>): boolean {
+  if (!v.merchantLabel || !v.label) return false
+  return v.useGoalBalance ? v.goalId != null : Number(v.splitAmount) > 0
+}
+
 export async function createPlannedSplit(input: PlannedSplitInput): Promise<void> {
   await requireAuth()
-  const v = clean(input)
-  if (!v.merchantLabel || !v.label || !(Number(v.splitAmount) > 0)) return
+  const v = clean(input, await usesGoalBalance(input))
+  if (!valid(v)) return
   await db.insert(plannedSplits).values({ ...v, merchantId: await resolveMerchant(input) })
   revalidateAll()
 }
 
 export async function updatePlannedSplit(id: number, input: PlannedSplitInput): Promise<void> {
   await requireAuth()
-  const v = clean(input)
-  if (!v.merchantLabel || !v.label || !(Number(v.splitAmount) > 0)) return
+  const v = clean(input, await usesGoalBalance(input))
+  if (!valid(v)) return
   // Editing a rule puts it back on watch: an applied rule that was fixed should
   // fire again on the next import rather than stay a stale confirmation.
   await db

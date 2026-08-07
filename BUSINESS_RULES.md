@@ -1956,10 +1956,13 @@ bar). Table `planned_splits`; CRUD in `app/actions/planned-splits.ts`; matching 
 | Field | Meaning |
 | --- | --- |
 | Place | Merchant to watch. Picked from the payee list (`merchant_id`) or typed (`merchant_label`), so a rule can name a merchant that doesn't exist yet — matching falls back to a case-insensitive name compare. |
-| Only if more than | Optional floor: ignore smaller charges at that place. Defaults to the split amount. |
-| Split off | The amount to carve out. |
+| Match part of the name | `match_mode = 'contains'`: the text only has to appear in the payee **or** the raw statement line, for when the posted name is unknown ("Costco" catches "COSTCO TIRE #12", "Costco.ca"). A contains rule is never pinned to a `merchant_id`. |
+| Only if more than | Optional floor: ignore smaller charges at that place. Defaults to the split amount (0 for a goal-balance rule, so pair it with a floor to stay safe). |
+| Split off | The amount to carve out. Null when *Use the goal's balance* is on. |
+| Use the goal's balance | `use_goal_balance`: the amount is decided at import time — the savings goal's whole current value, capped by what the charge still has. Under-funded goal → it pays what it can and the rest stays on the bill. Savings goals only (a gift card is credited by a split, never drained). On apply, the amount actually taken is written back to `split_amount` so the confirmation can name it. |
 | Call it | Name of the carved-out part (merchant + note), e.g. "Amazon gift card". |
 | Category | Category for the carved-out part. Blank keeps the merchant's. |
+| The rest goes to | Optional `remainder_category_id`: category for what stays on the parent charge, because the leftover often isn't what the payee usually means either (the $200 left of a $1,200 Costco tire bill is *Auto*, not *Groceries*). Only applied when there **is** a remainder. |
 | Goal or gift card | Optional. A **savings goal** pays for the carved-out part; a **gift card** (§10c) is *credited* by it instead — the split's own row becomes the card's load. |
 
 ### Matching (end of `ingestStatement`, after the amount rules)
@@ -1971,6 +1974,12 @@ shirt, each with its own category and its own (or no) goal. Rules are applied ol
 each peels off what the charge still has **left**; the "only if more than" floor is always read
 against the charge **as imported**. A charge already partly split must keep a remainder, so only
 a whole untouched charge can be consumed exactly. Then, per rule:
+
+**Worked example — $1,200 of tires at Costco, $1,000 of it from the Car goal.** Rule 1: place
+"Costco" *matching part of the name*, over $500, use the Car goal's balance, call it "Tires",
+category Auto, rest → Auto. That alone gives a $1,000 Auto row paid from the goal and leaves
+$200 of Auto on the bill. Want the leftover split too? Add rule 2 on the same bill for $100 →
+Auto and set rule 1's "rest goes to" to Groceries instead.
 
 - **Remainder > 0** → peel the split amount into a child transaction (`split_parent_id`,
   reusing an existing merchant with that name, no `merchant_rule` — it stays a one-off) and

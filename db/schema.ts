@@ -998,10 +998,24 @@ export const plannedSplits = pgTable('planned_splits', {
   // a rule written before the merchant exists still fires once it is created.
   merchantId: integer('merchant_id').references(() => merchants.id, { onDelete: 'set null' }),
   merchantLabel: text('merchant_label').notNull(),
+  // 'contains' matches any payee (or raw statement line) holding the text, for
+  // when the exact posted name is unknown — "Costco" catches "COSTCO TIRE #12".
+  matchMode: text('match_mode', { enum: ['exact', 'contains'] })
+    .notNull()
+    .default('exact'),
   minAmount: numeric('min_amount', { precision: 10, scale: 2 }),
-  splitAmount: numeric('split_amount', { precision: 10, scale: 2 }).notNull(),
+  // Null only when useGoalBalance is set — then the goal's balance is the amount.
+  splitAmount: numeric('split_amount', { precision: 10, scale: 2 }),
+  // "Use whatever the goal has": carve off the goal's whole balance (capped by
+  // the charge) instead of a number decided before the price was known.
+  useGoalBalance: boolean('use_goal_balance').notNull().default(false),
   label: text('label').notNull(),
   categoryId: integer('category_id').references(() => categories.id, { onDelete: 'set null' }),
+  // Category for what's LEFT on the bill — the Costco tire charge is Auto, not
+  // the Groceries the payee would normally give it.
+  remainderCategoryId: integer('remainder_category_id').references(() => categories.id, {
+    onDelete: 'set null',
+  }),
   goalId: integer('goal_id').references(() => goals.id, { onDelete: 'set null' }),
   status: text('status', { enum: ['pending', 'applied'] })
     .notNull()

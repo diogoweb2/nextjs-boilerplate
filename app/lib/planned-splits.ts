@@ -30,10 +30,30 @@ import {
 } from '@/db/schema'
 import { savingsValue } from '@/app/lib/goals'
 
-/** A rule matches a charge at or above this; defaults to the split amount. */
-function threshold(rule: { minAmount: string | null; splitAmount: string }): number {
+/**
+ * A rule matches a charge at or above this; defaults to the split amount. A
+ * "use the goal's balance" rule has no split amount of its own, so any charge at
+ * that place qualifies unless a floor was typed.
+ */
+function threshold(rule: { minAmount: string | null; splitAmount: string | null }): number {
   const min = rule.minAmount != null ? Number(rule.minAmount) : NaN
-  return Number.isFinite(min) && min > 0 ? min : Number(rule.splitAmount)
+  if (Number.isFinite(min) && min > 0) return min
+  const split = rule.splitAmount != null ? Number(rule.splitAmount) : NaN
+  return Number.isFinite(split) && split > 0 ? split : 0
+}
+
+/** Current value of a savings goal, or 0 for anything else / an empty goal. */
+async function savingsBalance(goalId: number): Promise<number> {
+  const [goal] = await db.select().from(goals).where(eq(goals.id, goalId)).limit(1)
+  if (!goal || goal.kind !== 'savings') return 0
+  const entries = await db
+    .select({ kind: goalEntries.kind, amount: goalEntries.amount, occurredAt: goalEntries.occurredAt })
+    .from(goalEntries)
+    .where(eq(goalEntries.goalId, goal.id))
+  const value = savingsValue(
+    entries.map((e) => ({ kind: e.kind, amount: Number(e.amount), occurredAt: e.occurredAt }))
+  )
+  return value > 0 ? value : 0
 }
 
 /**
@@ -205,28 +225,47 @@ export async function applyPlannedSplits(insertedIds: number[]): Promise<void> {
   const left = new Map<number, number>(candidates.map((r) => [r.id, Number(r.amount)]))
 
   for (const rule of rules) {
-    const split = Number(rule.splitAmount)
-    if (!(split > 0)) continue
     const min = threshold(rule)
     const wanted = rule.merchantLabel.trim().toLowerCase()
 
-    const match = candidates.find((r) => {
-      const sameMerchant =
-        rule.merchantId != null
-          ? r.merchantId === rule.merchantId
-          : r.merchantName.trim().toLowerCase() === wanted
-      if (!sameMerchant) return false
-      // The "only if more than" floor reads the charge as it was imported; what
-      // is still available to peel off is what's left after earlier rules.
-      if (Number(r.amount) < min - 0.005) return false
+    // "Use whatever the goal has" resolves its amount at import time, from the
+    // goal's balance now — capped by the charge, so an under-funded goal simply
+    // pays what it can and the rest stays on the bill.
+    const goalCap =
+      rule.useGoalBalance && rule.goalId != null ? await savingsBalance(rule.goalId) : 0
+    const fixed = rule.splitAmount != null ? Number(rule.splitAmount) : NaN
+    if (rule.useGoalBalance ? !(goalCap > 0) : !(fixed > 0)) continue
+
+    /** What this rule would peel off `r`; 0 when it can't apply. */
+    const take = (r: (typeof candidates)[number]): number => {
       const available = left.get(r.id) ?? 0
       // A charge already partly split must keep a remainder — only a whole,
       // untouched charge can be consumed exactly (relabelled in place below).
       const untouched = Math.abs(available - Number(r.amount)) < 0.005
-      return untouched ? available >= split - 0.005 : available - split > 0.0049
+      const cap = untouched ? available : Math.round((available - 0.01) * 100) / 100
+      if (rule.useGoalBalance) return Math.max(0, Math.round(Math.min(goalCap, cap) * 100) / 100)
+      return fixed <= cap + 0.005 ? fixed : 0
+    }
+
+    const match = candidates.find((r) => {
+      const sameMerchant =
+        rule.matchMode === 'contains'
+          ? // The posted name is unknown ahead of time ("COSTCO TIRE #12"), so a
+            // fragment matches either the tidied payee or the raw statement line.
+            r.merchantName.toLowerCase().includes(wanted) ||
+            (r.rawDescription ?? '').toLowerCase().includes(wanted)
+          : rule.merchantId != null
+            ? r.merchantId === rule.merchantId
+            : r.merchantName.trim().toLowerCase() === wanted
+      if (!sameMerchant) return false
+      // The "only if more than" floor reads the charge as it was imported; what
+      // is still available to peel off is what's left after earlier rules.
+      if (Number(r.amount) < min - 0.005) return false
+      return take(r) > 0.0049
     })
     if (!match) continue
 
+    const split = take(match)
     const total = left.get(match.id)!
     const remainder = Math.round((total - split) * 100) / 100
     left.set(match.id, remainder)
@@ -283,7 +322,12 @@ export async function applyPlannedSplits(insertedIds: number[]): Promise<void> {
 
       await db
         .update(transactions)
-        .set({ amount: remainder.toFixed(2) })
+        .set({
+          amount: remainder.toFixed(2),
+          // What's left is often not what the payee usually means either — the
+          // rest of the Costco tire bill is Auto, not Groceries.
+          ...(rule.remainderCategoryId != null ? { categoryId: rule.remainderCategoryId } : {}),
+        })
         .where(eq(transactions.id, match.id))
       targetId = child.id
     }
@@ -314,7 +358,14 @@ export async function applyPlannedSplits(insertedIds: number[]): Promise<void> {
 
     await db
       .update(plannedSplits)
-      .set({ status: 'applied', appliedAt: new Date(), appliedTransactionId: targetId })
+      .set({
+        status: 'applied',
+        appliedAt: new Date(),
+        appliedTransactionId: targetId,
+        // Record what a "use the goal's balance" rule actually took, so the
+        // dashboard confirmation can name the amount.
+        splitAmount: split.toFixed(2),
+      })
       .where(and(eq(plannedSplits.id, rule.id), eq(plannedSplits.status, 'pending')))
   }
 }

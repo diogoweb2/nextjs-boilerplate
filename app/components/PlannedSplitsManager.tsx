@@ -20,47 +20,68 @@ const LABEL_CLASS = 'mb-1 block text-xs font-medium text-[var(--muted)]'
 
 type Draft = {
   merchantLabel: string
+  matchMode: 'exact' | 'contains'
   minAmount: string
   splitAmount: string
+  useGoalBalance: boolean
   label: string
   categoryId: string
+  remainderCategoryId: string
   goalId: string
 }
 
 const EMPTY: Draft = {
   merchantLabel: '',
+  matchMode: 'exact',
   minAmount: '',
   splitAmount: '',
+  useGoalBalance: false,
   label: '',
   categoryId: '',
+  remainderCategoryId: '',
   goalId: '',
 }
 
 function draftFrom(row: PlannedSplitRow): Draft {
   return {
     merchantLabel: row.merchantLabel,
+    matchMode: row.matchMode,
     minAmount: row.minAmount != null ? String(row.minAmount) : '',
-    splitAmount: String(row.splitAmount),
+    splitAmount: row.splitAmount != null ? String(row.splitAmount) : '',
+    useGoalBalance: row.useGoalBalance,
     label: row.label,
     categoryId: row.categoryId != null ? String(row.categoryId) : '',
+    remainderCategoryId: row.remainderCategoryId != null ? String(row.remainderCategoryId) : '',
     goalId: row.goalId != null ? String(row.goalId) : '',
   }
+}
+
+/** The picked goal, when it's a savings goal that can be drained by the split. */
+function savingsGoal(d: Draft, options: PlannedSplitOptions) {
+  const goal = options.goals.find((g) => String(g.id) === d.goalId)
+  return goal?.kind === 'savings' ? goal : null
 }
 
 function toInput(d: Draft, options: PlannedSplitOptions): PlannedSplitInput | null {
   const merchantLabel = d.merchantLabel.trim()
   const label = d.label.trim()
   const splitAmount = Number(d.splitAmount)
-  if (!merchantLabel || !label || !Number.isFinite(splitAmount) || splitAmount <= 0) return null
+  const hasAmount = Number.isFinite(splitAmount) && splitAmount > 0
+  // Draining a goal replaces the typed amount — the price isn't known yet.
+  const useGoalBalance = d.useGoalBalance && savingsGoal(d, options) !== null
+  if (!merchantLabel || !label || (!hasAmount && !useGoalBalance)) return null
   const min = Number(d.minAmount)
   return {
     merchantLabel,
     merchantId:
       options.merchants.find((m) => m.name.toLowerCase() === merchantLabel.toLowerCase())?.id ?? null,
+    matchMode: d.matchMode,
     minAmount: d.minAmount.trim() && Number.isFinite(min) && min > 0 ? min : null,
-    splitAmount,
+    splitAmount: useGoalBalance ? null : splitAmount,
+    useGoalBalance,
     label,
     categoryId: d.categoryId ? Number(d.categoryId) : null,
+    remainderCategoryId: d.remainderCategoryId ? Number(d.remainderCategoryId) : null,
     goalId: d.goalId ? Number(d.goalId) : null,
   }
 }
@@ -86,6 +107,8 @@ function Form({
   const valid = toInput(draft, options) !== null
   const targetsGiftCard =
     options.goals.find((g) => String(g.id) === draft.goalId)?.kind === 'giftcard'
+  const goal = savingsGoal(draft, options)
+  const usesGoal = goal !== null && draft.useGoalBalance
 
   return (
     <div className="flex flex-col gap-3">
@@ -107,6 +130,14 @@ function Form({
               <option key={m.id} value={m.name} />
             ))}
           </datalist>
+          <label className="mt-1.5 flex items-center gap-1.5 text-xs text-[var(--muted)]">
+            <input
+              type="checkbox"
+              checked={draft.matchMode === 'contains'}
+              onChange={(e) => set({ matchMode: e.target.checked ? 'contains' : 'exact' })}
+            />
+            Match any payee containing this — “Costco” also catches “Costco Tire”
+          </label>
         </div>
         <div>
           <label className={LABEL_CLASS} htmlFor="ps-min">
@@ -136,9 +167,20 @@ function Form({
             step="0.01"
             className={INPUT_CLASS}
             placeholder="500"
-            value={draft.splitAmount}
+            disabled={usesGoal}
+            value={usesGoal ? '' : draft.splitAmount}
             onChange={(e) => set({ splitAmount: e.target.value })}
           />
+          {goal && (
+            <label className="mt-1.5 flex items-center gap-1.5 text-xs text-[var(--muted)]">
+              <input
+                type="checkbox"
+                checked={draft.useGoalBalance}
+                onChange={(e) => set({ useGoalBalance: e.target.checked })}
+              />
+              Use whatever {goal.name} has (or the whole charge, if that&apos;s smaller)
+            </label>
+          )}
         </div>
         <div>
           <label className={LABEL_CLASS} htmlFor="ps-label">
@@ -197,6 +239,24 @@ function Form({
             ))}
           </select>
         </div>
+        <div>
+          <label className={LABEL_CLASS} htmlFor="ps-rest">
+            The rest of the bill goes to
+          </label>
+          <select
+            id="ps-rest"
+            className={INPUT_CLASS}
+            value={draft.remainderCategoryId}
+            onChange={(e) => set({ remainderCategoryId: e.target.value })}
+          >
+            <option value="">Leave it as it came in</option>
+            {options.categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
       <div className="flex items-center gap-2">
         <button
@@ -220,7 +280,13 @@ function Form({
 }
 
 function describe(row: PlannedSplitRow): string {
+  const place = row.matchMode === 'contains' ? `charge with “${row.merchantLabel}” in it` : `${row.merchantLabel} charge`
   const min = row.minAmount != null ? ` over ${formatCurrency(row.minAmount)}` : ''
+  const amount =
+    // An applied goal-balance rule records what it actually took.
+    row.splitAmount != null && (!row.useGoalBalance || row.status === 'applied')
+      ? formatCurrency(row.splitAmount)
+      : 'whatever the goal holds'
   const cat = row.categoryName ? ` → ${row.categoryName}` : ''
   const goal = row.goalName
     ? (row.goalKind === 'giftcard'
@@ -228,7 +294,8 @@ function describe(row: PlannedSplitRow): string {
         : `, paid from ${row.goalEmoji ?? ''} ${row.goalName}`
       ).trimEnd()
     : ''
-  return `Next ${row.merchantLabel} charge${min}: split off ${formatCurrency(row.splitAmount)} as “${row.label}”${cat}${goal}.`
+  const rest = row.remainderCategoryName ? ` The rest → ${row.remainderCategoryName}.` : ''
+  return `Next ${place}${min}: split off ${amount} as “${row.label}”${cat}${goal}.${rest}`
 }
 
 /**
@@ -265,7 +332,9 @@ export function PlannedSplitsManager({
           Bought something that will post under the wrong name — a gift card at the supermarket,
           a friend&apos;s share on your card? Write it down here <em>before</em> the charge shows
           up and the next import will split it for you. Add one rule per thing — several rules
-          can come out of the same bill, each with its own category and goal.
+          can come out of the same bill, each with its own category and goal. Don&apos;t know the
+          exact payee or the exact price? Match part of the name, and let a goal pay whatever it
+          holds.
         </p>
         <Form
           draft={draft}
@@ -348,7 +417,12 @@ export function PlannedSplitsManager({
                             setDraft({
                               ...EMPTY,
                               merchantLabel: row.merchantLabel,
+                              matchMode: row.matchMode,
                               minAmount: row.minAmount != null ? String(row.minAmount) : '',
+                              remainderCategoryId:
+                                row.remainderCategoryId != null
+                                  ? String(row.remainderCategoryId)
+                                  : '',
                             })
                             document
                               .getElementById('ps-place')

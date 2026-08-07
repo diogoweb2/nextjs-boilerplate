@@ -15,7 +15,8 @@ import { dismissPlannedSplitAlert, type PlannedSplitAlert } from '@/app/actions/
 function line(a: PlannedSplitAlert): string {
   if (a.status === 'applied') {
     const goal = a.goalName ? `, paid from ${a.goalName}` : ''
-    return `Split ${formatCurrency(a.splitAmount)} out of your ${a.merchantLabel} charge as “${a.label}”${goal}.`
+    const amount = a.splitAmount != null ? `${formatCurrency(a.splitAmount)} ` : ''
+    return `Split ${amount}out of your ${a.merchantLabel} charge as “${a.label}”${goal}.`
   }
   return `Still waiting on a ${a.merchantLabel} charge for “${a.label}” — ${a.waitingDays} days and nothing matched.`
 }
