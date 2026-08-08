@@ -193,17 +193,24 @@ export async function loadSurplusPrompts(): Promise<SurplusPrompt[]> {
   // With Net-Zero, only the most recent month prompts; otherwise all stack.
   const months = hasNetZero ? open.slice(0, 1) : open
   const eligibleIds = elig.map((g) => g.id)
+  // Auto-contribute switches off once the goal hits its target — no target means
+  // the rule never self-disables.
+  const activeAuto = (g: (typeof elig)[number]): number | null => {
+    const target = g.targetAmount === null ? null : Number(g.targetAmount)
+    if (target !== null && (balances.get(g.id) ?? 0) >= target) return null
+    return g.autoContribute === null ? null : Number(g.autoContribute)
+  }
   // Priority order (= goal sortOrder, already applied) with the auto-contribute rule.
   const priority = elig.map((g) => ({
     id: g.id,
-    autoContribute: g.autoContribute === null ? null : Number(g.autoContribute),
+    autoContribute: activeAuto(g),
   }))
   const goalsView = elig.map((g) => ({
     id: g.id,
     name: g.name,
     emoji: g.emoji,
     color: g.color,
-    autoContribute: g.autoContribute === null ? null : Number(g.autoContribute),
+    autoContribute: activeAuto(g),
     saved: balances.get(g.id) ?? 0,
     target: g.targetAmount === null ? null : Number(g.targetAmount),
   }))

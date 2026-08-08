@@ -1039,6 +1039,11 @@ surplus isn't shown twice with two different asks.
   short, same as the partial-fund case above). The owner can still add *more* than the rule on any
   given month; the only way to give *less* is to lower or clear the `autoContribute` value on the goal
   itself (`GoalsManager` edit panel).
+- **Self-disables at target**: a goal with a `targetAmount` stops being auto-contribute-eligible (no
+  preselect, no locked floor) once its balance reaches that target — `activeAuto` in
+  `loadSurplusPrompts`. Goals with no target keep the rule forever; the `autoContribute` value itself
+  is untouched, so it comes back into effect if the balance later drops below target (e.g. after a
+  withdrawal).
 
 `month_allocations` (`month` unique, `status`, `percents` jsonb of `{ "<savingsGoalId>": pct }`,
 fractional)
