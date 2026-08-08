@@ -588,6 +588,11 @@ function SavingsBody({ goal }: { goal: GoalView }) {
           <div className="h-full rounded-full" style={{ width: `${pct}%`, background: goal.color }} />
         </div>
       )}
+      {goal.targetAmount !== null && goal.value >= goal.targetAmount && (
+        <p className="rounded-lg bg-[var(--warning)]/15 px-2.5 py-1.5 text-xs font-medium text-[var(--warning)]">
+          🎯 Target reached! Raise the target, archive this goal, or redirect future money elsewhere.
+        </p>
+      )}
       <p className="text-xs text-[var(--muted)]">{goal.milestone}</p>
       {goal.series.length > 1 && (() => {
         const pts = downsample(goal.series)
