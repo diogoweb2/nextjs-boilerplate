@@ -103,7 +103,7 @@ const LINKS = [
   { href: '/budget', label: 'Budget', icon: 'budget' },
   { href: '/transactions', label: 'Activity', icon: 'activity' },
   { href: '/transactions/planned', label: 'Planned', icon: 'planned' },
-  { href: '/accounts', label: 'Accounts', icon: 'accounts' },
+  { href: '/accounts', label: 'Goals', icon: 'accounts' },
   { href: '/reports', label: 'Reports', icon: 'reports' },
   { href: '/report', label: 'Recap', icon: 'recap' },
   { href: '/manage', label: 'Manage', icon: 'manage' },

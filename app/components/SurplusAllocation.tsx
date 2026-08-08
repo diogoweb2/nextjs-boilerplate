@@ -49,10 +49,16 @@ function PromptCard({ prompt }: { prompt: SurplusPrompt }) {
   const remainder = round2(prompt.net - total)
 
   const setAmt = (goalId: number, raw: number) => {
+    const goal = prompt.goals.find((g) => g.id === goalId)
+    const auto = goal?.autoContribute ?? 0
     const others = total - (amounts[String(goalId)] ?? 0)
     const max = Math.max(0, round2(prompt.net - others)) // respect the surplus ceiling
+    // Auto-contribute is a locked floor: the surplus can't cover more than it
+    // has, but the owner can't drag it below the rule either — only editing
+    // the rule in Goals can lower it.
+    const floor = Math.min(auto, max)
     const safe = Number.isFinite(raw) ? round2(raw) : 0
-    const v = Math.min(max, Math.max(0, safe))
+    const v = Math.min(max, Math.max(floor, safe))
     setAmounts((prev) => ({ ...prev, [String(goalId)]: v }))
   }
 
@@ -122,7 +128,7 @@ function PromptCard({ prompt }: { prompt: SurplusPrompt }) {
               <div className="flex items-center gap-3">
                 <input
                   type="range"
-                  min={0}
+                  min={Math.min(auto, Math.round(prompt.net))}
                   max={Math.max(1, Math.round(prompt.net))}
                   step={1}
                   value={amt}
@@ -134,7 +140,7 @@ function PromptCard({ prompt }: { prompt: SurplusPrompt }) {
                   <span className="text-sm text-[var(--muted)]">$</span>
                   <input
                     type="number"
-                    min={0}
+                    min={Math.min(auto, prompt.net)}
                     max={prompt.net}
                     step={1}
                     value={amt}
