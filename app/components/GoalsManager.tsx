@@ -1340,7 +1340,7 @@ function EditPanel({
               />
               /mo
             </span>
-            <span className="text-[11px]">pre-fills this amount in the monthly surplus prompt</span>
+            <span className="text-[11px]">locks in this amount in the monthly surplus prompt — you can add more, not less</span>
           </label>
         </>
       ) : null}

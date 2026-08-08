@@ -335,7 +335,9 @@ export const goals = pgTable('goals', {
   rateCheckedAt: timestamp('rate_checked_at'),
   // Savings only: a fixed monthly auto-contribute amount. When set, the monthly
   // surplus-allocation prompt (§10b) pre-fills exactly this much for the goal (in
-  // goal priority order, capped at the surplus left). null/0 = no rule.
+  // goal priority order, capped at the surplus left) and locks the slider so it
+  // can't be dragged below that amount — only editing this field lowers it.
+  // null/0 = no rule.
   autoContribute: numeric('auto_contribute', { precision: 12, scale: 2 }),
   // Include this goal in immediate push notifications when its value changes.
   notify: boolean('notify').notNull().default(false),

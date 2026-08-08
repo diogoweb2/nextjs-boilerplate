@@ -1034,6 +1034,11 @@ surplus isn't shown twice with two different asks.
   rule has **no start month** — it applies the next time the prompt shows and never to already-actioned
   months. Mortgage & Net-Zero are unaffected (never eligible). Mortgage Freedom and Net-Zero are the
   goals the owner explicitly wanted left out.
+- **Locked floor**: the auto-contribute amount isn't just a preselect — the slider/number input for
+  that goal can't be dragged below it (the min is capped at the surplus itself when the surplus falls
+  short, same as the partial-fund case above). The owner can still add *more* than the rule on any
+  given month; the only way to give *less* is to lower or clear the `autoContribute` value on the goal
+  itself (`GoalsManager` edit panel).
 
 `month_allocations` (`month` unique, `status`, `percents` jsonb of `{ "<savingsGoalId>": pct }`,
 fractional)
