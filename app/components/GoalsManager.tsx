@@ -1383,6 +1383,7 @@ function NewGoalForm() {
   const [color, setColor] = useState(COLORS[0])
   const [target, setTarget] = useState('')
   const [date, setDate] = useState('')
+  const [auto, setAuto] = useState('')
   const [kind, setKind] = useState<'savings' | 'giftcard'>('savings')
   const isGiftCard = kind === 'giftcard'
 
@@ -1395,10 +1396,12 @@ function NewGoalForm() {
         kind,
         targetAmount: !isGiftCard && target ? Number(target) : null,
         targetDate: isGiftCard ? null : date || null,
+        autoContribute: !isGiftCard && auto ? Number(auto) : null,
       })
       setName('')
       setTarget('')
       setDate('')
+      setAuto('')
       setOpen(false)
       router.refresh()
     })
@@ -1455,6 +1458,23 @@ function NewGoalForm() {
             ))}
           </div>
         </div>
+        {!isGiftCard && (
+          <label className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
+            ⭐ Auto-contribute
+            <span className="flex items-center gap-1">
+              $
+              <input
+                type="number"
+                placeholder="0"
+                value={auto}
+                onChange={(e) => setAuto(e.target.value)}
+                className={`${INPUT_CLASS} w-24 text-right`}
+              />
+              /mo
+            </span>
+            <span className="text-[11px]">locks in this amount in the monthly surplus prompt — you can add more, not less</span>
+          </label>
+        )}
         <div className="flex gap-2">
           <button disabled={!name.trim()} onClick={submit} className={PRIMARY_BTN}>
             {isGiftCard ? 'Create gift card' : 'Create goal'}
