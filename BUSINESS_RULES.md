@@ -2038,3 +2038,27 @@ items as JSON (date, description, amount, installment, category), then inserts t
 a hash of filename+date+description+amount. Already-imported filenames (tracked in
 `aparecida_imports`) are skipped, so re-running after dropping a new month's statement in the
 folder only processes what's new.
+
+### "Fora do padrão" — anomaly flags
+
+`detectAnomalies()` (`app/lib/aparecida.ts`) is a purely deterministic, statistics-only pass
+over the imported rows — no model call at request time, consistent with the app staying fully
+deterministic everywhere except the PDF-extraction step above. It flags a transaction when:
+
+- **`high_category_amount`** — amount is more than 2.5 standard deviations above its category's
+  mean (category needs ≥4 samples for this to mean anything).
+- **`high_overall_amount`** — fallback for thin categories: amount > 6× the overall median.
+- **`new_merchant_high_value`** — this exact description text has never appeared before *and*
+  the amount is > 3× the overall median (catches one-off big-ticket purchases, including each
+  leg of an unfamiliar installment plan, since each month's line differs by its "N/06" suffix).
+- **`unusual_city`** — the trailing city token (statements print e.g. "ATACAREJO ... RECIFE")
+  differs from her dominant city, once that dominant city has ≥10 sightings. Online-payment
+  processors (Mercado Pago `MP*…`, `MERCADOLIVRE*…`) print their own registered city, so this
+  also catches "unfamiliar online order" as a side effect — a feature, not a bug, for the goal
+  of "what's worth a second look."
+- **`possible_duplicate`** — the same date + description + amount appears more than once (both
+  occurrences get flagged).
+
+`MIN_FLAG_AMOUNT` (R$30) suppresses amount-based flags on trivial charges. The "Fora do padrão"
+card on `/aparecida` lists every flagged row, worst-first (most flags, then most recent); these
+are leads for a human to eyeball, not conclusions.

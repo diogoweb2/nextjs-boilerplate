@@ -3,12 +3,21 @@ import type { AparecidaData } from '@/app/actions/aparecida'
 import {
   categoryColor,
   categoryTotals,
+  detectAnomalies,
   formatBRL,
   formatBRLCompact,
   formatDatePt,
   formatMonthPt,
   monthTotals,
 } from '@/app/lib/aparecida'
+
+const FLAG_COLORS: Record<string, string> = {
+  high_category_amount: '#ef4444',
+  high_overall_amount: '#ef4444',
+  new_merchant_high_value: '#f59e0b',
+  unusual_city: '#3b82f6',
+  possible_duplicate: '#8b5cf6',
+}
 
 function StatTile({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
@@ -116,6 +125,10 @@ export function AparecidaManager({ data }: { data: AparecidaData }) {
   }
   const monthGroups = [...byMonth.entries()].sort(([a], [b]) => b.localeCompare(a))
 
+  const flagged = detectAnomalies(transactions)
+    .filter((t) => t.flags.length > 0)
+    .sort((a, b) => b.flags.length - a.flags.length || b.txnDate.localeCompare(a.txnDate))
+
   if (transactions.length === 0) {
     return (
       <Card title="Aparecida">
@@ -141,7 +154,56 @@ export function AparecidaManager({ data }: { data: AparecidaData }) {
           {lastMonth && (
             <StatTile label={`Última fatura (${formatMonthPt(lastMonth.month)})`} value={formatBRL(lastMonth.total)} />
           )}
+          <StatTile
+            label="Fora do padrão"
+            value={String(flagged.length)}
+            hint={flagged.length ? 'vale dar uma olhada' : 'nada chamando atenção'}
+          />
         </div>
+      </Card>
+
+      <Card title="Fora do padrão">
+        {flagged.length === 0 ? (
+          <p className="text-sm text-[var(--muted)]">
+            Nada fora do padrão até agora — sem valores muito acima do normal, comerciantes novos
+            de valor alto, cidade incomum ou possíveis cobranças duplicadas.
+          </p>
+        ) : (
+          <ul className="flex flex-col divide-y divide-[var(--border)]">
+            {flagged.map((t) => (
+              <li key={t.id} className="flex flex-col gap-1.5 py-2.5 first:pt-0 last:pb-0">
+                <div className="flex items-center gap-3 text-sm">
+                  <span className="w-12 shrink-0 tabular-nums text-[var(--muted)]">{formatDatePt(t.txnDate)}</span>
+                  <span className="flex-1 truncate font-medium">{t.description}</span>
+                  <span
+                    className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium"
+                    style={{
+                      color: categoryColor(t.category),
+                      background: `color-mix(in srgb, ${categoryColor(t.category)} 15%, transparent)`,
+                    }}
+                  >
+                    {t.category}
+                  </span>
+                  <span className="w-20 shrink-0 text-right tabular-nums font-semibold">{formatBRL(Number(t.amount))}</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5 pl-[3.75rem]">
+                  {t.flags.map((f) => (
+                    <span
+                      key={f.code}
+                      className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+                      style={{
+                        color: FLAG_COLORS[f.code],
+                        background: `color-mix(in srgb, ${FLAG_COLORS[f.code]} 12%, transparent)`,
+                      }}
+                    >
+                      {f.label}
+                    </span>
+                  ))}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </Card>
 
       <Card title="Gasto por mês">
