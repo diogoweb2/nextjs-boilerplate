@@ -179,11 +179,17 @@ const RECIFE_METRO_CITIES = new Set([
   'MATA',
 ])
 
-const MIN_FLAG_AMOUNT = 30 // ignore trivial charges even if statistically odd
+export const MIN_FLAG_AMOUNT = 50 // ignore trivial charges even if statistically odd
 
 export function detectAnomalies(txns: AparecidaTransaction[]): FlaggedAparecidaTransaction[] {
   const amounts = txns.map((t) => Number(t.amount))
   const overallMedian = median(amounts)
+
+  // Owner override, vendor-wide: dismissing one charge from a merchant means
+  // "I trust this merchant", so every transaction sharing that exact
+  // description is treated as dismissed too, not just the row that was
+  // clicked — the whole vendor stops showing up in "Fora do padrão".
+  const dismissedDescriptions = new Set(txns.filter((t) => t.notSuspicious).map((t) => t.description))
 
   // Per-category mean/stddev (need a handful of samples to mean anything).
   const byCategory = new Map<string, number[]>()
@@ -266,15 +272,8 @@ export function detectAnomalies(txns: AparecidaTransaction[]): FlaggedAparecidaT
       flags.push({ code: 'possible_duplicate', label: 'Possível cobrança duplicada no mesmo dia' })
     }
 
-    // Owner override: marked "não é suspeito" clears everything EXCEPT the
-    // amount-based flags — a legit merchant can still post a charge that's
-    // genuinely way above normal, and that's worth a fresh look regardless of
-    // an earlier dismissal (which was about the merchant/location, not this
-    // specific amount).
-    const finalFlags = t.notSuspicious
-      ? flags.filter((f) => f.code === 'high_category_amount' || f.code === 'high_overall_amount')
-      : flags
-
-    return { ...t, flags: finalFlags }
+    // Owner override: dismissing any charge from this vendor clears every
+    // flag for every charge from that same vendor.
+    return { ...t, flags: dismissedDescriptions.has(t.description) ? [] : flags }
   })
 }

@@ -2057,11 +2057,13 @@ whichever machine ran the import). Served by `GET /api/aparecida/statement/[file
 session cookie like every other route.
 
 **Owner override (`aparecida_transactions.not_suspicious`)** — a manual "não é suspeito" toggle
-(`setAparecidaNotSuspicious` in `app/actions/aparecida.ts`). It clears every flag EXCEPT the
-amount-based ones (`high_category_amount`, `high_overall_amount`) — dismissing a row is about
-vouching for the merchant/location, not for any future amount on it, so a legitimately-flagged
-huge charge still resurfaces even after dismissal. Set from the row itself or from inside the
-detail modal; flips back with the same control.
+(`setAparecidaNotSuspicious` in `app/actions/aparecida.ts`). It's per-row in the DB, but
+`detectAnomalies()` applies it **vendor-wide**: dismissing any one charge from a merchant
+collects every `description` with `not_suspicious = true` into a set, and every transaction
+whose `description` is in that set gets zero flags — the whole vendor drops out of "Fora do
+padrão", not just the row that was clicked. Set from the row itself or from inside the detail
+modal ("Não é suspeito (esse estabelecimento)"); flips back with the same control on the
+originally-dismissed row.
 
 ### "Fora do padrão" — anomaly flags
 
@@ -2086,9 +2088,10 @@ deterministic everywhere except the PDF-extraction step above. It flags a transa
 - **`possible_duplicate`** — the same date + description + amount appears more than once (both
   occurrences get flagged).
 
-`MIN_FLAG_AMOUNT` (R$30) suppresses amount-based flags on trivial charges. A row with
-`not_suspicious = true` keeps only its amount-based flags, if any (see owner override, above).
-The "Fora do padrão" card on `/aparecida` lists every flagged row, worst-first (most flags, then
+`MIN_FLAG_AMOUNT` (R$50) suppresses amount-based flags on trivial charges; the "Fora do padrão"
+card title states this threshold directly (`Fora do padrão (acima de R$ 50,00)`). Any
+transaction whose `description` was dismissed via the owner override, above, gets zero flags
+regardless of the above. The "Fora do padrão" card on `/aparecida` lists every flagged row, worst-first (most flags, then
 most recent); these are leads for a human to eyeball, not conclusions. Every row — flagged or
 not — can be opened in a detail modal (`AparecidaTransactionModal.tsx`) showing every field
 untruncated, the AI merchant note, links to open/download the original PDF, and a "ver todas as

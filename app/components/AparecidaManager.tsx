@@ -8,6 +8,7 @@ import type { AparecidaData } from '@/app/actions/aparecida'
 import { setAparecidaNotSuspicious } from '@/app/actions/aparecida'
 import {
   APARECIDA_CATEGORIES,
+  MIN_FLAG_AMOUNT,
   categoryColor,
   categoryTotals,
   detectAnomalies,
@@ -247,8 +248,9 @@ export function AparecidaManager({ data }: { data: AparecidaData }) {
               type="button"
               className="font-medium text-[var(--muted)] hover:underline"
               onClick={() => toggleNotSuspicious(t.id, true)}
+              title="Some da lista para todos os lançamentos deste estabelecimento"
             >
-              Não é suspeito
+              Não é suspeito (esse estabelecimento)
             </button>
           )}
           {t.notSuspicious && (
@@ -360,7 +362,7 @@ export function AparecidaManager({ data }: { data: AparecidaData }) {
         </div>
       </Card>
 
-      <Card title="Fora do padrão">
+      <Card title={`Fora do padrão (acima de ${formatBRL(MIN_FLAG_AMOUNT)})`}>
         {flagged.length === 0 ? (
           <p className="text-sm text-[var(--muted)]">
             Nada fora do padrão até agora — sem valores muito acima do normal, comerciantes novos

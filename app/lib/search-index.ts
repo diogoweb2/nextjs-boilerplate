@@ -122,7 +122,7 @@ export const FEATURE_INDEX: FeatureEntry[] = [
   { label: 'Aparecida', page: 'Aparecida', href: '/aparecida', keywords: ['stepmother', 'brazil', 'brasil', 'cartão', 'fatura', 'real', 'brl', 'reais'] },
   { label: 'Filtros', page: 'Aparecida', href: '/aparecida#filtros', keywords: ['filter', 'mês', 'categoria', 'buscar', 'estabelecimento', 'search'] },
   { label: 'Resumo', page: 'Aparecida', href: '/aparecida#resumo', keywords: ['total', 'média mensal'] },
-  { label: 'Fora do padrão', page: 'Aparecida', href: '/aparecida#fora-do-padra-o', keywords: ['anomaly', 'suspicious', 'suspeito', 'outlier', 'duplicado', 'fraude', 'flag'] },
+  { label: 'Fora do padrão', page: 'Aparecida', href: '/aparecida#fora-do-padra-o-acima-de-r-50-00', keywords: ['anomaly', 'suspicious', 'suspeito', 'outlier', 'duplicado', 'fraude', 'flag'] },
   { label: 'Gasto por mês', page: 'Aparecida', href: '/aparecida#gasto-por-me-s', keywords: ['monthly', 'mensal'] },
   { label: 'Gasto por categoria', page: 'Aparecida', href: '/aparecida#gasto-por-categoria', keywords: ['category', 'donut', 'pizza'] },
   { label: 'Lançamentos', page: 'Aparecida', href: '/aparecida#lanc-amentos', keywords: ['transactions', 'extrato'] },

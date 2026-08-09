@@ -156,7 +156,11 @@ export function AparecidaTransactionModal({
             className="rounded-lg px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
             style={{ background: txn.notSuspicious ? 'var(--muted)' : 'var(--accent)' }}
           >
-            {pending ? 'Salvando…' : txn.notSuspicious ? 'Marcar como suspeito novamente' : 'Não é suspeito'}
+            {pending
+              ? 'Salvando…'
+              : txn.notSuspicious
+                ? 'Marcar como suspeito novamente'
+                : 'Não é suspeito (some da lista para este estabelecimento inteiro)'}
           </button>
 
           <button
