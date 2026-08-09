@@ -158,6 +158,27 @@ function guessCity(description: string): string | null {
   return last
 }
 
+/**
+ * She lives in Recife; a charge in Olinda or anywhere else in Grande Recife
+ * is completely normal and shouldn't get flagged just for not matching the
+ * single "dominant city" token. Trailing tokens seen on real statements for
+ * the metro-area cities (multi-word names get truncated to their last word
+ * by guessCity, e.g. "JABOATAO DOS GUARARAPES" -> "GUARARAPES").
+ */
+const RECIFE_METRO_CITIES = new Set([
+  'RECIFE',
+  'OLINDA',
+  'PAULISTA',
+  'CAMARAGIBE',
+  'JABOATAO',
+  'GUARARAPES',
+  'IGARASSU',
+  'IPOJUCA',
+  'ABREU',
+  'CABO',
+  'MATA',
+])
+
 const MIN_FLAG_AMOUNT = 30 // ignore trivial charges even if statistically odd
 
 export function detectAnomalies(txns: AparecidaTransaction[]): FlaggedAparecidaTransaction[] {
@@ -227,7 +248,13 @@ export function detectAnomalies(txns: AparecidaTransaction[]): FlaggedAparecidaT
 
     // City mismatch only means something once there's a real "normal" to compare against.
     const city = guessCity(t.description)
-    if (city && dominantCity && city !== dominantCity && dominantCityCount >= 10) {
+    if (
+      city &&
+      dominantCity &&
+      city !== dominantCity &&
+      dominantCityCount >= 10 &&
+      !RECIFE_METRO_CITIES.has(city)
+    ) {
       flags.push({
         code: 'unusual_city',
         label: `Cidade incomum: ${city} (normalmente ${dominantCity})`,
@@ -239,6 +266,7 @@ export function detectAnomalies(txns: AparecidaTransaction[]): FlaggedAparecidaT
       flags.push({ code: 'possible_duplicate', label: 'Possível cobrança duplicada no mesmo dia' })
     }
 
-    return { ...t, flags }
+    // Owner override: marked "não é suspeito" — never show flags for it.
+    return { ...t, flags: t.notSuspicious ? [] : flags }
   })
 }

@@ -1051,6 +1051,14 @@ export const aparecidaTransactions = pgTable(
     // Dedup key: statementFile + date + description + amount, so re-running the
     // import on an already-processed statement is a no-op.
     externalId: text('external_id').notNull().unique(),
+    // Owner-set override: "not suspicious", dismisses this row from "Fora do
+    // padrão" regardless of what detectAnomalies() computes.
+    notSuspicious: boolean('not_suspicious').notNull().default(false),
+    // Short AI-researched note about the merchant, generated once at import
+    // time by scripts/aparecida-import.ts (never at request time — see
+    // detectAnomalies() doc comment on why the app stays deterministic
+    // otherwise). Always shown labeled as AI-generated in the UI.
+    aiFeedback: text('ai_feedback'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (t) => [index('aparecida_transactions_txn_date_idx').on(t.txnDate)]
@@ -1062,6 +1070,10 @@ export const aparecidaImports = pgTable('aparecida_imports', {
   filename: text('filename').notNull().unique(),
   transactionCount: integer('transaction_count').notNull().default(0),
   totalAmount: numeric('total_amount', { precision: 10, scale: 2 }).notNull().default('0'),
+  // Original statement PDF, base64-encoded, so "open/download the original
+  // PDF" works in production too (Brasil/aparecida/*.pdf is gitignored and
+  // only exists on whichever machine ran the import).
+  pdfBase64: text('pdf_base64'),
   importedAt: timestamp('imported_at').defaultNow().notNull(),
 })
 

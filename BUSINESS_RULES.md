@@ -2034,10 +2034,32 @@ Portuguese category list + BRL formatting), and `app/components/AparecidaManager
 The only writer is `npm run aparecida:import` (`scripts/aparecida-import.ts`): it reads every
 `*.pdf` in `Brasil/aparecida/` (gitignored — real name/address printed on the statements),
 shells out to `claude -p --model sonnet --effort low` per file to read the PDF and extract line
-items as JSON (date, description, amount, installment, category), then inserts them, deduped by
-a hash of filename+date+description+amount. Already-imported filenames (tracked in
-`aparecida_imports`) are skipped, so re-running after dropping a new month's statement in the
-folder only processes what's new.
+items as JSON (date, description, amount, installment, category, aiFeedback), then inserts them,
+deduped by a hash of filename+date+description+amount. Already-imported filenames (tracked in
+`aparecida_imports`) are skipped for extraction, so re-running after dropping a new month's
+statement in the folder only processes what's new — but the script still does two backfill
+passes over already-imported statements every run: it stores the original PDF bytes
+(base64, `aparecida_imports.pdf_base64`) if missing, and generates `ai_feedback` for any
+transaction row that doesn't have one yet, so both are safe to add retroactively.
+
+**AI merchant feedback (`aparecida_transactions.ai_feedback`)** — a one-sentence, Portuguese,
+model-written note about the merchant (what kind of business it is, and whether it looks
+legit), generated once via `--allowedTools WebSearch` either during extraction (new statements)
+or by the `runClaudeFeedbackBackfill` pass (existing statements missing it, batched by unique
+description within a statement). Generated only at import time, never at request time — the app
+stays deterministic everywhere else. Always rendered in the UI labeled "Gerado por IA"
+(`AparecidaTransactionModal.tsx`) so it's never mistaken for a stated fact.
+
+**Original PDF access** — `aparecida_imports.pdf_base64` holds the full statement so it can be
+opened/downloaded from the deployed app (Neon-hosted; `Brasil/aparecida/` only exists on
+whichever machine ran the import). Served by `GET /api/aparecida/statement/[filename]`
+(`?download=1` forces a save-as); not whitelisted in `proxy.ts`, so it requires the normal
+session cookie like every other route.
+
+**Owner override (`aparecida_transactions.not_suspicious`)** — a manual "não é suspeito" toggle
+(`setAparecidaNotSuspicious` in `app/actions/aparecida.ts`) that clears a row's anomaly flags
+everywhere (`detectAnomalies()` returns `[]` for it regardless of what the statistics say). Set
+from the row itself or from inside the detail modal; flips back with the same control.
 
 ### "Fora do padrão" — anomaly flags
 
@@ -2055,10 +2077,17 @@ deterministic everywhere except the PDF-extraction step above. It flags a transa
   differs from her dominant city, once that dominant city has ≥10 sightings. Online-payment
   processors (Mercado Pago `MP*…`, `MERCADOLIVRE*…`) print their own registered city, so this
   also catches "unfamiliar online order" as a side effect — a feature, not a bug, for the goal
-  of "what's worth a second look."
+  of "what's worth a second look." Never fires for `RECIFE_METRO_CITIES` (Recife, Olinda,
+  Paulista, Camaragibe, Jaboatão dos Guararapes, Igarassu, Ipojuca, Abreu e Lima, Cabo de Santo
+  Agostinho, São Lourenço da Mata) — she lives in Recife, so anywhere in that metro area is
+  normal and not a location-based lead.
 - **`possible_duplicate`** — the same date + description + amount appears more than once (both
   occurrences get flagged).
 
-`MIN_FLAG_AMOUNT` (R$30) suppresses amount-based flags on trivial charges. The "Fora do padrão"
-card on `/aparecida` lists every flagged row, worst-first (most flags, then most recent); these
-are leads for a human to eyeball, not conclusions.
+`MIN_FLAG_AMOUNT` (R$30) suppresses amount-based flags on trivial charges. A row with
+`not_suspicious = true` always resolves to zero flags regardless of the above (see owner
+override, above). The "Fora do padrão" card on `/aparecida` lists every flagged row,
+worst-first (most flags, then most recent); these are leads for a human to eyeball, not
+conclusions. Every row — flagged or not — can be filtered by month (default "todos") and opened
+in a detail modal (`AparecidaTransactionModal.tsx`) showing every field untruncated, the AI
+merchant note, and links to open/download the original PDF.

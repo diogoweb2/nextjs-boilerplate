@@ -1,5 +1,11 @@
+'use client'
+
+import { useMemo, useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import { Card } from '@/app/components/AppShell'
+import { AparecidaTransactionModal } from '@/app/components/AparecidaTransactionModal'
 import type { AparecidaData } from '@/app/actions/aparecida'
+import { setAparecidaNotSuspicious } from '@/app/actions/aparecida'
 import {
   categoryColor,
   categoryTotals,
@@ -9,7 +15,9 @@ import {
   formatDatePt,
   formatMonthPt,
   monthTotals,
+  type FlaggedAparecidaTransaction,
 } from '@/app/lib/aparecida'
+import type { AparecidaTransaction } from '@/db/schema'
 
 const FLAG_COLORS: Record<string, string> = {
   high_category_amount: '#ef4444',
@@ -110,8 +118,38 @@ function CategoryDonut({ segments, total }: { segments: { category: string; amou
   )
 }
 
+/** Category badge — shared by every row rendering below. */
+function CategoryBadge({ category }: { category: string }) {
+  return (
+    <span
+      className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium"
+      style={{
+        color: categoryColor(category),
+        background: `color-mix(in srgb, ${categoryColor(category)} 15%, transparent)`,
+      }}
+    >
+      {category}
+    </span>
+  )
+}
+
 export function AparecidaManager({ data }: { data: AparecidaData }) {
-  const { transactions, imports } = data
+  const router = useRouter()
+  const { transactions: allTransactions, imports } = data
+  const [monthFilter, setMonthFilter] = useState<string>('all')
+  const [openTxn, setOpenTxn] = useState<AparecidaTransaction | null>(null)
+  const [, startTransition] = useTransition()
+
+  const allMonths = monthTotals(allTransactions)
+
+  const transactions = useMemo(
+    () =>
+      monthFilter === 'all'
+        ? allTransactions
+        : allTransactions.filter((t) => t.txnDate.slice(0, 7) === monthFilter),
+    [allTransactions, monthFilter]
+  )
+
   const months = monthTotals(transactions)
   const categories = categoryTotals(transactions)
   const total = transactions.reduce((sum, t) => sum + Number(t.amount), 0)
@@ -125,11 +163,89 @@ export function AparecidaManager({ data }: { data: AparecidaData }) {
   }
   const monthGroups = [...byMonth.entries()].sort(([a], [b]) => b.localeCompare(a))
 
-  const flagged = detectAnomalies(transactions)
+  const flaggedAll = detectAnomalies(transactions)
+  const flagsById = new Map(flaggedAll.map((t) => [t.id, t.flags]))
+  const flagged = flaggedAll
     .filter((t) => t.flags.length > 0)
     .sort((a, b) => b.flags.length - a.flags.length || b.txnDate.localeCompare(a.txnDate))
 
-  if (transactions.length === 0) {
+  function refresh() {
+    startTransition(() => router.refresh())
+  }
+
+  function toggleNotSuspicious(id: number, next: boolean) {
+    startTransition(async () => {
+      await setAparecidaNotSuspicious(id, next)
+      refresh()
+    })
+  }
+
+  function TxnRow({ t, flags }: { t: AparecidaTransaction; flags?: FlaggedAparecidaTransaction['flags'] }) {
+    return (
+      <li className="flex flex-col gap-1.5 py-2.5 first:pt-0 last:pb-0">
+        <div
+          className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg text-sm"
+          onClick={() => setOpenTxn(t)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => e.key === 'Enter' && setOpenTxn(t)}
+        >
+          <span className="w-12 shrink-0 tabular-nums text-[var(--muted)]">{formatDatePt(t.txnDate)}</span>
+          <span className="min-w-[140px] flex-1 cursor-pointer break-words font-medium hover:underline">
+            {t.description}
+            {t.installment && <span className="ml-1.5 text-xs text-[var(--muted)]">({t.installment})</span>}
+          </span>
+          <CategoryBadge category={t.category} />
+          <span className="shrink-0 text-right tabular-nums font-semibold">{formatBRL(Number(t.amount))}</span>
+        </div>
+        {flags && flags.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 pl-[3.75rem]">
+            {flags.map((f) => (
+              <span
+                key={f.code}
+                className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+                style={{
+                  color: FLAG_COLORS[f.code],
+                  background: `color-mix(in srgb, ${FLAG_COLORS[f.code]} 12%, transparent)`,
+                }}
+              >
+                {f.label}
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="flex flex-wrap gap-3 pl-[3.75rem] text-xs">
+          <button
+            type="button"
+            className="font-medium text-[var(--accent)] hover:underline"
+            onClick={() => setOpenTxn(t)}
+          >
+            Mais detalhes
+          </button>
+          {flags && flags.length > 0 && (
+            <button
+              type="button"
+              className="font-medium text-[var(--muted)] hover:underline"
+              onClick={() => toggleNotSuspicious(t.id, true)}
+            >
+              Não é suspeito
+            </button>
+          )}
+          {t.notSuspicious && (
+            <button
+              type="button"
+              className="font-medium text-[var(--muted)] hover:underline"
+              onClick={() => toggleNotSuspicious(t.id, false)}
+            >
+              Marcar como suspeito novamente
+            </button>
+          )}
+        </div>
+      </li>
+    )
+  }
+
+  if (allTransactions.length === 0) {
     return (
       <Card title="Aparecida">
         <p className="text-sm text-[var(--muted)]">
@@ -143,7 +259,33 @@ export function AparecidaManager({ data }: { data: AparecidaData }) {
 
   return (
     <div className="flex flex-col gap-5">
-      <Card title="Resumo">
+      {openTxn && (
+        <AparecidaTransactionModal
+          txn={openTxn}
+          flags={flagsById.get(openTxn.id) ?? []}
+          onClose={() => setOpenTxn(null)}
+          onChanged={refresh}
+        />
+      )}
+
+      <Card
+        title="Resumo"
+        action={
+          <select
+            value={monthFilter}
+            onChange={(e) => setMonthFilter(e.target.value)}
+            className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs font-medium"
+            aria-label="Filtrar por mês"
+          >
+            <option value="all">Todos os meses</option>
+            {[...allMonths].reverse().map((m) => (
+              <option key={m.month} value={m.month}>
+                {formatMonthPt(m.month)}
+              </option>
+            ))}
+          </select>
+        }
+      >
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <StatTile label="Total no período" value={formatBRL(total)} hint={`${transactions.length} lançamentos`} />
           <StatTile
@@ -171,36 +313,7 @@ export function AparecidaManager({ data }: { data: AparecidaData }) {
         ) : (
           <ul className="flex flex-col divide-y divide-[var(--border)]">
             {flagged.map((t) => (
-              <li key={t.id} className="flex flex-col gap-1.5 py-2.5 first:pt-0 last:pb-0">
-                <div className="flex items-center gap-3 text-sm">
-                  <span className="w-12 shrink-0 tabular-nums text-[var(--muted)]">{formatDatePt(t.txnDate)}</span>
-                  <span className="flex-1 truncate font-medium">{t.description}</span>
-                  <span
-                    className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium"
-                    style={{
-                      color: categoryColor(t.category),
-                      background: `color-mix(in srgb, ${categoryColor(t.category)} 15%, transparent)`,
-                    }}
-                  >
-                    {t.category}
-                  </span>
-                  <span className="w-20 shrink-0 text-right tabular-nums font-semibold">{formatBRL(Number(t.amount))}</span>
-                </div>
-                <div className="flex flex-wrap gap-1.5 pl-[3.75rem]">
-                  {t.flags.map((f) => (
-                    <span
-                      key={f.code}
-                      className="rounded-full px-2 py-0.5 text-[11px] font-medium"
-                      style={{
-                        color: FLAG_COLORS[f.code],
-                        background: `color-mix(in srgb, ${FLAG_COLORS[f.code]} 12%, transparent)`,
-                      }}
-                    >
-                      {f.label}
-                    </span>
-                  ))}
-                </div>
-              </li>
+              <TxnRow key={t.id} t={t} flags={t.flags} />
             ))}
           </ul>
         )}
@@ -226,27 +339,7 @@ export function AparecidaManager({ data }: { data: AparecidaData }) {
                 </summary>
                 <ul className="flex flex-col divide-y divide-[var(--border)] border-t border-[var(--border)] px-3">
                   {txns.map((t) => (
-                    <li key={t.id} className="flex items-center gap-3 py-2 text-sm">
-                      <span className="w-12 shrink-0 tabular-nums text-[var(--muted)]">{formatDatePt(t.txnDate)}</span>
-                      <span className="flex-1 truncate">
-                        {t.description}
-                        {t.installment && (
-                          <span className="ml-1.5 text-xs text-[var(--muted)]">({t.installment})</span>
-                        )}
-                      </span>
-                      <span
-                        className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium"
-                        style={{
-                          color: categoryColor(t.category),
-                          background: `color-mix(in srgb, ${categoryColor(t.category)} 15%, transparent)`,
-                        }}
-                      >
-                        {t.category}
-                      </span>
-                      <span className="w-20 shrink-0 text-right tabular-nums font-medium">
-                        {formatBRL(Number(t.amount))}
-                      </span>
-                    </li>
+                    <TxnRow key={t.id} t={t} flags={flagsById.get(t.id)} />
                   ))}
                 </ul>
               </details>
@@ -259,11 +352,21 @@ export function AparecidaManager({ data }: { data: AparecidaData }) {
         <ul className="flex flex-col divide-y divide-[var(--border)]">
           {imports.map((imp) => (
             <li key={imp.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-              <span className="truncate">{imp.filename}</span>
+              <span className="min-w-0 flex-1 break-words">{imp.filename}</span>
               <span className="shrink-0 text-xs text-[var(--muted)]">{imp.transactionCount} lançamentos</span>
               <span className="w-24 shrink-0 text-right tabular-nums font-medium">
                 {formatBRL(Number(imp.totalAmount))}
               </span>
+              {imp.pdfBase64 && (
+                <a
+                  href={`/api/aparecida/statement/${encodeURIComponent(imp.filename)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="shrink-0 text-xs font-medium text-[var(--accent)] hover:underline"
+                >
+                  PDF
+                </a>
+              )}
             </li>
           ))}
         </ul>
