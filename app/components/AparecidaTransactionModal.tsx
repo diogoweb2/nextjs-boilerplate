@@ -11,11 +11,13 @@ export function AparecidaTransactionModal({
   flags,
   onClose,
   onChanged,
+  onFilterEstablishment,
 }: {
   txn: AparecidaTransaction
   flags: AparecidaFlag[]
   onClose: () => void
   onChanged: () => void
+  onFilterEstablishment: (description: string) => void
 }) {
   const [pending, startTransition] = useTransition()
 
@@ -155,6 +157,14 @@ export function AparecidaTransactionModal({
             style={{ background: txn.notSuspicious ? 'var(--muted)' : 'var(--accent)' }}
           >
             {pending ? 'Salvando…' : txn.notSuspicious ? 'Marcar como suspeito novamente' : 'Não é suspeito'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onFilterEstablishment(txn.description)}
+            className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-medium hover:bg-[var(--surface-2)]"
+          >
+            Ver todas as compras neste estabelecimento
           </button>
         </div>
       </div>

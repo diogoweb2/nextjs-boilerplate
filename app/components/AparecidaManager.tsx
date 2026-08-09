@@ -7,6 +7,7 @@ import { AparecidaTransactionModal } from '@/app/components/AparecidaTransaction
 import type { AparecidaData } from '@/app/actions/aparecida'
 import { setAparecidaNotSuspicious } from '@/app/actions/aparecida'
 import {
+  APARECIDA_CATEGORIES,
   categoryColor,
   categoryTotals,
   detectAnomalies,
@@ -137,18 +138,23 @@ export function AparecidaManager({ data }: { data: AparecidaData }) {
   const router = useRouter()
   const { transactions: allTransactions, imports } = data
   const [monthFilter, setMonthFilter] = useState<string>('all')
+  const [categoryFilter, setCategoryFilter] = useState<string>('all')
+  const [searchFilter, setSearchFilter] = useState<string>('')
   const [openTxn, setOpenTxn] = useState<AparecidaTransaction | null>(null)
   const [, startTransition] = useTransition()
 
   const allMonths = monthTotals(allTransactions)
+  const hasActiveFilters = monthFilter !== 'all' || categoryFilter !== 'all' || searchFilter.trim() !== ''
 
-  const transactions = useMemo(
-    () =>
-      monthFilter === 'all'
-        ? allTransactions
-        : allTransactions.filter((t) => t.txnDate.slice(0, 7) === monthFilter),
-    [allTransactions, monthFilter]
-  )
+  const transactions = useMemo(() => {
+    const search = searchFilter.trim().toLowerCase()
+    return allTransactions.filter((t) => {
+      if (monthFilter !== 'all' && t.txnDate.slice(0, 7) !== monthFilter) return false
+      if (categoryFilter !== 'all' && t.category !== categoryFilter) return false
+      if (search && !t.description.toLowerCase().includes(search)) return false
+      return true
+    })
+  }, [allTransactions, monthFilter, categoryFilter, searchFilter])
 
   const months = monthTotals(transactions)
   const categories = categoryTotals(transactions)
@@ -178,6 +184,20 @@ export function AparecidaManager({ data }: { data: AparecidaData }) {
       await setAparecidaNotSuspicious(id, next)
       refresh()
     })
+  }
+
+  function filterByEstablishment(description: string) {
+    setSearchFilter(description)
+    setMonthFilter('all')
+    setCategoryFilter('all')
+    setOpenTxn(null)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  function clearFilters() {
+    setMonthFilter('all')
+    setCategoryFilter('all')
+    setSearchFilter('')
   }
 
   function TxnRow({ t, flags }: { t: AparecidaTransaction; flags?: FlaggedAparecidaTransaction['flags'] }) {
@@ -265,16 +285,37 @@ export function AparecidaManager({ data }: { data: AparecidaData }) {
           flags={flagsById.get(openTxn.id) ?? []}
           onClose={() => setOpenTxn(null)}
           onChanged={refresh}
+          onFilterEstablishment={filterByEstablishment}
         />
       )}
 
       <Card
-        title="Resumo"
+        title="Filtros"
         action={
+          hasActiveFilters ? (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="rounded-lg border border-[var(--border)] px-2 py-1 text-xs font-medium hover:bg-[var(--surface-2)]"
+            >
+              Limpar filtros
+            </button>
+          ) : undefined
+        }
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <input
+            type="text"
+            value={searchFilter}
+            onChange={(e) => setSearchFilter(e.target.value)}
+            placeholder="Buscar por estabelecimento…"
+            className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+            aria-label="Buscar por estabelecimento"
+          />
           <select
             value={monthFilter}
             onChange={(e) => setMonthFilter(e.target.value)}
-            className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs font-medium"
+            className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-2 text-sm font-medium"
             aria-label="Filtrar por mês"
           >
             <option value="all">Todos os meses</option>
@@ -284,8 +325,23 @@ export function AparecidaManager({ data }: { data: AparecidaData }) {
               </option>
             ))}
           </select>
-        }
-      >
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-2 text-sm font-medium"
+            aria-label="Filtrar por categoria"
+          >
+            <option value="all">Todas as categorias</option>
+            {APARECIDA_CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
+      </Card>
+
+      <Card title="Resumo">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <StatTile label="Total no período" value={formatBRL(total)} hint={`${transactions.length} lançamentos`} />
           <StatTile

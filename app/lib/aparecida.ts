@@ -266,7 +266,15 @@ export function detectAnomalies(txns: AparecidaTransaction[]): FlaggedAparecidaT
       flags.push({ code: 'possible_duplicate', label: 'Possível cobrança duplicada no mesmo dia' })
     }
 
-    // Owner override: marked "não é suspeito" — never show flags for it.
-    return { ...t, flags: t.notSuspicious ? [] : flags }
+    // Owner override: marked "não é suspeito" clears everything EXCEPT the
+    // amount-based flags — a legit merchant can still post a charge that's
+    // genuinely way above normal, and that's worth a fresh look regardless of
+    // an earlier dismissal (which was about the merchant/location, not this
+    // specific amount).
+    const finalFlags = t.notSuspicious
+      ? flags.filter((f) => f.code === 'high_category_amount' || f.code === 'high_overall_amount')
+      : flags
+
+    return { ...t, flags: finalFlags }
   })
 }
