@@ -1032,6 +1032,40 @@ export const plannedSplits = pgTable('planned_splits', {
 })
 
 /**
+ * "Aparecida" — a fully isolated read-only ledger for a family member's
+ * Brazilian credit card, whose money someone else manages. It never touches
+ * categories/merchants/transactions above; `npm run aparecida:import` is the
+ * only writer (see scripts/aparecida-import.ts + app/lib/aparecida.ts for the
+ * fixed Portuguese category list).
+ */
+export const aparecidaTransactions = pgTable(
+  'aparecida_transactions',
+  {
+    id: serial('id').primaryKey(),
+    txnDate: date('txn_date').notNull(),
+    description: text('description').notNull(),
+    category: text('category').notNull(),
+    amount: numeric('amount', { precision: 10, scale: 2 }).notNull(),
+    installment: text('installment'),
+    statementFile: text('statement_file').notNull(),
+    // Dedup key: statementFile + date + description + amount, so re-running the
+    // import on an already-processed statement is a no-op.
+    externalId: text('external_id').notNull().unique(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => [index('aparecida_transactions_txn_date_idx').on(t.txnDate)]
+)
+
+/** One row per statement PDF the importer has already processed. */
+export const aparecidaImports = pgTable('aparecida_imports', {
+  id: serial('id').primaryKey(),
+  filename: text('filename').notNull().unique(),
+  transactionCount: integer('transaction_count').notNull().default(0),
+  totalAmount: numeric('total_amount', { precision: 10, scale: 2 }).notNull().default('0'),
+  importedAt: timestamp('imported_at').defaultNow().notNull(),
+})
+
+/**
  * Single-row marker for the header NotificationBell's "seen" state. `signature`
  * is a fingerprint of the problem set (ids + details) last acknowledged by
  * opening the panel; the badge shows only when the current set's signature
@@ -1166,3 +1200,5 @@ export type FeedbackItem = typeof feedbackItems.$inferSelect
 export type FeedbackKind = 'bug' | 'idea'
 export type SubscriptionAlertDismissal = typeof subscriptionAlertDismissals.$inferSelect
 export type SubscriptionRenewalDismissal = typeof subscriptionRenewalDismissals.$inferSelect
+export type AparecidaTransaction = typeof aparecidaTransactions.$inferSelect
+export type AparecidaImport = typeof aparecidaImports.$inferSelect

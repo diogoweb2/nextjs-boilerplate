@@ -79,6 +79,12 @@ const ICON_PATHS: Record<string, React.ReactNode> = {
       <line x1="21" x2="9" y1="12" y2="12" />
     </>
   ),
+  aparecida: (
+    <>
+      <circle cx="12" cy="8" r="4" />
+      <path d="M5 21v-2a7 7 0 0 1 14 0v2" />
+    </>
+  ),
 }
 
 function NavIcon({ name, className = 'h-[18px] w-[18px]' }: { name: string; className?: string }) {
@@ -106,6 +112,7 @@ const LINKS = [
   { href: '/accounts', label: 'Goals', icon: 'accounts' },
   { href: '/reports', label: 'Reports', icon: 'reports' },
   { href: '/report', label: 'Recap', icon: 'recap' },
+  { href: '/aparecida', label: 'Aparecida', icon: 'aparecida' },
   { href: '/manage', label: 'Manage', icon: 'manage' },
 ]
 

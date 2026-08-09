@@ -2021,3 +2021,20 @@ is **not** deleted, because it doubles as the confirmation.
 
 Dismissals live in the DB, never localStorage, so they clear on every device. Editing a rule
 resets it to pending and clears the dismissal — a fixed rule should fire on the next import.
+
+## 23. Aparecida (`/aparecida`)
+
+A fully isolated, read-only ledger for a family member's Brazilian credit card (BRL), whose
+money someone else manages day-to-day — this section only exists so the owner can keep an eye
+on it. It does **not** participate in anything above: no shared categories/merchants/
+transactions table, no analytics, no budget/goals/insights. Everything lives in
+`aparecida_transactions` + `aparecida_imports` (`db/schema.ts`), `app/lib/aparecida.ts` (fixed
+Portuguese category list + BRL formatting), and `app/components/AparecidaManager.tsx`.
+
+The only writer is `npm run aparecida:import` (`scripts/aparecida-import.ts`): it reads every
+`*.pdf` in `Brasil/aparecida/` (gitignored — real name/address printed on the statements),
+shells out to `claude -p --model sonnet --effort low` per file to read the PDF and extract line
+items as JSON (date, description, amount, installment, category), then inserts them, deduped by
+a hash of filename+date+description+amount. Already-imported filenames (tracked in
+`aparecida_imports`) are skipped, so re-running after dropping a new month's statement in the
+folder only processes what's new.

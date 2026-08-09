@@ -118,6 +118,14 @@ export const FEATURE_INDEX: FeatureEntry[] = [
   { label: 'Monthly recap', page: 'Recap', href: '/report', keywords: ['80s report', 'month report', 'grade', 'summary'] },
   { label: 'Year in Review', page: 'Recap', href: '/report/year', keywords: ['annual report', 'yearly', 'wrapped', 'rewind', 'year report', 'grade'] },
 
+  // ── Aparecida ───────────────────────────────────────────────────────────
+  { label: 'Aparecida', page: 'Aparecida', href: '/aparecida', keywords: ['stepmother', 'brazil', 'brasil', 'cartão', 'fatura', 'real', 'brl', 'reais'] },
+  { label: 'Resumo', page: 'Aparecida', href: '/aparecida#resumo', keywords: ['total', 'média mensal'] },
+  { label: 'Gasto por mês', page: 'Aparecida', href: '/aparecida#gasto-por-me-s', keywords: ['monthly', 'mensal'] },
+  { label: 'Gasto por categoria', page: 'Aparecida', href: '/aparecida#gasto-por-categoria', keywords: ['category', 'donut', 'pizza'] },
+  { label: 'Lançamentos', page: 'Aparecida', href: '/aparecida#lanc-amentos', keywords: ['transactions', 'extrato'] },
+  { label: 'Faturas importadas', page: 'Aparecida', href: '/aparecida#faturas-importadas', keywords: ['statements', 'imports', 'pdf'] },
+
   // ── Manage ──────────────────────────────────────────────────────────────
   { label: 'Categories', page: 'Manage › Categories', href: '/manage', keywords: ['edit', 'colors', 'buckets', 'kind'] },
   { label: 'Merchants', page: 'Manage › Merchants', href: '/manage/merchants', keywords: ['rules', 'merge', 'rename', 'learning'] },
