@@ -2129,6 +2129,12 @@ every other analytics page.
     goal-funding offsets are app-generated. Paying with gift-card balance at the till involves no
     card, so it earns nothing; counting it would both double-count the original load and invent
     rewards from nothing.
+  - **Bank rows (`tangerine`, `scotia`) are excluded** — `REWARD_EARNING_SOURCES` limits this whole
+    feature to `master` and `amex`. Chequing/debit activity earns no points and no cash back, and no
+    scenario on this page moves it onto a card. Keeping it in was actively misleading: bank rows
+    carry no card last-4, so §26 attributed *every* one of them to `self` and badly skewed the
+    per-cardholder split (in the owner's data, ~$59k/yr of Scotia debit landing on one side). This
+    is the source-of-truth filter for §24, §25 and §26 alike.
   - Ordinary transfers (CC payments, inter-account moves) stay excluded.
 - **Cobalt earn tiers** (`classifyCobaltTier`, matched by merchant-name keyword lists kept in the
   file, same spirit as `BIGGEST_PURCHASE_EXCLUDE_MERCHANTS`):
@@ -2320,12 +2326,20 @@ two caps, and up to $122,000/yr at the elevated rates. Rendered as a card inside
   `extraPlanCostMonthly = fidoPricePerLine − remainingKoodoLinePrice`: the one-card plan pays for
   1 Fido + 1 Koodo, the two-card plan for 2 Fido. Both prices are the §25 inputs — `TwoRogersCardsCard`
   is rendered *by* `FidoSwitchCard` (not by `CobaltAnalysis`) precisely so those prices have one home.
+- **Stackable as a third option** — `compareOneVsTwoCards` is called in `FidoSwitchCard`, not in the
+  §26 card, so the same figure both drives that card and folds into §25's "Combined annual impact"
+  when the owner ticks **"Add a second primary Rogers card"**. That checkbox is nested under (and
+  disabled without) "Also cancel Amex Cobalt": §26 prices *both* of its sides with everything already
+  on Rogers, so a second primary card is not a standalone scenario and must never contribute on its
+  own. The §26 card shows a confirmation line when its gain is already counted upstream, so the same
+  dollars are never read as two separate wins.
 - **Attribution by cardholder** — `computeRogersSpendByPerson` splits the same trailing-12-month
   eligible-purchase set (§24 `cardEligiblePurchases`) using `ctx.personById`, resolved from the card
   last-4 through `app/lib/cardholders.ts`. Names live only in `.env.local`; the model itself carries
   the neutral keys `self`/`partner`, so **no cardholder name ever reaches the DB or this public
-  repo**. Rows with no last-4 (bank debits) fall to `self`, matching the rest of the app — the UI
-  says so explicitly, because it can materially skew the split.
+  repo**. Both credit-card importers write a last-4 (`app/lib/csv.ts`), and the rows that never had
+  one — bank/debit — are already excluded upstream, so the `?? 'self'` fallback should be unreachable
+  in practice; it stays as the same safe default the rest of the app uses.
 - **All three buckets share the household `monthsOfData`** (`bucketRogersSpend` takes it as an
   argument rather than deriving it). A partner active in only 6 of 12 months must not be handed a
   fuller pro-rated cap than the household window justifies.
@@ -2343,6 +2357,7 @@ two caps, and up to $122,000/yr at the elevated rates. Rendered as a card inside
   redemption-bonus eligible, but both scenarios have Fido, so that effect is identical on both sides
   and cancels out of the difference. It does shift the absolute totals shown.
 - **Spend table** (`computeSpendMatrix`) — annualized purchase spend per cardholder per card source,
-  plus both together. Purchases only; card payments and transfers excluded, gift-card loads included.
+  plus both together. Purchases only; card payments, transfers and bank/debit rows excluded,
+  gift-card loads included.
   `SOURCE_ORDER` is typed `ImportSource[]` and assigned into `SpendMatrix['sources']` (`CardSource`,
   redeclared in the client-safe core), so the two unions drifting apart is a compile error.

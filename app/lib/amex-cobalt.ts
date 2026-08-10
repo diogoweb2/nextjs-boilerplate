@@ -41,6 +41,17 @@ function isForeignCountry(country: string | null | undefined): boolean {
 }
 
 /**
+ * The two rewards-earning credit cards. Bank rows (`tangerine`, `scotia`) are
+ * **deliberately excluded from this whole feature** per the owner: they are
+ * chequing/debit activity, not card purchases, so they neither earn Cobalt
+ * points nor Rogers cash back and there is no scenario here that moves them
+ * onto a card. Keeping them was actively misleading — they carry no card
+ * last-4, so §26 attributed every one of them to `self` and badly skewed the
+ * per-cardholder split.
+ */
+const REWARD_EARNING_SOURCES: ReadonlySet<ImportSource> = new Set<ImportSource>(['master', 'amex'])
+
+/**
  * The purchases a credit card would actually earn rewards on. Not the same set
  * as "expense flow", because of gift cards (§10c):
  *
@@ -52,13 +63,14 @@ function isForeignCountry(country: string | null | undefined): boolean {
  *   and goal-funding offsets are app-generated. Spending gift-card balance at
  *   the till involves no card at all, so it earns nothing; counting it would
  *   both double-count the original load and invent rewards out of nothing.
+ * - **Bank rows are excluded** — see `REWARD_EARNING_SOURCES`.
  * - Ordinary transfers (CC payments, inter-account moves) stay excluded.
  */
 function cardEligiblePurchases(flows: EnrichedTxn[], giftCardLoadIds: Set<number>): EnrichedTxn[] {
   return flows.filter(
     (t) =>
       t.amount > 0 &&
-      t.source !== 'manual' &&
+      REWARD_EARNING_SOURCES.has(t.source) &&
       (t.flow === 'expense' || giftCardLoadIds.has(t.id)),
   )
 }
@@ -75,9 +87,9 @@ export type CardRewardContext = {
 }
 
 /**
- * Buckets up to the trailing 12 complete months of real purchase spend (all
- * cards — the question is what spend *would* earn on Cobalt, not just what's
- * already on Amex) into the card's earn tiers. Server-only: pulls in
+ * Buckets up to the trailing 12 complete months of real purchase spend (both
+ * credit cards — the question is what spend *would* earn on Cobalt, not just
+ * what's already on Amex) into the card's earn tiers. Server-only: pulls in
  * app/lib/analytics.ts (and therefore next/headers via demo.ts), so this
  * function must never be imported from a 'use client' component — see
  * amex-cobalt-core.ts for the client-safe re-pricing half.
@@ -239,9 +251,11 @@ function bucketRogersSpend(
  * $61,000 cap.
  *
  * Attribution comes from the card last-4 (`ctx.personById`, resolved through
- * .env.local so no name touches the DB or this public repo). **Rows with no
- * last-4 — bank debits — fall to `self`**, matching the rest of the app; the UI
- * says so, because it can materially skew the split.
+ * .env.local so no name touches the DB or this public repo). Both the Master
+ * and Amex importers carry a last-4 (`app/lib/csv.ts`), and bank rows — the
+ * ones that never had one — are already out of scope via
+ * `REWARD_EARNING_SOURCES`, so the `?? 'self'` fallback should be unreachable
+ * in practice. It stays as the same safe default the rest of the app uses.
  */
 export function computeRogersSpendByPerson(
   flows: EnrichedTxn[],
@@ -280,9 +294,10 @@ export type SpendMatrix = {
   grandTotal: number
 }
 
-// Typed as ImportSource, assigned into SpendMatrix['sources'] (CardSource) —
-// so if the two unions ever drift apart this stops compiling.
-const SOURCE_ORDER: ImportSource[] = ['master', 'amex', 'tangerine', 'scotia', 'manual']
+// Only the reward-earning cards can ever appear (cardEligiblePurchases drops
+// everything else). Typed as ImportSource, assigned into SpendMatrix['sources']
+// (CardSource) — so if the two unions ever drift apart this stops compiling.
+const SOURCE_ORDER: ImportSource[] = ['master', 'amex']
 
 export function computeSpendMatrix(flows: EnrichedTxn[], ctx: CardRewardContext): SpendMatrix {
   const w = rogersWindow(flows, ctx)
@@ -339,6 +354,9 @@ export function computeCardShowdown(
  * Phone bills are excluded because the calculator models them explicitly;
  * counting them here too would double-count. Foreign spend is excluded because
  * its rate (net 0.5%) doesn't change with qualifying status.
+ *
+ * `onAllCards` means both credit cards; bank/debit rows are out of scope for
+ * this whole feature (see `REWARD_EARNING_SOURCES`).
  *
  * `onRogersCard` uses `source === 'master'` — the Rogers Bank Mastercard
  * ingests under that source (§1). If the owner ever carries a second

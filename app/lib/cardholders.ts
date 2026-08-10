@@ -21,7 +21,8 @@ export function cardholderName(last4: string | null): string {
 
 /** Neutral key for the same mapping, for models that must not carry a name.
  *  Rows with no card last-4 (bank debits) fall to `self`, matching
- *  `cardholderName` — see §26 for why that caveat is surfaced in the UI. */
+ *  `cardholderName`. §26 never sees those rows — it excludes bank sources
+ *  entirely — but the default stays consistent with the rest of the app. */
 export function cardholderKey(last4: string | null): 'self' | 'partner' {
   const partnerCards = (process.env.PARTNER_CARDS ?? '')
     .split(',')

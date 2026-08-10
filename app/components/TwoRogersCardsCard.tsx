@@ -1,6 +1,5 @@
 'use client'
 
-import { useMemo } from 'react'
 import { Card } from '@/app/components/AppShell'
 import { formatCurrency } from '@/app/lib/format'
 import {
@@ -8,9 +7,7 @@ import {
   ROGERS_DOMESTIC_BONUS_RATE,
   ROGERS_DOMESTIC_BASE_RATE,
   CARD_SOURCE_LABEL,
-  rogersRates,
-  compareOneVsTwoCards,
-  type RogersSpendByPerson,
+  type TwoCardComparison,
   type CardSource,
   type PersonKey,
 } from '@/app/lib/amex-cobalt-core'
@@ -52,40 +49,31 @@ export type SpendMatrixView = {
  * identical on both accounts, so below one cap the two scenarios earn exactly
  * the same amount. Both sides are priced with Amex already cancelled, since the
  * scenario only makes sense once all household spend is landing on Rogers.
+ *
+ * The comparison itself is computed by `FidoSwitchCard` and passed in, because
+ * the same figure feeds its "Combined annual impact" line when the owner ticks
+ * "add a second primary card" — one calculation, two places showing it.
  */
 export function TwoRogersCardsCard({
-  byPerson,
+  cmp,
   matrix,
   selfName,
   partnerName,
-  redeemTowardBill,
   fidoPricePerLine,
   remainingKoodoLinePrice,
+  countedInCombined,
 }: {
-  byPerson: RogersSpendByPerson
+  cmp: TwoCardComparison
   matrix: SpendMatrixView
   selfName: string
   partnerName: string
-  redeemTowardBill: boolean
   /** From the §25 calculator — the second account needs its own Fido line. */
   fidoPricePerLine: number
   /** What the one-card scenario keeps paying Koodo for the second line. */
   remainingKoodoLinePrice: number
+  /** True when the §25 card is already folding this gain into its total. */
+  countedInCombined: boolean
 }) {
-  // One card → 1 Fido + 1 Koodo. Two cards → 2 Fido (each Account needs its own
-  // qualifying service). The marginal cost is the difference on that one line.
-  const extraPlanCostMonthly = fidoPricePerLine - remainingKoodoLinePrice
-
-  const cmp = useMemo(
-    () =>
-      compareOneVsTwoCards(
-        byPerson,
-        rogersRates({ qualifying: true, redeemTowardBill }),
-        extraPlanCostMonthly,
-      ),
-    [byPerson, redeemTowardBill, extraPlanCostMonthly],
-  )
-
   const v = VERDICT_META[cmp.verdict]
   const nameOf = (p: PersonKey) => (p === 'self' ? selfName : partnerName)
   const householdSpend = cmp.oneCard.annualizedSpend
@@ -104,6 +92,15 @@ export function TwoRogersCardsCard({
         assumes <strong>both</strong> Koodo lines move to Fido — and Amex is cancelled either way, since
         the scenario only exists once everything lands on Rogers.
       </p>
+
+      {countedInCombined && (
+        <p className="mb-3 rounded-lg bg-[var(--surface-2)] p-2.5 text-xs text-[var(--muted)]">
+          ✓ This scenario is currently switched on above, so its{' '}
+          {cmp.netGainAnnual >= 0 ? '+' : ''}
+          {formatCurrency(cmp.netGainAnnual)}/yr is already inside the &ldquo;Combined annual
+          impact&rdquo; figure.
+        </p>
+      )}
 
       <div
         key={cmp.verdict}
@@ -227,9 +224,10 @@ export function TwoRogersCardsCard({
           </table>
         </div>
         <p className="mt-2 text-xs text-[var(--muted)]">
-          Purchases only — card payments and transfers are excluded, gift-card loads included (§10c).
-          Attribution is by card last-4; <strong>bank debit rows carry no last-4, so they count as{' '}
-          {selfName}</strong>, which can skew the split. Phone bills are held at today&apos;s amounts:
+          Credit-card purchases only — Tangerine and Scotia debit activity is out of scope for this
+          whole page, along with card payments and transfers; gift-card loads are included (§10c).
+          Attribution is by the card last-4 on each statement row, which both importers carry; any row
+          that somehow lacks one falls to {selfName}. Phone bills are held at today&apos;s amounts:
           both scenarios have a Fido line, so the redemption bonus affects the two totals equally and
           cancels out of the difference.
         </p>
