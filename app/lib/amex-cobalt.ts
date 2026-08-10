@@ -180,6 +180,24 @@ export function computeRogersSpend(flows: EnrichedTxn[], ctx: CardRewardContext)
   return bucketRogersSpend(w.inWindow, w.months, w.monthsOfData, ctx.countryById)
 }
 
+/**
+ * The spend actually **on** the Rogers Mastercard today, as opposed to
+ * `computeRogersSpend`'s hypothetical "what if the whole household ran through
+ * it". Same `source === 'master'` basis (and same caveat) as
+ * `computePhoneSwitchSpendBasis` — the dashboard's Rogers box reports the card
+ * the household really carries, not a scenario.
+ */
+export function computeRogersCardSpend(flows: EnrichedTxn[], ctx: CardRewardContext): RogersSpendData {
+  const w = rogersWindow(flows, ctx)
+  if (!w) return EMPTY_ROGERS_SPEND
+  return bucketRogersSpend(
+    w.inWindow.filter((t) => t.source === 'master'),
+    w.months,
+    w.monthsOfData,
+    ctx.countryById,
+  )
+}
+
 const EMPTY_ROGERS_SPEND: RogersSpendData = {
   monthsOfData: 0,
   domesticSpend: 0,

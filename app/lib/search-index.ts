@@ -56,7 +56,8 @@ export const FEATURE_INDEX: FeatureEntry[] = [
   { label: 'Available to give a job', page: 'Overview', href: '/#available-to-give-a-job', keywords: ['surplus', 'allocate', 'spare', 'net zero', 'goal', 'every dollar a job'] },
   { label: 'Bills calendar', page: 'Overview', href: '/#bills-calendar', keywords: ['recurring', 'due', 'payments', 'subscriptions', 'mortgage', 'payday', 'month grid'] },
   { label: 'Goals summary', page: 'Overview', href: '/#goals', keywords: ['savings'] },
-  { label: 'Amex Cobalt: worth it?', page: 'Overview', href: '/#amex-cobalt-worth-it', keywords: ['credit card', 'membership fee', 'points', 'rewards', 'keep or cancel'] },
+  { label: 'Amex Cobalt: net value', page: 'Overview', href: '/#amex-cobalt-net-value', keywords: ['credit card', 'membership fee', 'points', 'rewards', 'cash back', 'net positive', 'keep or cancel'] },
+  { label: 'Rogers Mastercard: net value', page: 'Overview', href: '/#rogers-mastercard-net-value', keywords: ['credit card', 'cash back', 'rogers bank', 'mastercard', 'fee', 'net positive', 'rewards'] },
   { label: 'Top insights', page: 'Overview', href: '/', keywords: ['cards', 'highlights'] },
   { label: 'Import a statement', page: 'Manage › Import', href: '/manage/import#import-a-statement', keywords: ['upload', 'csv', 'sync'] },
 
