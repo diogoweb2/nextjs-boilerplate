@@ -68,6 +68,10 @@ export function CobaltAnalysis({
   // The bill you'd redeem against is the Fido plan being quoted — it is not in
   // the ledger, so nothing can infer it.
   const [fidoQuotedPrice, setFidoQuotedPrice] = useState(30)
+  const [switchBothLines, setSwitchBothLines] = useState(false)
+  // Two Fido lines means two bills to redeem against, so the §24 bonus cap
+  // doubles with the §25 scenario.
+  const qualifyingBillMonthly = switchBothLines ? fidoQuotedPrice * 2 : fidoQuotedPrice
 
   const analysis = useMemo(() => valueFromPoints(points, cpp, COBALT_FEE_MONTHLY), [points, cpp])
   const rogers = useMemo(
@@ -77,10 +81,10 @@ export function CobaltAnalysis({
         rogersRates({
           qualifying: hasQualifyingService,
           redeemTowardBill,
-          redemptionCapMonthly: fidoQuotedPrice,
+          redemptionCapMonthly: qualifyingBillMonthly,
         }),
       ),
-    [rogersSpend, hasQualifyingService, redeemTowardBill, fidoQuotedPrice],
+    [rogersSpend, hasQualifyingService, redeemTowardBill, qualifyingBillMonthly],
   )
   const showdown = useMemo(() => compareCards(analysis, rogers), [analysis, rogers])
   // Rogers priced at the *base* (no-qualifying-service) rate. The Fido card
@@ -222,9 +226,11 @@ export function CobaltAnalysis({
               <strong>+{(ROGERS_REDEMPTION_BONUS * 100).toFixed(0)}%</strong> redemption bonus (vs. a plain
               statement credit), capped at what you actually owe on that bill.
               <span className="mt-0.5 block text-xs text-[var(--muted)]">
-                Capped at the <strong>{formatCurrency(fidoQuotedPrice)}/mo</strong> Fido price you
-                quoted below — that hypothetical plan is the only Rogers-family bill in play, and it
-                isn&apos;t in your statements, so it has to come from the calculator.
+                Capped at the <strong>{formatCurrency(qualifyingBillMonthly)}/mo</strong> Fido bill you
+                quoted below ({switchBothLines ? 'two lines' : 'one line'}) — that hypothetical plan
+                is the only Rogers-family bill in play, and it isn&apos;t in your statements, so it
+                has to come from the calculator. A bill of B is worth at most B/3 a year, since
+                redeeming $1 buys $1.50 of bill.
                 {redeemTowardBill && (
                   <>
                     {' '}
@@ -336,7 +342,7 @@ export function CobaltAnalysis({
               net on {formatCurrency(rogers.foreignSpend)}/yr foreign-currency spend (3% back minus Canada&apos;s
               2.5% FX fee)
               {redeemTowardBill
-                ? `, plus ${formatCurrency(rogers.annualizedRedemptionBonus)}/yr from the ${(ROGERS_REDEMPTION_BONUS * 100).toFixed(0)}% bonus on cash back redeemed against the ${formatCurrency(fidoQuotedPrice)}/mo Fido bill`
+                ? `, plus ${formatCurrency(rogers.annualizedRedemptionBonus)}/yr from the ${(ROGERS_REDEMPTION_BONUS * 100).toFixed(0)}% bonus on cash back redeemed against the ${formatCurrency(qualifyingBillMonthly)}/mo Fido bill`
                 : ''}
               . No monthly fee.
             </div>
@@ -395,6 +401,8 @@ export function CobaltAnalysis({
         twoCards={twoCards}
         fidoQuotedPrice={fidoQuotedPrice}
         setFidoQuotedPrice={setFidoQuotedPrice}
+        switchBothLines={switchBothLines}
+        setSwitchBothLines={setSwitchBothLines}
       />
     </div>
   )

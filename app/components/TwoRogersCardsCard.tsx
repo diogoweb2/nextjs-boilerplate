@@ -61,7 +61,7 @@ export function TwoRogersCardsCard({
   partnerName,
   fidoPricePerLine,
   remainingKoodoLinePrice,
-  countedInCombined,
+  bothLinesAlreadyOnFido,
 }: {
   cmp: TwoCardComparison
   matrix: SpendMatrixView
@@ -71,8 +71,9 @@ export function TwoRogersCardsCard({
   fidoPricePerLine: number
   /** What the one-card scenario keeps paying Koodo for the second line. */
   remainingKoodoLinePrice: number
-  /** True when the §25 card is already folding this gain into its total. */
-  countedInCombined: boolean
+  /** True when §25 is already moving both lines — the second account then needs
+   *  no extra line, so this scenario costs nothing to run. */
+  bothLinesAlreadyOnFido: boolean
 }) {
   const v = VERDICT_META[cmp.verdict]
   const nameOf = (p: PersonKey) => (p === 'self' ? selfName : partnerName)
@@ -93,12 +94,11 @@ export function TwoRogersCardsCard({
         the scenario only exists once everything lands on Rogers.
       </p>
 
-      {countedInCombined && (
+      {bothLinesAlreadyOnFido && (
         <p className="mb-3 rounded-lg bg-[var(--surface-2)] p-2.5 text-xs text-[var(--muted)]">
-          ✓ This scenario is currently switched on above, so its{' '}
-          {cmp.netGainAnnual >= 0 ? '+' : ''}
-          {formatCurrency(cmp.netGainAnnual)}/yr is already inside the &ldquo;Combined annual
-          impact&rdquo; figure.
+          ✓ You already have <strong>both</strong> lines on Fido above, so a second account needs no
+          extra line — it just splits the two bills you already pay. Nothing left to cost, which is
+          why the only thing left is the cap.
         </p>
       )}
 
@@ -178,12 +178,25 @@ export function TwoRogersCardsCard({
         <strong className="text-[var(--foreground)]">
           The second card is free — Rogers World Elite has no annual fee.
         </strong>{' '}
-        {cmp.netGainAnnual < 0 ? 'The negative is entirely the phone line' : 'The only cost here is the phone line'}
-        : a second Fido line at {formatCurrency(fidoPricePerLine)} replacing the{' '}
-        {formatCurrency(remainingKoodoLinePrice)} Koodo line the one-card plan keeps, i.e.{' '}
-        {formatCurrency(cmp.extraPlanCostAnnual)}/yr sticker, {formatCurrency(cmp.netExtraPlanCostAnnual)}
-        /yr after the cash back that spend itself earns. Both prices come from the calculator above —
-        drop the Fido quote to {formatCurrency(remainingKoodoLinePrice)} and this cost disappears.
+        {bothLinesAlreadyOnFido ? (
+          <>
+            And with both lines already on Fido there is no extra line to buy either, so this
+            scenario is pure upside — every dollar of it cap headroom.
+          </>
+        ) : (
+          <>
+            {cmp.netGainAnnual < 0
+              ? 'The negative is entirely the phone line'
+              : 'The only cost here is the phone line'}
+            : a second Fido line at {formatCurrency(fidoPricePerLine)} replacing the{' '}
+            {formatCurrency(remainingKoodoLinePrice)} Koodo line the one-card plan keeps, i.e.{' '}
+            {formatCurrency(cmp.extraPlanCostAnnual)}/yr sticker,{' '}
+            {formatCurrency(cmp.netExtraPlanCostAnnual)}/yr after the cash back that spend itself
+            earns. Both prices come from the calculator above — tick &ldquo;move both lines&rdquo;
+            there, or drop the Fido quote to {formatCurrency(remainingKoodoLinePrice)}, and this cost
+            disappears.
+          </>
+        )}
       </p>
 
       {/* Cap usage, per account */}

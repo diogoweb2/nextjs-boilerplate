@@ -474,23 +474,33 @@ export function compareOneVsTwoCards(
   rates: RogersRates,
   opts: {
     /**
-     * Monthly Fido bill **one account** can redeem against. Same number on both
-     * sides: the one-card household has one Fido line, the two-card household
-     * has one per person — which is exactly why two accounts collect two
-     * bonuses off it.
+     * Monthly Fido bill the **single shared account** can redeem against — the
+     * total of every line, since they all bill to that one card.
      */
-    qualifyingBillPerAccount: number
-    /** Sticker cost per month of the second line (Fido price − Koodo re-quote). */
+    oneCardQualifyingBill: number
+    /**
+     * Monthly Fido bill **each** account can redeem against when there are two.
+     * Splitting the same lines across two accounts is what lets the household
+     * collect two capped bonuses instead of one — but only while each bonus
+     * stays under its own `bill / 1.5` ceiling, so the gain shrinks to nothing
+     * once every line has already moved.
+     */
+    twoCardQualifyingBillEach: number
+    /** Sticker cost per month of any *extra* line the second account needs.
+     *  Zero when both lines have already moved to Fido. */
     extraPlanCostMonthly: number
   },
 ): TwoCardComparison {
-  const scenarioRates: RogersRates = {
+  const oneCard = cashbackFromSpend(byPerson.combined, {
     ...rates,
-    redemptionCapMonthly: opts.qualifyingBillPerAccount,
+    redemptionCapMonthly: opts.oneCardQualifyingBill,
+  })
+  const twoCardRates: RogersRates = {
+    ...rates,
+    redemptionCapMonthly: opts.twoCardQualifyingBillEach,
   }
-  const oneCard = cashbackFromSpend(byPerson.combined, scenarioRates)
-  const self = cashbackFromSpend(byPerson.self, scenarioRates)
-  const partner = cashbackFromSpend(byPerson.partner, scenarioRates)
+  const self = cashbackFromSpend(byPerson.self, twoCardRates)
+  const partner = cashbackFromSpend(byPerson.partner, twoCardRates)
 
   const twoCardCashback = self.annualizedCashback + partner.annualizedCashback
   // Floored at 0: splitting spend across two accounts can never *lose* cash

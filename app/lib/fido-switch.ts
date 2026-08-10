@@ -13,8 +13,12 @@ import {
 export const DEFAULT_KOODO_TWO_LINE_TOTAL = 45.2
 
 export type FidoScenario = {
-  /** The most Fido can charge and still leave the household no worse off. */
+  /** The most Fido can charge **per line** and still leave the household no
+   *  worse off. With both lines moved that ceiling applies twice over, so it
+   *  falls well below the one-line figure. */
   breakEvenPrice: number
+  /** 1 or 2 — echoed back so the UI can say "per line" only when it matters. */
+  linesOnFido: 1 | 2
   /** Positive = switching saves this much per month. */
   monthlyDelta: number
   annualDelta: number
@@ -29,10 +33,19 @@ export type FidoSwitchInput = {
   currentTwoLineTotal: number
   /**
    * Asked for explicitly (not assumed to be half the two-line total) because
-   * dropping to one line usually loses Koodo's multi-line discount.
+   * dropping to one line usually loses Koodo's multi-line discount. Unused when
+   * `switchBothLines` is on — there is no Koodo line left to re-quote.
    */
   remainingKoodoLinePrice: number
+  /** Quoted price of **one** Fido line. */
   fidoQuotedPrice: number
+  /**
+   * Move both lines to Fido, leaving Koodo entirely. Beyond the obvious plan
+   * cost, this doubles the redeemable Rogers-family bill, so the redemption
+   * bonus can be worth up to twice as much (subject to its own `bill / 1.5`
+   * ceiling — see `redemptionBonusValue`).
+   */
+  switchBothLines?: boolean
   /** Card-wide rate today, with no qualifying service (1.5%). */
   currentRate: number
   /** Card-wide rate once a Fido line makes you a qualifying customer (2%). */
@@ -81,17 +94,26 @@ function monthlyCashback(
   return earned + bonus
 }
 
+/** How many lines end up on Fido, and therefore how big the redeemable
+ *  Rogers-family bill is. */
+export function fidoLineCount(input: Pick<FidoSwitchInput, 'switchBothLines'>): 1 | 2 {
+  return input.switchBothLines ? 2 : 1
+}
+
 /** Net monthly outlay attributable to this decision: phone bills minus all the
  *  cash back the card throws off (including on non-phone spend, since the rate
  *  on that spend is exactly what the switch changes). */
 function netMonthlyCost(input: FidoSwitchInput, fidoPrice: number): number {
-  const phone = input.remainingKoodoLinePrice + fidoPrice
+  const lines = fidoLineCount(input)
+  // Both lines moved → no Koodo line left to pay for, and two Fido bills to
+  // redeem against.
+  const phone = lines === 2 ? fidoPrice * 2 : input.remainingKoodoLinePrice + fidoPrice
   const cashback = monthlyCashback(
     phone + input.otherRogersSpend,
     input.switchedRate,
     input.postCapRate ?? ROGERS_DOMESTIC_BASE_RATE,
     input.annualCap ?? ROGERS_ANNUAL_CAP,
-    fidoPrice,
+    fidoPrice * lines,
     input.redeemTowardBill,
   )
   return phone - cashback
@@ -116,12 +138,15 @@ export function computeFidoSwitch(input: FidoSwitchInput): FidoScenario {
   const afterNetCost = netMonthlyCost(input, input.fidoQuotedPrice)
   const monthlyDelta = todayNetCost - afterNetCost
 
+  const lines = fidoLineCount(input)
+  const afterPhone =
+    lines === 2 ? input.fidoQuotedPrice * 2 : input.remainingKoodoLinePrice + input.fidoQuotedPrice
   const afterCashback = monthlyCashback(
-    input.remainingKoodoLinePrice + input.fidoQuotedPrice + input.otherRogersSpend,
+    afterPhone + input.otherRogersSpend,
     input.switchedRate,
     postCapRate,
     annualCap,
-    input.fidoQuotedPrice,
+    input.fidoQuotedPrice * lines,
     input.redeemTowardBill,
   )
 
@@ -152,9 +177,9 @@ export function computeFidoSwitch(input: FidoSwitchInput): FidoScenario {
     breakEvenPrice,
     monthlyDelta,
     annualDelta: monthlyDelta * 12,
-    planCostDelta:
-      input.currentTwoLineTotal - (input.remainingKoodoLinePrice + input.fidoQuotedPrice),
+    planCostDelta: input.currentTwoLineTotal - afterPhone,
     cashbackDelta: afterCashback - todayCashback,
+    linesOnFido: lines,
     verdict,
   }
 }

@@ -2229,13 +2229,26 @@ every other analytics page.
   12-month bar chart of monthly advantage, and the methodology notes above shown inline (so the
   model stays auditable without reading this file).
 
-## 25. Switch 1 line to Fido? (`app/lib/fido-switch.ts`, `FidoSwitchCard.tsx`)
+## 25. Switch to Fido? (`app/lib/fido-switch.ts`, `FidoSwitchCard.tsx`)
 
 A break-even calculator on the same Accounts › Amex Cobalt tab, below the Rogers comparison, for a
-real decision the owner is weighing: move one of two Koodo lines ($45.20/mo combined today) to Fido
-and pay the Fido bill on the Rogers Mastercard for the §24 bonus rate. **Not** modeled as "switch
-both lines" — the owner has confirmed two-line Koodo already beats two separate single-line bills,
-so the tool only ever asks about one line moving.
+real decision the owner is weighing: move one or both of two Koodo lines ($45.20/mo combined today)
+to Fido and pay the Fido bill on the Rogers Mastercard for the §24 bonus rate.
+
+- **`switchBothLines` toggles the scenario.** One line → the household keeps a re-quoted Koodo line
+  alongside one Fido line. Both lines → Koodo is gone, the re-quote input disappears (there is
+  nothing left to re-quote), and the phone cost is `fidoQuotedPrice × 2`.
+- **Both lines is not simply "one line, doubled".** It also **doubles the redeemable Rogers-family
+  bill**, so the redemption bonus can be worth up to twice as much — subject to its own `bill / 1.5`
+  ceiling (§24 correction 12). That is why moving both can win even though the plan cost is worse:
+  on the owner's spend, `breakEvenPrice` per line goes $48.40 → $35.50 with the bonus off, but
+  $73.16 → $53.66 with it on.
+- **`breakEvenPrice` is always per line**, and `linesOnFido` is echoed back on the scenario so the UI
+  only says "per line" when that distinction matters. With both lines moved the ceiling is paid
+  twice, so it necessarily sits well below the one-line figure.
+- Originally modelled as one line only, on the owner's early note that two-line Koodo beats two
+  single-line bills. That is still true on plan price alone — it stops being the whole story once the
+  second Fido bill's redemption bonus is counted.
 
 **Only the plan price is hypothetical** — the spend the decision hinges on comes from real
 statements. The value of switching is dominated not by the phone bill but by the **card-wide
@@ -2350,13 +2363,18 @@ two caps, and up to $122,000/yr at the elevated rates. Rendered as a card inside
   the card and earns the rate like any other purchase, so measuring its sticker price against net
   cash back would repeat §25 correction 3. It earns `rates.domestic` unless *both* accounts are
   already past their caps, since it lands on whichever still has headroom.
-- **Stackable as a third option** — `compareOneVsTwoCards` is called in `FidoSwitchCard`, not in the
-  §26 card, so the same figure both drives that card and folds into §25's "Combined annual impact"
-  when the owner ticks **"Add a second primary Rogers card"**. That checkbox is nested under (and
-  disabled without) "Also cancel Amex Cobalt": §26 prices *both* of its sides with everything already
-  on Rogers, so a second primary card is not a standalone scenario and must never contribute on its
-  own. The §26 card shows a confirmation line when its gain is already counted upstream, so the same
-  dollars are never read as two separate wins.
+- **Not a checkbox in §25.** It briefly was — a "add a second primary Rogers card" tickbox nested
+  under "also cancel Amex Cobalt", folding this gain into the combined total. The owner had it
+  removed: it was disabled in its default state, so it read as broken UI, and three stacked
+  conditional scenarios in one card is more than the card can carry. §26 now stands on its own and
+  is purely informational.
+- **`switchBothLines` in §25 changes this scenario's cost to zero.** With both lines already on
+  Fido, a second account buys no extra line — it just splits the two bills the household already
+  pays. `extraPlanCostMonthly` becomes 0, so the comparison is pure upside. That is also why the two
+  sides take *separate* qualifying bills: `oneCardQualifyingBill` is the total of every line (they
+  all bill to one card), while `twoCardQualifyingBillEach` is one line's price. When both lines have
+  already moved, splitting them across two accounts redeems the same total, so
+  `redemptionGainAnnual` correctly collapses toward zero and only the cap effect remains.
 - **Attribution by cardholder** — `computeRogersSpendByPerson` splits the same trailing-12-month
   eligible-purchase set (§24 `cardEligiblePurchases`) using `ctx.personById`, resolved from the card
   last-4 through `app/lib/cardholders.ts`. Names live only in `.env.local`; the model itself carries
