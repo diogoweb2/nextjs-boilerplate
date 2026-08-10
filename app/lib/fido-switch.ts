@@ -5,7 +5,7 @@
 // (1.5% → 2%), not just on the phone bill.
 
 import {
-  ROGERS_REDEMPTION_BONUS,
+  redemptionBonusValue,
   ROGERS_ANNUAL_CAP,
   ROGERS_DOMESTIC_BASE_RATE,
 } from '@/app/lib/amex-cobalt-core'
@@ -74,8 +74,10 @@ function monthlyCashback(
   const over = Math.max(0, annualSpend - annualCap)
   const earned = (under * rate + over * postCapRate) / 12
   // The 1.5x bonus only applies to cash back actually redeemed against a
-  // qualifying bill, so it is capped by both what you earned and what you owe.
-  const bonus = redeem ? Math.min(earned, qualifyingBill) * ROGERS_REDEMPTION_BONUS : 0
+  // qualifying bill, so it is capped by both what you earned and what you owe —
+  // the latter divided by 1.5, since the bill caps the *credit*, not the
+  // redemption. See `redemptionBonusValue`.
+  const bonus = redeem ? redemptionBonusValue(earned, qualifyingBill) : 0
   return earned + bonus
 }
 

@@ -191,6 +191,27 @@ export const ROGERS_ANNUAL_CAP = 61_000
  *  Rogers/Fido/Shaw/Comwave bill instead of a plain statement credit. Applies at
  *  redemption, so it is not subject to the annual spend cap. */
 export const ROGERS_REDEMPTION_BONUS = 0.5
+/** What $1 of redeemed cash back is worth against a qualifying bill: $1.50. */
+export const ROGERS_REDEMPTION_MULTIPLIER = 1 + ROGERS_REDEMPTION_BONUS
+
+/**
+ * Extra value from redeeming cash back against a qualifying bill, over a plain
+ * statement credit.
+ *
+ * **The bill caps the credit, not the redemption.** Owner's worked example:
+ * $20,000 of spend earns $400, and that $400 "completely wipes out a $600
+ * Rogers bill" — because $400 redeemed buys $600 of bill. So the most you can
+ * redeem against a bill of B is `B / 1.5`, not B: past that there is no bill
+ * left to apply it to and the remainder falls back to a 1x statement credit.
+ *
+ * Consequence worth remembering: the bonus on a bill of B can never exceed
+ * **B / 3** (`B/1.5 × 0.5`). A $600/yr Fido bill is worth at most $200/yr,
+ * which is exactly the owner's example read the other way round.
+ */
+export function redemptionBonusValue(earned: number, qualifyingBill: number): number {
+  const maxRedeemable = Math.max(0, qualifyingBill) / ROGERS_REDEMPTION_MULTIPLIER
+  return Math.min(Math.max(0, earned), maxRedeemable) * ROGERS_REDEMPTION_BONUS
+}
 
 export const ROGERS_FAMILY_KEYWORDS = ['rogers', 'fido', 'shaw', 'comwave']
 const ROGERS_FAMILY_RE = wordMatcher(ROGERS_FAMILY_KEYWORDS)
@@ -335,12 +356,12 @@ export function cashbackFromSpend(data: RogersSpendData, rates: RogersRates = DE
     const forRate = underShare * rates.foreign + (1 - underShare) * rates.foreignPostCap
 
     const earned = m.domesticSpend * domRate + m.foreignSpend * forRate
-    // The bonus can't exceed what's actually redeemed against the bill, nor
-    // what's been earned to redeem in the first place. The bill is the
-    // scenario's quoted plan price when there is one — a Fido plan being priced
-    // is not in the ledger, so `familySpend` would silently cap it at 0.
+    // The bill is the scenario's quoted plan price when there is one — a Fido
+    // plan being priced is not in the ledger, so `familySpend` would silently
+    // cap it at 0. See `redemptionBonusValue` for why the bill is divided by
+    // 1.5 before it caps anything.
     const qualifyingBill = rates.redemptionCapMonthly ?? m.familySpend
-    const bonus = rates.redeemTowardBill ? Math.min(earned, qualifyingBill) * ROGERS_REDEMPTION_BONUS : 0
+    const bonus = rates.redeemTowardBill ? redemptionBonusValue(earned, qualifyingBill) : 0
     bonusTotal += bonus
 
     earnedCapped += earned

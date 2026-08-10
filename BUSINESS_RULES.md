@@ -2417,3 +2417,19 @@ two caps, and up to $122,000/yr at the elevated rates. Rendered as a card inside
     annual fee reads as a bug. The card now states that the second card is free and that any negative
     is the phone line, with the sticker and netted line cost both shown, and points at the one input
     that removes it.
+
+### §24 corrections (continued)
+
+12. **The bill capped the redemption, when it actually caps the credit.** `cashbackFromSpend` used
+    `min(earned, bill) × 0.5`, which lets a $600/yr bill absorb $600 of cash back and hand back $900
+    of credit against it. The owner's worked example is the disproof: $20,000 of spend earns $400,
+    and that $400 "completely wipes out a $600 Rogers bill" — $400 redeemed *buys* $600 of bill. So
+    the ceiling on what you can redeem is `bill / 1.5`; past that there is no bill left and the
+    remainder falls back to a plain 1x statement credit.
+    - Now `redemptionBonusValue(earned, bill)` — a single exported helper used by both
+      `cashbackFromSpend` (§24/§26) and `monthlyCashback` (§25), which had the same bug.
+    - **The bonus on a bill of B can never exceed `B / 3`** (`B/1.5 × 0.5`), so a $600/yr Fido bill is
+      worth at most $200/yr no matter how much is spent on the card. The old formula plateaued at
+      `B / 2` = $300/yr, which is the ~$300 swing the owner spotted.
+    - Verified: at $20,000 spend and a $600 bill the model now credits exactly $600.00 against the
+      bill; the credited amount is clamped at the bill for every spend level tested up to $91k.
