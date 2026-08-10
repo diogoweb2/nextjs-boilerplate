@@ -416,8 +416,15 @@ export type TwoCardComparison = {
   twoCardCashback: number
   /** Annual cash back gained by adding the second account. Never negative. */
   cashbackGain: number
-  /** Annual cost of the extra qualifying service the second account needs. */
+  /** The slice of `cashbackGain` that comes from cap headroom alone. */
+  capGainAnnual: number
+  /** The slice that comes from the second account's own redemption bonus. */
+  redemptionGainAnnual: number
+  /** Gross annual cost of the extra qualifying service the second account
+   *  needs — the sticker difference, before the card pays anything back. */
   extraPlanCostAnnual: number
+  /** Same cost after the cash back that extra spend itself earns. */
+  netExtraPlanCostAnnual: number
   netGainAnnual: number
   /** Annualized spend that only the second cap keeps at the elevated rate. */
   spendRescuedFromCap: number
@@ -428,27 +435,53 @@ export type TwoCardComparison = {
  * One Rogers account vs. two (one per cardholder), both priced with Amex
  * already cancelled so all household spend lands on Rogers either way.
  *
- * The gain is *purely* a cap effect: below one cap the two scenarios earn
- * exactly the same, since the rate is whole-card and identical on both
- * accounts. `extraPlanCostMonthly` is what the second account costs to keep
- * qualifying — each Account needs its own Rogers/Fido/Shaw/Comwave service, so
- * a second card means a second line (per the owner: switching *both* Koodo
- * lines to Fido).
+ * **The second card itself is free** — Rogers World Elite has no annual fee, so
+ * nothing here can make the *card* a cost. Any negative comes entirely from
+ * `extraPlanCostMonthly`: each Account needs its own qualifying
+ * Rogers/Fido/Shaw/Comwave service, so a second card means a second Fido line
+ * replacing a cheaper Koodo one (per the owner: switching *both* Koodo lines).
+ *
+ * Two things a second account earns, both of which the first version missed:
+ *  1. **Cap headroom** — a second $61k band. Below one cap this is exactly zero,
+ *     since the rate is whole-card and identical on both accounts.
+ *  2. **Its own redemption bonus** — each account redeems against its own Fido
+ *     bill, so two accounts get two capped bonuses instead of one. At a typical
+ *     bill this is worth more than the cap effect.
  */
 export function compareOneVsTwoCards(
   byPerson: RogersSpendByPerson,
   rates: RogersRates,
-  extraPlanCostMonthly: number,
+  opts: {
+    /**
+     * Monthly Fido bill **one account** can redeem against. Same number on both
+     * sides: the one-card household has one Fido line, the two-card household
+     * has one per person — which is exactly why two accounts collect two
+     * bonuses off it.
+     */
+    qualifyingBillPerAccount: number
+    /** Sticker cost per month of the second line (Fido price − Koodo re-quote). */
+    extraPlanCostMonthly: number
+  },
 ): TwoCardComparison {
-  const oneCard = cashbackFromSpend(byPerson.combined, rates)
-  const self = cashbackFromSpend(byPerson.self, rates)
-  const partner = cashbackFromSpend(byPerson.partner, rates)
+  const scenarioRates: RogersRates = {
+    ...rates,
+    redemptionCapMonthly: opts.qualifyingBillPerAccount,
+  }
+  const oneCard = cashbackFromSpend(byPerson.combined, scenarioRates)
+  const self = cashbackFromSpend(byPerson.self, scenarioRates)
+  const partner = cashbackFromSpend(byPerson.partner, scenarioRates)
 
   const twoCardCashback = self.annualizedCashback + partner.annualizedCashback
   // Floored at 0: splitting spend across two accounts can never *lose* cash
-  // back (same rates, strictly more headroom), so a negative here would be a
-  // rounding artefact of the pro-rated window, not a real effect.
+  // back (same rates, strictly more headroom, one more redeemable bill), so a
+  // negative here would be a rounding artefact of the pro-rated window.
   const cashbackGain = Math.max(0, twoCardCashback - oneCard.annualizedCashback)
+  const redemptionGainAnnual = Math.max(
+    0,
+    self.annualizedRedemptionBonus + partner.annualizedRedemptionBonus -
+      oneCard.annualizedRedemptionBonus,
+  )
+  const capGainAnnual = Math.max(0, cashbackGain - redemptionGainAnnual)
 
   const cap = rates.annualCap
   const spendRescuedFromCap =
@@ -456,8 +489,16 @@ export function compareOneVsTwoCards(
     Math.min(partner.annualizedSpend, cap) -
     Math.min(oneCard.annualizedSpend, cap)
 
-  const extraPlanCostAnnual = extraPlanCostMonthly * 12
-  const netGainAnnual = cashbackGain - extraPlanCostAnnual
+  const extraPlanCostAnnual = opts.extraPlanCostMonthly * 12
+  // The extra line is itself a charge on the card, so it earns the rate like
+  // any other purchase — comparing its *gross* price against *net* cash back
+  // would repeat §25 correction 3, where a gross Koodo bill was measured
+  // against a net Fido one. It lands on whichever account still has headroom,
+  // so it earns the elevated rate unless *both* accounts are already past cap.
+  const marginalRate =
+    Math.min(self.annualizedSpend, partner.annualizedSpend) < cap ? rates.domestic : rates.domesticPostCap
+  const netExtraPlanCostAnnual = extraPlanCostAnnual * (1 - marginalRate)
+  const netGainAnnual = cashbackGain - netExtraPlanCostAnnual
 
   // Wider "close" band ($10/mo) than the other verdicts on this page: running a
   // second card and a second carrier account is real ongoing admin, so a
@@ -471,7 +512,10 @@ export function compareOneVsTwoCards(
     partner,
     twoCardCashback,
     cashbackGain,
+    capGainAnnual,
+    redemptionGainAnnual,
     extraPlanCostAnnual,
+    netExtraPlanCostAnnual,
     netGainAnnual,
     spendRescuedFromCap,
     verdict,

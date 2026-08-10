@@ -126,7 +126,10 @@ export function TwoRogersCardsCard({
                   <strong>one</strong> {formatCurrency(ROGERS_ANNUAL_CAP)} cap, so a second one earns
                   nothing at all.
                 </>
-              )}
+              )}{' '}
+              Worth <strong>+{formatCurrency(cmp.cashbackGain)}/yr</strong> in cash back, against{' '}
+              {formatCurrency(cmp.netExtraPlanCostAnnual)}/yr for the extra Fido line the second
+              account needs to stay qualifying.
             </div>
           </div>
         </div>
@@ -139,14 +142,20 @@ export function TwoRogersCardsCard({
         </div>
       </div>
 
-      {/* Where the number comes from */}
-      <div className="mt-3 grid grid-cols-1 gap-2 rounded-lg bg-[var(--surface-2)] p-3 text-sm sm:grid-cols-3">
+      {/* Where the number comes from. Split into the two things a second
+          account actually earns, then the one thing it costs. */}
+      <div className="mt-3 grid grid-cols-2 gap-2 rounded-lg bg-[var(--surface-2)] p-3 text-sm sm:grid-cols-4">
         <Line label="One card" value={`${formatCurrency(cmp.oneCard.annualizedCashback)}/yr`} />
         <Line label="Two cards" value={`${formatCurrency(cmp.twoCardCashback)}/yr`} />
         <Line
-          label="Extra cash back"
-          value={`+${formatCurrency(cmp.cashbackGain)}/yr`}
-          tone={cmp.cashbackGain > 0 ? 'positive' : undefined}
+          label="From the 2nd cap"
+          value={`+${formatCurrency(cmp.capGainAnnual)}/yr`}
+          tone={cmp.capGainAnnual > 0 ? 'positive' : undefined}
+        />
+        <Line
+          label="From the 2nd bonus"
+          value={`+${formatCurrency(cmp.redemptionGainAnnual)}/yr`}
+          tone={cmp.redemptionGainAnnual > 0 ? 'positive' : undefined}
         />
         <Line
           label={`${nameOf('self')} alone`}
@@ -156,20 +165,25 @@ export function TwoRogersCardsCard({
           label={`${nameOf('partner')} alone`}
           value={`${formatCurrency(cmp.partner.annualizedSpend)}/yr spend`}
         />
+        <Line label="Second card's fee" value="$0.00/yr" tone="positive" />
         <Line
-          label="Extra line cost"
-          value={`${cmp.extraPlanCostAnnual >= 0 ? '−' : '+'}${formatCurrency(
-            Math.abs(cmp.extraPlanCostAnnual),
+          label="Extra Fido line"
+          value={`${cmp.netExtraPlanCostAnnual >= 0 ? '−' : '+'}${formatCurrency(
+            Math.abs(cmp.netExtraPlanCostAnnual),
           )}/yr`}
-          tone={cmp.extraPlanCostAnnual > 0 ? 'negative' : 'positive'}
+          tone={cmp.netExtraPlanCostAnnual > 0 ? 'negative' : 'positive'}
         />
       </div>
       <p className="mt-2 text-xs text-[var(--muted)]">
-        Extra line cost = a second Fido line at {formatCurrency(fidoPricePerLine)} replacing the{' '}
-        {formatCurrency(remainingKoodoLinePrice)} Koodo line the one-card plan keeps. Both prices come
-        from the calculator above. Rates are identical on both accounts, so below one cap the two
-        scenarios earn <em>exactly</em> the same — every dollar of gain here is cap headroom, nothing
-        else.
+        <strong className="text-[var(--foreground)]">
+          The second card is free — Rogers World Elite has no annual fee.
+        </strong>{' '}
+        {cmp.netGainAnnual < 0 ? 'The negative is entirely the phone line' : 'The only cost here is the phone line'}
+        : a second Fido line at {formatCurrency(fidoPricePerLine)} replacing the{' '}
+        {formatCurrency(remainingKoodoLinePrice)} Koodo line the one-card plan keeps, i.e.{' '}
+        {formatCurrency(cmp.extraPlanCostAnnual)}/yr sticker, {formatCurrency(cmp.netExtraPlanCostAnnual)}
+        /yr after the cash back that spend itself earns. Both prices come from the calculator above —
+        drop the Fido quote to {formatCurrency(remainingKoodoLinePrice)} and this cost disappears.
       </p>
 
       {/* Cap usage, per account */}

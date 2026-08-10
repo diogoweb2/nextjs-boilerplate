@@ -2326,11 +2326,19 @@ bill. Getting that backwards was the original bug (see "Corrections" below).
 two caps, and up to $122,000/yr at the elevated rates. Rendered as a card inside
 `/accounts/cobalt`, directly after §25.
 
-- **The gain is purely a cap effect.** The Rogers rate is *whole-card* and identical on both
-  accounts, so below one cap the one-card and two-card scenarios earn **exactly** the same. A second
-  card can never rescue spend a single cap already covered. Verified numerically: at $30k and at
-  exactly $61k of household spend the gain is `$0.00`; above it the gain equals
-  `spendRescuedFromCap × (2% − 1.5%)` to the cent.
+- **The second card is free.** Rogers World Elite has no annual fee, so nothing in this model can
+  make the *card* a cost. Any negative verdict is entirely `extraPlanCostMonthly` — the second Fido
+  line. The card says so in those words, because a negative next to a fee-free card reads as a bug.
+- **A second account earns two distinct things**, and `cashbackGain` is reported split between them:
+  - `capGainAnnual` — the second $61k band. Below one cap this is **exactly** zero, since the rate is
+    whole-card and identical on both accounts; a second card cannot rescue spend one cap already
+    covered. Verified: `$0.00` at $30k and at exactly $61k of household spend, and above it the gain
+    equals `spendRescuedFromCap × (2% − 1.5%)` to the cent.
+  - `redemptionGainAnnual` — **each account redeems against its own Fido bill**, so two accounts
+    collect two capped bonuses where one account collects one. `qualifyingBillPerAccount` is
+    therefore the *same* number on both sides (one line's price); the doubling comes from the number
+    of accounts, not the bill. On the owner's real split this is worth *more* than the cap effect and
+    flips the verdict — it was missing entirely at first (see correction 9).
 - **Both sides assume Amex is already cancelled** — the scenario only exists once all household
   spend is landing on Rogers. Both sides also assume a qualifying service, so both are priced at 2%.
 - **Two accounts need two qualifying services**, so this assumes *both* Koodo lines move to Fido
@@ -2338,6 +2346,10 @@ two caps, and up to $122,000/yr at the elevated rates. Rendered as a card inside
   `extraPlanCostMonthly = fidoPricePerLine − remainingKoodoLinePrice`: the one-card plan pays for
   1 Fido + 1 Koodo, the two-card plan for 2 Fido. Both prices are the §25 inputs — `TwoRogersCardsCard`
   is rendered *by* `FidoSwitchCard` (not by `CobaltAnalysis`) precisely so those prices have one home.
+- **That cost is netted, not gross** (`netExtraPlanCostAnnual`). The extra line is itself a charge on
+  the card and earns the rate like any other purchase, so measuring its sticker price against net
+  cash back would repeat §25 correction 3. It earns `rates.domestic` unless *both* accounts are
+  already past their caps, since it lands on whichever still has headroom.
 - **Stackable as a third option** — `compareOneVsTwoCards` is called in `FidoSwitchCard`, not in the
   §26 card, so the same figure both drives that card and folds into §25's "Combined annual impact"
   when the owner ticks **"Add a second primary Rogers card"**. That checkbox is nested under (and
@@ -2388,3 +2400,20 @@ two caps, and up to $122,000/yr at the elevated rates. Rendered as a card inside
 8. **Existing Rogers-family spend is deliberately excluded from the cap**, per the owner ("only the
    payment bonus against the Fido account"). If the ledger does contain such bills the assumptions
    card names the amount and says it isn't counted, so the choice stays visible rather than buried.
+
+### §26 corrections
+
+9. **The second account's own redemption bonus was missing.** `compareOneVsTwoCards` priced all
+   three buckets with rates carrying no `redemptionCapMonthly`, so the cap fell back to `familySpend`
+   — zero, for the same reason as correction 7. The two-card scenario therefore lost its *second*
+   redeemable Fido bill, and the whole feature was reduced to the cap effect alone. On the owner's
+   real split ($27,700 / $63,117) with a $45 line this understated the gain by $270/yr and turned a
+   **+$145/yr "worth it"** into a **−$125/yr "stick to one card"**. The owner caught it from the
+   outside: a fee-free card cannot produce a negative on its own.
+10. **Gross plan cost was compared against net cash back**, exactly the asymmetry §25 correction 3
+    fixed. The extra Fido line is spend on the card and earns the rate; `netExtraPlanCostAnnual` now
+    accounts for that.
+11. **A negative verdict needs its cause named.** Even once correct, "−$X/yr" beside a card with no
+    annual fee reads as a bug. The card now states that the second card is free and that any negative
+    is the phone line, with the sticker and netted line cost both shown, and points at the one input
+    that removes it.

@@ -91,11 +91,10 @@ export function FidoSwitchCard({
   // two-card household 2 Fido (each Account needs its own qualifying service).
   const twoCardCmp = useMemo(
     () =>
-      compareOneVsTwoCards(
-        twoCards.byPerson,
-        rogersRates({ qualifying: true, redeemTowardBill }),
-        fidoQuotedPrice - remainingKoodoLinePrice,
-      ),
+      compareOneVsTwoCards(twoCards.byPerson, rogersRates({ qualifying: true, redeemTowardBill }), {
+        qualifyingBillPerAccount: fidoQuotedPrice,
+        extraPlanCostMonthly: fidoQuotedPrice - remainingKoodoLinePrice,
+      }),
     [twoCards.byPerson, redeemTowardBill, fidoQuotedPrice, remainingKoodoLinePrice],
   )
 
