@@ -13,6 +13,8 @@ import {
   type RogersSpendByPerson,
 } from '@/app/lib/amex-cobalt-core'
 import { TwoRogersCardsCard, type SpendMatrixView } from '@/app/components/TwoRogersCardsCard'
+import { KeepAmexAt2Card } from '@/app/components/KeepAmexAt2Card'
+import { compareKeepAmex } from '@/app/lib/keep-amex'
 
 const INPUT_CLASS =
   'w-28 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-right text-sm tabular-nums text-[var(--foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]'
@@ -115,6 +117,36 @@ export function FidoSwitchCard({
         extraPlanCostMonthly: switchBothLines ? 0 : fidoQuotedPrice - remainingKoodoLinePrice,
       }),
     [twoCards.byPerson, redeemTowardBill, fidoQuotedPrice, remainingKoodoLinePrice, switchBothLines],
+  )
+
+  // §27 lives here for the same reason §26 does: it is the same switch priced
+  // two ways, so it must read the same plan prices. Deliberately independent of
+  // the "also cancel Cobalt" checkbox below — the whole point is to show both
+  // sides of that choice at once rather than making you toggle between them.
+  const keepAmexCmp = useMemo(
+    () =>
+      compareKeepAmex({
+        currentTwoLineTotal,
+        remainingKoodoLinePrice,
+        fidoQuotedPrice,
+        switchBothLines,
+        currentRate: ROGERS_DOMESTIC_BASE_RATE,
+        switchedRate: ROGERS_DOMESTIC_BONUS_RATE,
+        redeemTowardBill,
+        spendOnRogersCard,
+        spendOnAllCards,
+        cobaltCancelAnnualDelta,
+      }),
+    [
+      currentTwoLineTotal,
+      remainingKoodoLinePrice,
+      fidoQuotedPrice,
+      switchBothLines,
+      redeemTowardBill,
+      spendOnRogersCard,
+      spendOnAllCards,
+      cobaltCancelAnnualDelta,
+    ],
   )
 
   const v = VERDICT_META[scenario.verdict]
@@ -306,6 +338,13 @@ export function FidoSwitchCard({
         </div>
       )}
     </Card>
+
+    <KeepAmexAt2Card
+      cmp={keepAmexCmp}
+      spendOnRogersCard={spendOnRogersCard}
+      spendOnAllCards={spendOnAllCards}
+      monthsOfData={monthsOfData}
+    />
 
     <TwoRogersCardsCard
       cmp={twoCardCmp}

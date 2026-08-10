@@ -2451,3 +2451,38 @@ two caps, and up to $122,000/yr at the elevated rates. Rendered as a card inside
       `B / 2` = $300/yr, which is the ~$300 swing the owner spotted.
     - Verified: at $20,000 spend and a $600 bill the model now credits exactly $600.00 against the
       bill; the credited amount is clamped at the bill for every spend level tested up to $91k.
+
+## 27. Keep Amex, but switch to 2%? (`app/lib/keep-amex.ts`, `KeepAmexAt2Card.tsx`)
+
+**The Fido line is not exclusive to cancelling the Cobalt.** It makes the household a qualifying
+Rogers customer, which lifts the *card* to 2% on everything — Amex in the wallet or not. §24 asks
+"Cobalt or Rogers?", §25 asks "is a Fido line worth it?"; neither answered the owner's actual
+question: *if I get the Fido line and keep the Cobalt anyway, how much is that costing me?*
+Rendered as a card inside `/accounts/cobalt`, between §25 and §26.
+
+- **Three futures, one baseline.** Both scenarios are annual deltas against *today* (two Koodo lines,
+  Rogers at 1.5%, Cobalt kept), so their difference is exactly the price of keeping the Cobalt:
+  - `keepAnnual` = `computeFidoSwitch` with `otherRogersSpend = spendOnRogersCard` — only the spend
+    already on the Rogers card gets the lift, because the Amex spend stays on the Amex.
+  - `cancelAnnual` = the same with `otherRogersSpend = spendOnAllCards`, **plus**
+    `cobaltCancelAnnualDelta`.
+  - `costOfKeepingAmex = cancelAnnual − keepAnnual`. Positive = cancelling is ahead by that much.
+- **`cobaltCancelAnnualDelta` must be the base-rate (1.5%) figure**, the same value §25 uses for its
+  "also cancel Cobalt" line. The 0.5pp lift on the Amex spend is already inside
+  `cancelAmex.annualDelta` (it prices the switch against `spendOnAllCards`); adding a bonus-rate
+  delta on top would count the same half-point twice — §25 correction 3 in a new place.
+- **The Fido line cancels out.** Its plan cost and its redemption bonus are identical on both sides,
+  so the gap is purely: Amex points + fee vs. 2% on the Amex spend. The card says this in words,
+  because a reader who has just typed three plan prices will assume they drive this number.
+- **The cap can favour keeping the Amex.** Keeping it leaves less spend on the Rogers card, so the
+  $61,000/yr line bites later. `spendPushedPastCap` is the annualized spend that *only* the cancel
+  path pushes past the cap (earning 1.5% instead of 2%), and the card surfaces the three states —
+  neither path near the cap, only the cancel path over, both over. Both paths include the post-switch
+  phone bills in the card-spend total, since those ride the card too.
+- **Verdict band ±$120/yr**, matching §26 rather than §25's ±$2/mo: under $10/mo the Cobalt's
+  non-cash perks (transferable points instead of cash back, travel insurance, Amex Offers) are a
+  plausible tiebreak, and the app does not price those.
+- **Independent of §25's "also cancel Cobalt" checkbox.** The point is to show both sides of that
+  choice at once, not to make the owner toggle between them and hold two numbers in their head.
+- **Moves with the point-value slider**, since `cobaltCancelAnnualDelta` is derived from the Cobalt
+  analysis priced at the current ¢/point.
