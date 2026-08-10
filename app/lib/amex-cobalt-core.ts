@@ -241,17 +241,32 @@ export type RogersRates = {
   foreignPostCap: number
   /** Spend past which the elevated rates stop, for the observed window. */
   annualCap: number
-  /** Apply the 1.5x redemption bonus, capped at that month's family spend. */
+  /** Apply the 1.5x redemption bonus, capped by `redemptionCapMonthly`. */
   redeemTowardBill: boolean
+  /**
+   * Monthly qualifying bill the redemption bonus is capped at. You can only
+   * redeem against a bill you actually have, and the bill in question is
+   * **hypothetical** — it's the Fido plan being priced, which by definition
+   * isn't in the ledger yet (the household is on Koodo). So the caller passes
+   * the quoted price in rather than letting the model infer it.
+   *
+   * `null` falls back to each month's ledger-derived `familySpend`
+   * (`isRogersFamilyMerchant`), which is only right when no scenario is being
+   * modelled at all — i.e. the dashboard's default showdown.
+   */
+  redemptionCapMonthly: number | null
 }
 
-/** Assembles the six rate fields from the two decisions that actually vary, so
+/** Assembles the rate fields from the few decisions that actually vary, so
  *  callers never hand-roll (and never forget the post-cap pair). */
 export function rogersRates(opts: {
   /** Holding ≥1 Rogers/Fido/Shaw/Comwave service lifts domestic 1.5% → 2%. */
   qualifying: boolean
   redeemTowardBill?: boolean
   annualCap?: number
+  /** See `RogersRates.redemptionCapMonthly`. Pass 0 to model a scenario with no
+   *  qualifying bill to redeem against. */
+  redemptionCapMonthly?: number
 }): RogersRates {
   return {
     domestic: opts.qualifying ? ROGERS_DOMESTIC_BONUS_RATE : ROGERS_DOMESTIC_BASE_RATE,
@@ -260,6 +275,7 @@ export function rogersRates(opts: {
     foreignPostCap: ROGERS_FOREIGN_NET_RATE_POST_CAP,
     annualCap: opts.annualCap ?? ROGERS_ANNUAL_CAP,
     redeemTowardBill: opts.redeemTowardBill ?? false,
+    redemptionCapMonthly: opts.redemptionCapMonthly ?? null,
   }
 }
 
@@ -280,6 +296,13 @@ export type RogersAnalysis = {
   hitsAnnualCap: boolean
   /** Annualized $ lost to the cap vs. an uncapped world. 0 when under it. */
   capCostAnnual: number
+  /** Annualized value of the 1.5x redemption bonus alone, so the UI can show
+   *  what ticking that box is actually worth (it is 0 with no bill to redeem
+   *  against, which is easy to miss otherwise). */
+  annualizedRedemptionBonus: number
+  /** The monthly bill the bonus was capped by — the quoted Fido price when a
+   *  scenario supplied one, else the ledger's own Rogers-family spend. */
+  redemptionCapMonthly: number
 }
 
 /**
@@ -301,6 +324,7 @@ export function cashbackFromSpend(data: RogersSpendData, rates: RogersRates = DE
   // comparison (the bonus is a redemption mechanic, unaffected by the cap).
   let earnedCapped = 0
   let earnedUncapped = 0
+  let bonusTotal = 0
 
   const monthly: RogersMonthPoint[] = data.monthly.map((m) => {
     const monthSpend = m.domesticSpend + m.foreignSpend
@@ -312,8 +336,12 @@ export function cashbackFromSpend(data: RogersSpendData, rates: RogersRates = DE
 
     const earned = m.domesticSpend * domRate + m.foreignSpend * forRate
     // The bonus can't exceed what's actually redeemed against the bill, nor
-    // what's been earned to redeem in the first place.
-    const bonus = rates.redeemTowardBill ? Math.min(earned, m.familySpend) * ROGERS_REDEMPTION_BONUS : 0
+    // what's been earned to redeem in the first place. The bill is the
+    // scenario's quoted plan price when there is one — a Fido plan being priced
+    // is not in the ledger, so `familySpend` would silently cap it at 0.
+    const qualifyingBill = rates.redemptionCapMonthly ?? m.familySpend
+    const bonus = rates.redeemTowardBill ? Math.min(earned, qualifyingBill) * ROGERS_REDEMPTION_BONUS : 0
+    bonusTotal += bonus
 
     earnedCapped += earned
     earnedUncapped += m.domesticSpend * rates.domestic + m.foreignSpend * rates.foreign
@@ -337,6 +365,10 @@ export function cashbackFromSpend(data: RogersSpendData, rates: RogersRates = DE
     annualizedSpend,
     hitsAnnualCap: cumulative > windowCap,
     capCostAnnual,
+    annualizedRedemptionBonus: bonusTotal * scale,
+    redemptionCapMonthly:
+      rates.redemptionCapMonthly ??
+      (data.monthsOfData > 0 ? data.familySpend / data.monthsOfData : 0),
   }
 }
 

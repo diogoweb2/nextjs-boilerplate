@@ -38,6 +38,8 @@ export function FidoSwitchCard({
   monthsOfData,
   cobaltCancelAnnualDelta,
   twoCards,
+  fidoQuotedPrice,
+  setFidoQuotedPrice,
 }: {
   redeemTowardBill: boolean
   /** Real avg monthly non-phone domestic spend already on the Rogers card. */
@@ -54,10 +56,13 @@ export function FidoSwitchCard({
    *  so the Fido/Koodo line prices stay in one place — §26's "extra line cost"
    *  is literally the difference between the two prices typed in below. */
   twoCards: { byPerson: RogersSpendByPerson; matrix: SpendMatrixView; selfName: string; partnerName: string }
+  /** Owned by the parent: the §24 redemption bonus is capped by this same
+   *  hypothetical bill, so it can't live in this component's local state. */
+  fidoQuotedPrice: number
+  setFidoQuotedPrice: (n: number) => void
 }) {
   const [currentTwoLineTotal, setCurrentTwoLineTotal] = useState(DEFAULT_KOODO_TWO_LINE_TOTAL)
   const [remainingKoodoLinePrice, setRemainingKoodoLinePrice] = useState(DEFAULT_KOODO_TWO_LINE_TOTAL / 2)
-  const [fidoQuotedPrice, setFidoQuotedPrice] = useState(30)
   const [cancelCobaltToo, setCancelCobaltToo] = useState(false)
   const [secondPrimaryCard, setSecondPrimaryCard] = useState(false)
 

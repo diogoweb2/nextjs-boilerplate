@@ -63,18 +63,38 @@ export function CobaltAnalysis({
   const [cpp, setCpp] = useState(DEFAULT_CENTS_PER_POINT)
   const [hasQualifyingService, setHasQualifyingService] = useState(false)
   const [redeemTowardBill, setRedeemTowardBill] = useState(false)
+  // Owned here, not in FidoSwitchCard, because two sibling cards need it: §25
+  // prices the switch with it, and the redemption bonus below is capped by it.
+  // The bill you'd redeem against is the Fido plan being quoted — it is not in
+  // the ledger, so nothing can infer it.
+  const [fidoQuotedPrice, setFidoQuotedPrice] = useState(30)
+
   const analysis = useMemo(() => valueFromPoints(points, cpp, COBALT_FEE_MONTHLY), [points, cpp])
   const rogers = useMemo(
-    () => cashbackFromSpend(rogersSpend, rogersRates({ qualifying: hasQualifyingService, redeemTowardBill })),
-    [rogersSpend, hasQualifyingService, redeemTowardBill],
+    () =>
+      cashbackFromSpend(
+        rogersSpend,
+        rogersRates({
+          qualifying: hasQualifyingService,
+          redeemTowardBill,
+          redemptionCapMonthly: fidoQuotedPrice,
+        }),
+      ),
+    [rogersSpend, hasQualifyingService, redeemTowardBill, fidoQuotedPrice],
   )
   const showdown = useMemo(() => compareCards(analysis, rogers), [analysis, rogers])
   // Rogers priced at the *base* (no-qualifying-service) rate. The Fido card
   // computes the qualifying-rate lift itself from its own spend input, so the
   // "cancel Cobalt" delta it receives must exclude that lift — otherwise the
   // same 0.5pp would be counted on both sides of its combined total.
+  // `redemptionCapMonthly: 0` for the same reason: that scenario is "cancel
+  // Cobalt but stay on Koodo", and a Koodo bill is not redeemable.
   const rogersAtBaseRate = useMemo(
-    () => cashbackFromSpend(rogersSpend, rogersRates({ qualifying: false, redeemTowardBill })),
+    () =>
+      cashbackFromSpend(
+        rogersSpend,
+        rogersRates({ qualifying: false, redeemTowardBill, redemptionCapMonthly: 0 }),
+      ),
     [rogersSpend, redeemTowardBill],
   )
 
@@ -198,9 +218,32 @@ export function CobaltAnalysis({
               className="mt-0.5 h-4 w-4 accent-[var(--accent)]"
             />
             <span>
-              Redeem cash back toward the Rogers/Fido bill — a{' '}
+              Redeem cash back toward the Fido bill — a{' '}
               <strong>+{(ROGERS_REDEMPTION_BONUS * 100).toFixed(0)}%</strong> redemption bonus (vs. a plain
-              statement credit), capped at what you actually owe on those bills.
+              statement credit), capped at what you actually owe on that bill.
+              <span className="mt-0.5 block text-xs text-[var(--muted)]">
+                Capped at the <strong>{formatCurrency(fidoQuotedPrice)}/mo</strong> Fido price you
+                quoted below — that hypothetical plan is the only Rogers-family bill in play, and it
+                isn&apos;t in your statements, so it has to come from the calculator.
+                {redeemTowardBill && (
+                  <>
+                    {' '}
+                    Worth{' '}
+                    <strong className="text-[var(--positive)]">
+                      {formatCurrency(rogers.annualizedRedemptionBonus)}/yr
+                    </strong>
+                    .
+                  </>
+                )}
+                {rogersSpend.familySpend > 0 && (
+                  <>
+                    {' '}
+                    Your ledger also shows {formatCurrency(rogersSpend.familySpend)} of existing
+                    Rogers-family spend, which is <em>not</em> counted here — say the word if those
+                    bills should raise the cap too.
+                  </>
+                )}
+              </span>
             </span>
           </label>
 
@@ -293,7 +336,7 @@ export function CobaltAnalysis({
               net on {formatCurrency(rogers.foreignSpend)}/yr foreign-currency spend (3% back minus Canada&apos;s
               2.5% FX fee)
               {redeemTowardBill
-                ? `, plus a ${(ROGERS_REDEMPTION_BONUS * 100).toFixed(0)}% redemption bonus on the ${formatCurrency(rogers.familySpend)}/yr redeemed toward Rogers/Fido bills`
+                ? `, plus ${formatCurrency(rogers.annualizedRedemptionBonus)}/yr from the ${(ROGERS_REDEMPTION_BONUS * 100).toFixed(0)}% bonus on cash back redeemed against the ${formatCurrency(fidoQuotedPrice)}/mo Fido bill`
                 : ''}
               . No monthly fee.
             </div>
@@ -350,6 +393,8 @@ export function CobaltAnalysis({
         monthsOfData={switchBasis.monthsOfData}
         cobaltCancelAnnualDelta={rogersAtBaseRate.annualizedCashback - analysis.netAnnualValue}
         twoCards={twoCards}
+        fidoQuotedPrice={fidoQuotedPrice}
+        setFidoQuotedPrice={setFidoQuotedPrice}
       />
     </div>
   )

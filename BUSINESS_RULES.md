@@ -2171,7 +2171,8 @@ every other analytics page.
     the "have ≥1 qualifying Rogers/Fido/Shaw/Comwave service" checkbox is on) applies to **all**
     eligible domestic (CAD) spend, not just spend at Rogers/Fido. `familySpend` (Rogers/Fido bill
     charges) is tracked as a **subset** of `domesticSpend` — it still earns the same flat rate as
-    everything else; it's kept separate only to cap the redemption bonus below.
+    everything else. It is now only a *fallback* cap for the redemption bonus; see
+    `redemptionCapMonthly` below for why a ledger-derived figure was the wrong basis.
   - **Foreign** (`ROGERS_FOREIGN_NET_RATE`, net **0.5%**) — the card pays 3% back on USD purchases,
     but Canada's standard 2.5% FX fee is already baked into the converted charge amount, netting
     +0.5% (owner-confirmed math, not derived; flat regardless of the qualifying-service checkbox per
@@ -2196,11 +2197,22 @@ every other analytics page.
   - Rates are assembled by **`rogersRates({ qualifying, redeemTowardBill })`** rather than by hand,
     so no caller can set the elevated pair and forget the post-cap pair.
   - **Redemption bonus** (`ROGERS_REDEMPTION_BONUS`, **+50%**) — a second, independent checkbox
-    ("redeem cash back toward the Rogers/Fido bill"). This is a *redemption*-time bonus, not an
-    earn-time one: applying accumulated cash back toward a qualifying bill is worth 1.5x a plain
-    statement credit. Capped in `cashbackFromSpend` at `min(earned cash back, familySpend)` per
-    month — the bonus can't exceed what's actually owed on the bill, nor what's been earned to
-    redeem in the first place.
+    ("redeem cash back toward the Fido bill"). This is a *redemption*-time bonus, not an earn-time
+    one: applying accumulated cash back toward a qualifying bill is worth 1.5x a plain statement
+    credit. Capped in `cashbackFromSpend` at `min(earned cash back, qualifyingBill)` per month — the
+    bonus can't exceed what's actually owed on the bill, nor what's been earned to redeem.
+  - **The qualifying bill is `rates.redemptionCapMonthly`, not `familySpend`.** The bill you would
+    redeem against is the **hypothetical Fido plan being priced**, which by definition is not in the
+    statements — the household is on Koodo. `CobaltAnalysis` therefore owns the quoted Fido price
+    (lifted out of `FidoSwitchCard`, since two sibling cards need it) and passes it in. `null` falls
+    back to the ledger's `familySpend`, which is only right when no scenario is modelled at all —
+    i.e. the dashboard's default showdown, where the bonus is off anyway.
+  - `rogersAtBaseRate` (the "cancel Cobalt but stay on Koodo" comparison feeding §25) passes
+    `redemptionCapMonthly: 0` — no Fido line means no redeemable bill, so no bonus. Same reasoning as
+    its `qualifying: false`.
+  - `RogersAnalysis` exposes `annualizedRedemptionBonus` so the UI can state what ticking the box is
+    actually worth. It was silently $0 before; a bonus that quietly evaluates to nothing is worse
+    than no checkbox.
   - No annual fee. Both checkboxes and their caveats are shown directly on the assumptions/
     comparison cards, not just here — default **off** (today's no-Fido state).
 - **Verdict** (`compareCards`): `advantage = cobalt.netAnnualValue − rogers.annualizedCashback`.
@@ -2361,3 +2373,18 @@ two caps, and up to $122,000/yr at the elevated rates. Rendered as a card inside
   gift-card loads included.
   `SOURCE_ORDER` is typed `ImportSource[]` and assigned into `SpendMatrix['sources']` (`CardSource`,
   redeclared in the client-safe core), so the two unions drifting apart is a compile error.
+
+### §24 corrections (continued)
+
+7. **The redemption bonus was capped by ledger data, so it silently did nothing.** The checkbox
+   capped the bonus at `familySpend` — merchant-name matches for rogers/fido/shaw/comwave in the
+   *existing* statements. The household is on Koodo, so there is no Fido bill to match and the cap
+   was $0: ticking the box changed the total by exactly nothing while the UI advertised "+50%".
+   Verified before/after on $2,000/mo of domestic spend at 2%: bonus went $0.00/yr → $180.00/yr with
+   a $30/mo quoted Fido plan (`min($40 earned, $30 bill) × 0.5 × 12`). §25 never had this bug — it
+   always passed `fidoQuotedPrice` as the qualifying bill; only §24 inferred it from the ledger.
+   **The general rule, same as correction 2 in §25 but pointing the other way: a value the ledger
+   cannot know must come from the scenario inputs, not from merchant matching.**
+8. **Existing Rogers-family spend is deliberately excluded from the cap**, per the owner ("only the
+   payment bonus against the Fido account"). If the ledger does contain such bills the assumptions
+   card names the amount and says it isn't counted, so the choice stays visible rather than buried.
