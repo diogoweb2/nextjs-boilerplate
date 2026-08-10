@@ -5,6 +5,7 @@ import { db } from '@/db'
 import { transactions, goals, goalEntries } from '@/db/schema'
 import { requireAuth } from '@/app/lib/auth-guard'
 import { isDemoSession } from '@/app/lib/demo'
+import { cardholderKey } from '@/app/lib/cardholders'
 import type { CardRewardContext } from '@/app/lib/amex-cobalt'
 
 /**
@@ -16,13 +17,20 @@ import type { CardRewardContext } from '@/app/lib/amex-cobalt'
  * - **giftCardLoadIds** — transactions that `loadGiftCard` (§10c) flipped to
  *   `flow = 'transfer'`. They are real card swipes at a supermarket, so the
  *   reward models must count them even though spend analytics don't.
+ * - **personById** — which cardholder made the purchase, as a neutral
+ *   `self`/`partner` key. Derived from the card last-4 via `cardholders.ts`, so
+ *   no name ever reaches the DB or this (public) repo. Feeds §26.
  */
 export async function loadCardRewardContext(): Promise<CardRewardContext> {
   await requireAuth()
-  if (await isDemoSession()) return { countryById: new Map(), giftCardLoadIds: new Set() }
+  if (await isDemoSession()) {
+    return { countryById: new Map(), giftCardLoadIds: new Set(), personById: new Map() }
+  }
 
   const [countryRows, giftRows] = await Promise.all([
-    db.select({ id: transactions.id, country: transactions.country }).from(transactions),
+    db
+      .select({ id: transactions.id, country: transactions.country, cardLast4: transactions.cardLast4 })
+      .from(transactions),
     db
       .select({ transactionId: goalEntries.transactionId, amount: goalEntries.amount })
       .from(goalEntries)
@@ -37,5 +45,9 @@ export async function loadCardRewardContext(): Promise<CardRewardContext> {
     if (r.transactionId != null && Number(r.amount) > 0) giftCardLoadIds.add(r.transactionId)
   }
 
-  return { countryById: new Map(countryRows.map((r) => [r.id, r.country])), giftCardLoadIds }
+  return {
+    countryById: new Map(countryRows.map((r) => [r.id, r.country])),
+    personById: new Map(countryRows.map((r) => [r.id, cardholderKey(r.cardLast4)])),
+    giftCardLoadIds,
+  }
 }

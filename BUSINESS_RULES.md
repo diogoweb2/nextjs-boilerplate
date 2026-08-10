@@ -2267,10 +2267,11 @@ bill. Getting that backwards was the original bug (see "Corrections" below).
 - **Verdict**: **switch** when the monthly delta favours the move by more than $2, **stay** when it's
   worse by more than $2, **toss-up** in between (small enough to come down to porting hassle, not
   dollars).
-- **Combine with canceling Cobalt** (checkbox): ticking it rewrites the "other spend" input to
-  `switchBasis.onAllCards` (all cards' non-phone domestic spend — what would reach Rogers if Cobalt
-  were gone) rather than hiding a second number, so there's one visible source of truth the owner can
-  still edit. The "Combined annual impact" line then adds
+- **Combine with canceling Cobalt** (checkbox): ticking it switches the derived "other spend" basis
+  from `switchBasis.onRogersCard` to `switchBasis.onAllCards` (all cards' non-phone domestic spend —
+  what would reach Rogers if Cobalt were gone). This is the *only* control over that figure, because
+  cancelling Cobalt is the only thing that changes which spend lands on the Rogers card. The UI
+  states which basis is live and over how many months. The "Combined annual impact" line then adds
   `cobaltCancelAnnualDelta = rogersAtBaseRate.annualizedCashback − cobalt.netAnnualValue` —
   deliberately the **base**-rate delta, because the qualifying-rate lift is already inside the
   scenario's own numbers; using the bonus-rate delta would count the same 0.5pp twice. It is also the
@@ -2300,3 +2301,48 @@ bill. Getting that backwards was the original bug (see "Corrections" below).
    the lift by the cash-back factor. The bisection model has no such term.
 6. **The elevated rates are capped at $61k of annual spend.** Modelled as unlimited at first, which
    overstated both the Rogers-vs-Cobalt comparison and the Fido lift for a heavy-spending year.
+
+## 26. Two Rogers cards, one each? (`compareOneVsTwoCards`, `TwoRogersCardsCard.tsx`)
+
+**The $61,000 cap is per Account, not per household.** Two primary cardholders means two accounts,
+two caps, and up to $122,000/yr at the elevated rates. Rendered as a card inside
+`/accounts/cobalt`, directly after §25.
+
+- **The gain is purely a cap effect.** The Rogers rate is *whole-card* and identical on both
+  accounts, so below one cap the one-card and two-card scenarios earn **exactly** the same. A second
+  card can never rescue spend a single cap already covered. Verified numerically: at $30k and at
+  exactly $61k of household spend the gain is `$0.00`; above it the gain equals
+  `spendRescuedFromCap × (2% − 1.5%)` to the cent.
+- **Both sides assume Amex is already cancelled** — the scenario only exists once all household
+  spend is landing on Rogers. Both sides also assume a qualifying service, so both are priced at 2%.
+- **Two accounts need two qualifying services**, so this assumes *both* Koodo lines move to Fido
+  (the owner's framing). The marginal cost is therefore
+  `extraPlanCostMonthly = fidoPricePerLine − remainingKoodoLinePrice`: the one-card plan pays for
+  1 Fido + 1 Koodo, the two-card plan for 2 Fido. Both prices are the §25 inputs — `TwoRogersCardsCard`
+  is rendered *by* `FidoSwitchCard` (not by `CobaltAnalysis`) precisely so those prices have one home.
+- **Attribution by cardholder** — `computeRogersSpendByPerson` splits the same trailing-12-month
+  eligible-purchase set (§24 `cardEligiblePurchases`) using `ctx.personById`, resolved from the card
+  last-4 through `app/lib/cardholders.ts`. Names live only in `.env.local`; the model itself carries
+  the neutral keys `self`/`partner`, so **no cardholder name ever reaches the DB or this public
+  repo**. Rows with no last-4 (bank debits) fall to `self`, matching the rest of the app — the UI
+  says so explicitly, because it can materially skew the split.
+- **All three buckets share the household `monthsOfData`** (`bucketRogersSpend` takes it as an
+  argument rather than deriving it). A partner active in only 6 of 12 months must not be handed a
+  fuller pro-rated cap than the household window justifies.
+- **`cashbackGain` is floored at 0.** Splitting spend across two accounts can never lose cash back —
+  same rates, strictly more headroom — so a negative there would be a pro-rating artefact, not a real
+  effect.
+- **Foreign spend makes the second cap worth more.** Post-cap foreign is net −1% (§24), so the
+  one-card scenario actively loses money abroad past $61k while two accounts keep it at +0.5%. In a
+  test with $61k domestic + $20k USD each, the gain was $455.62/yr vs. $305.00 for the same domestic
+  spend alone.
+- **Verdict band is deliberately wider than the rest of the page** (±$120/yr, vs ±$2/mo in §25):
+  running a second card *and* a second carrier account is real ongoing admin, so a near-wash is not
+  worth doing.
+- **Phone bills are held at their historical amounts.** Switching carrier changes which bills are
+  redemption-bonus eligible, but both scenarios have Fido, so that effect is identical on both sides
+  and cancels out of the difference. It does shift the absolute totals shown.
+- **Spend table** (`computeSpendMatrix`) — annualized purchase spend per cardholder per card source,
+  plus both together. Purchases only; card payments and transfers excluded, gift-card loads included.
+  `SOURCE_ORDER` is typed `ImportSource[]` and assigned into `SpendMatrix['sources']` (`CardSource`,
+  redeclared in the client-safe core), so the two unions drifting apart is a compile error.

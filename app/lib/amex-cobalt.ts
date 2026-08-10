@@ -1,4 +1,4 @@
-import type { EnrichedTxn } from '@/app/lib/analytics'
+import type { EnrichedTxn, ImportSource } from '@/app/lib/analytics'
 import { addMonths, anchorMonth } from '@/app/lib/analytics'
 import {
   TIER_META,
@@ -19,6 +19,9 @@ import {
   type RogersSpendMonth,
   type RogersAnalysis,
   type CardShowdown,
+  type PersonKey,
+  type RogersSpendByPerson,
+  type CardSource,
 } from '@/app/lib/amex-cobalt-core'
 
 export * from '@/app/lib/amex-cobalt-core'
@@ -66,6 +69,9 @@ export type CardRewardContext = {
   countryById: Map<number, string | null>
   /** Transaction ids flipped to `transfer` by a gift-card load (§10c). */
   giftCardLoadIds: Set<number>
+  /** transaction id → which cardholder made it, resolved from the card last-4
+   *  via .env.local (app/lib/cardholders.ts). Never a name. */
+  personById: Map<number, PersonKey>
 }
 
 /**
@@ -157,24 +163,52 @@ export function computeCobaltAnalysis(
  * `isForeignCountry`).
  */
 export function computeRogersSpend(flows: EnrichedTxn[], ctx: CardRewardContext): RogersSpendData {
-  const { countryById } = ctx
+  const w = rogersWindow(flows, ctx)
+  if (!w) return EMPTY_ROGERS_SPEND
+  return bucketRogersSpend(w.inWindow, w.months, w.monthsOfData, ctx.countryById)
+}
+
+const EMPTY_ROGERS_SPEND: RogersSpendData = {
+  monthsOfData: 0,
+  domesticSpend: 0,
+  foreignSpend: 0,
+  familySpend: 0,
+  monthly: [],
+}
+
+/** The trailing-12-month slice of card-eligible purchases, shared by every
+ *  Rogers bucketing call so they all annualize over the same window. */
+function rogersWindow(
+  flows: EnrichedTxn[],
+  ctx: CardRewardContext,
+): { months: string[]; inWindow: EnrichedTxn[]; monthsOfData: number } | null {
   const purchases = cardEligiblePurchases(flows, ctx.giftCardLoadIds)
   const anchor = anchorMonth(flows)
-  if (!anchor || purchases.length === 0) {
-    return { monthsOfData: 0, domesticSpend: 0, foreignSpend: 0, familySpend: 0, monthly: [] }
-  }
+  if (!anchor || purchases.length === 0) return null
 
   const months = trailingTwelveMonths(anchor)
   const monthSet = new Set(months)
   const inWindow = purchases.filter((t) => monthSet.has(t.txnDate.slice(0, 7)))
+  if (inWindow.length === 0) return null
   const monthsOfData = new Set(inWindow.map((t) => t.txnDate.slice(0, 7))).size || 1
+  return { months, inWindow, monthsOfData }
+}
 
+/** `monthsOfData` is passed in rather than derived, so a per-person subset is
+ *  annualized (and cap-pro-rated) over the *household* window — otherwise a
+ *  cardholder active in only 6 of 12 months would be handed a full cap. */
+function bucketRogersSpend(
+  txns: EnrichedTxn[],
+  months: string[],
+  monthsOfData: number,
+  countryById: Map<number, string | null>,
+): RogersSpendData {
   let domesticSpend = 0
   let foreignSpend = 0
   let familySpend = 0
   const byMonth = new Map<string, { domestic: number; foreign: number; family: number }>()
 
-  for (const t of inWindow) {
+  for (const t of txns) {
     const ym = t.txnDate.slice(0, 7)
     const bucket = byMonth.get(ym) ?? { domestic: 0, foreign: 0, family: 0 }
     if (isForeignCountry(countryById.get(t.id))) {
@@ -197,6 +231,92 @@ export function computeRogersSpend(flows: EnrichedTxn[], ctx: CardRewardContext)
   })
 
   return { monthsOfData, domesticSpend, foreignSpend, familySpend, monthly }
+}
+
+/**
+ * The same trailing-12-month spend, split by cardholder — the input to §26's
+ * "two Rogers cards, one each?" question, where each Account carries its own
+ * $61,000 cap.
+ *
+ * Attribution comes from the card last-4 (`ctx.personById`, resolved through
+ * .env.local so no name touches the DB or this public repo). **Rows with no
+ * last-4 — bank debits — fall to `self`**, matching the rest of the app; the UI
+ * says so, because it can materially skew the split.
+ */
+export function computeRogersSpendByPerson(
+  flows: EnrichedTxn[],
+  ctx: CardRewardContext,
+): RogersSpendByPerson {
+  const w = rogersWindow(flows, ctx)
+  if (!w) {
+    return {
+      monthsOfData: 0,
+      self: EMPTY_ROGERS_SPEND,
+      partner: EMPTY_ROGERS_SPEND,
+      combined: EMPTY_ROGERS_SPEND,
+    }
+  }
+
+  const personOf = (t: EnrichedTxn): PersonKey => ctx.personById.get(t.id) ?? 'self'
+  const bucket = (txns: EnrichedTxn[]) =>
+    bucketRogersSpend(txns, w.months, w.monthsOfData, ctx.countryById)
+
+  return {
+    monthsOfData: w.monthsOfData,
+    self: bucket(w.inWindow.filter((t) => personOf(t) === 'self')),
+    partner: bucket(w.inWindow.filter((t) => personOf(t) === 'partner')),
+    combined: bucket(w.inWindow),
+  }
+}
+
+/** Annualized purchase spend per cardholder per card, plus both together —
+ *  the plain "where does the money actually go" table behind §26's scenario. */
+export type SpendMatrix = {
+  monthsOfData: number
+  /** Only sources with spend in the window, in a stable display order. */
+  sources: CardSource[]
+  rows: { person: PersonKey; bySource: Record<string, number>; total: number }[]
+  totalsBySource: Record<string, number>
+  grandTotal: number
+}
+
+// Typed as ImportSource, assigned into SpendMatrix['sources'] (CardSource) —
+// so if the two unions ever drift apart this stops compiling.
+const SOURCE_ORDER: ImportSource[] = ['master', 'amex', 'tangerine', 'scotia', 'manual']
+
+export function computeSpendMatrix(flows: EnrichedTxn[], ctx: CardRewardContext): SpendMatrix {
+  const w = rogersWindow(flows, ctx)
+  if (!w) {
+    return { monthsOfData: 0, sources: [], rows: [], totalsBySource: {}, grandTotal: 0 }
+  }
+  const scale = 12 / w.monthsOfData
+
+  const totals: Record<PersonKey, Record<string, number>> = { self: {}, partner: {} }
+  const totalsBySource: Record<string, number> = {}
+  const seen = new Set<ImportSource>()
+
+  for (const t of w.inWindow) {
+    const person = ctx.personById.get(t.id) ?? 'self'
+    const amount = t.amount * scale
+    totals[person][t.source] = (totals[person][t.source] ?? 0) + amount
+    totalsBySource[t.source] = (totalsBySource[t.source] ?? 0) + amount
+    seen.add(t.source)
+  }
+
+  const sources = SOURCE_ORDER.filter((s) => seen.has(s))
+  const rows = (['self', 'partner'] as PersonKey[]).map((person) => ({
+    person,
+    bySource: totals[person],
+    total: Object.values(totals[person]).reduce((a, b) => a + b, 0),
+  }))
+
+  return {
+    monthsOfData: w.monthsOfData,
+    sources,
+    rows,
+    totalsBySource,
+    grandTotal: Object.values(totalsBySource).reduce((a, b) => a + b, 0),
+  }
 }
 
 export function computeCardShowdown(

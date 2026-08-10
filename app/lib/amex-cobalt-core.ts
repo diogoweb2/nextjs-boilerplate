@@ -340,6 +340,112 @@ export function cashbackFromSpend(data: RogersSpendData, rates: RogersRates = DE
   }
 }
 
+// ── Two Rogers cards, one per person ───────────────────────────────────────
+// The $61,000 cap is per **Account**, not per household. Two primary
+// cardholders means two accounts, two caps, and therefore up to $122,000 of
+// spend at the elevated rates. That only pays off to the extent the household
+// actually spends past one cap AND the spend splits between the two people —
+// a second card can never rescue spend that a single cap already covered.
+
+/** Neutral cardholder key: the real names live only in .env.local (see
+ *  app/lib/cardholders.ts), never in the DB or this public repo. */
+export type PersonKey = 'self' | 'partner'
+
+export type RogersSpendByPerson = {
+  /** Household window length. Deliberately shared by all three buckets so the
+   *  cap is pro-rated identically — a partner with fewer active months must not
+   *  be handed a fuller cap than the household window justifies. */
+  monthsOfData: number
+  self: RogersSpendData
+  partner: RogersSpendData
+  combined: RogersSpendData
+}
+
+/** Mirrors `ImportSource` from analytics.ts. Redeclared here because this file
+ *  must stay free of server-only imports — analytics.ts reaches next/headers
+ *  through demo.ts. `SOURCE_ORDER` in amex-cobalt.ts is typed as
+ *  `ImportSource[]` and assigned into `SpendMatrix['sources']`, so the two
+ *  unions drifting apart is a compile error rather than a silent bug. */
+export type CardSource = 'master' | 'amex' | 'tangerine' | 'scotia' | 'manual'
+
+export const CARD_SOURCE_LABEL: Record<CardSource, string> = {
+  master: 'Rogers Mastercard',
+  amex: 'Amex Cobalt',
+  tangerine: 'Tangerine (debit)',
+  scotia: 'Scotia (debit)',
+  manual: 'Manual entries',
+}
+
+export type TwoCardComparison = {
+  /** Everything on a single account, one cap. */
+  oneCard: RogersAnalysis
+  self: RogersAnalysis
+  partner: RogersAnalysis
+  twoCardCashback: number
+  /** Annual cash back gained by adding the second account. Never negative. */
+  cashbackGain: number
+  /** Annual cost of the extra qualifying service the second account needs. */
+  extraPlanCostAnnual: number
+  netGainAnnual: number
+  /** Annualized spend that only the second cap keeps at the elevated rate. */
+  spendRescuedFromCap: number
+  verdict: 'worth' | 'close' | 'not'
+}
+
+/**
+ * One Rogers account vs. two (one per cardholder), both priced with Amex
+ * already cancelled so all household spend lands on Rogers either way.
+ *
+ * The gain is *purely* a cap effect: below one cap the two scenarios earn
+ * exactly the same, since the rate is whole-card and identical on both
+ * accounts. `extraPlanCostMonthly` is what the second account costs to keep
+ * qualifying — each Account needs its own Rogers/Fido/Shaw/Comwave service, so
+ * a second card means a second line (per the owner: switching *both* Koodo
+ * lines to Fido).
+ */
+export function compareOneVsTwoCards(
+  byPerson: RogersSpendByPerson,
+  rates: RogersRates,
+  extraPlanCostMonthly: number,
+): TwoCardComparison {
+  const oneCard = cashbackFromSpend(byPerson.combined, rates)
+  const self = cashbackFromSpend(byPerson.self, rates)
+  const partner = cashbackFromSpend(byPerson.partner, rates)
+
+  const twoCardCashback = self.annualizedCashback + partner.annualizedCashback
+  // Floored at 0: splitting spend across two accounts can never *lose* cash
+  // back (same rates, strictly more headroom), so a negative here would be a
+  // rounding artefact of the pro-rated window, not a real effect.
+  const cashbackGain = Math.max(0, twoCardCashback - oneCard.annualizedCashback)
+
+  const cap = rates.annualCap
+  const spendRescuedFromCap =
+    Math.min(self.annualizedSpend, cap) +
+    Math.min(partner.annualizedSpend, cap) -
+    Math.min(oneCard.annualizedSpend, cap)
+
+  const extraPlanCostAnnual = extraPlanCostMonthly * 12
+  const netGainAnnual = cashbackGain - extraPlanCostAnnual
+
+  // Wider "close" band ($10/mo) than the other verdicts on this page: running a
+  // second card and a second carrier account is real ongoing admin, so a
+  // near-wash is not worth doing.
+  const verdict: TwoCardComparison['verdict'] =
+    netGainAnnual > 120 ? 'worth' : netGainAnnual >= -120 ? 'close' : 'not'
+
+  return {
+    oneCard,
+    self,
+    partner,
+    twoCardCashback,
+    cashbackGain,
+    extraPlanCostAnnual,
+    netGainAnnual,
+    spendRescuedFromCap,
+    verdict,
+  }
+}
+
 export type CardShowdown = {
   /** Cobalt net value minus Rogers cash back, annualized — positive = Cobalt ahead. */
   advantage: number

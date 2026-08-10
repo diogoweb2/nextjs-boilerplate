@@ -8,7 +8,9 @@ import {
   ROGERS_DOMESTIC_BONUS_RATE,
   ROGERS_DOMESTIC_BASE_RATE,
   ROGERS_ANNUAL_CAP,
+  type RogersSpendByPerson,
 } from '@/app/lib/amex-cobalt-core'
+import { TwoRogersCardsCard, type SpendMatrixView } from '@/app/components/TwoRogersCardsCard'
 
 const INPUT_CLASS =
   'w-28 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-right text-sm tabular-nums text-[var(--foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]'
@@ -33,6 +35,7 @@ export function FidoSwitchCard({
   spendOnAllCards,
   monthsOfData,
   cobaltCancelAnnualDelta,
+  twoCards,
 }: {
   redeemTowardBill: boolean
   /** Real avg monthly non-phone domestic spend already on the Rogers card. */
@@ -45,6 +48,10 @@ export function FidoSwitchCard({
    *  qualifying-rate slice is already inside the scenario's own numbers, so
    *  using the bonus-rate delta here would double-count it. */
   cobaltCancelAnnualDelta: number
+  /** §26 data. Rendered as a sibling card from here rather than from the parent
+   *  so the Fido/Koodo line prices stay in one place — §26's "extra line cost"
+   *  is literally the difference between the two prices typed in below. */
+  twoCards: { byPerson: RogersSpendByPerson; matrix: SpendMatrixView; selfName: string; partnerName: string }
 }) {
   const [currentTwoLineTotal, setCurrentTwoLineTotal] = useState(DEFAULT_KOODO_TWO_LINE_TOTAL)
   const [remainingKoodoLinePrice, setRemainingKoodoLinePrice] = useState(DEFAULT_KOODO_TWO_LINE_TOTAL / 2)
@@ -91,6 +98,7 @@ export function FidoSwitchCard({
   )
 
   return (
+    <>
     <Card
       title="Switch 1 line to Fido?"
       action={<span className="text-xs text-[var(--muted)]">a Fido line lifts the whole card to 2%</span>}
@@ -226,5 +234,16 @@ export function FidoSwitchCard({
         </div>
       )}
     </Card>
+
+    <TwoRogersCardsCard
+      byPerson={twoCards.byPerson}
+      matrix={twoCards.matrix}
+      selfName={twoCards.selfName}
+      partnerName={twoCards.partnerName}
+      redeemTowardBill={redeemTowardBill}
+      fidoPricePerLine={fidoQuotedPrice}
+      remainingKoodoLinePrice={remainingKoodoLinePrice}
+    />
+    </>
   )
 }

@@ -19,6 +19,17 @@ export function cardholderName(last4: string | null): string {
   return last4 && partnerCards.includes(last4) ? partnerName : selfName
 }
 
+/** Neutral key for the same mapping, for models that must not carry a name.
+ *  Rows with no card last-4 (bank debits) fall to `self`, matching
+ *  `cardholderName` — see §26 for why that caveat is surfaced in the UI. */
+export function cardholderKey(last4: string | null): 'self' | 'partner' {
+  const partnerCards = (process.env.PARTNER_CARDS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  return last4 && partnerCards.includes(last4) ? 'partner' : 'self'
+}
+
 /** Display names + partner card last-4s for the auto-fill feature (server-side). */
 export function getPersonNames(): { selfName: string; partnerName: string; partnerCards: string[] } {
   return {

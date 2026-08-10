@@ -18,8 +18,10 @@ import {
   compareCards,
   type CobaltPointsData,
   type RogersSpendData,
+  type RogersSpendByPerson,
 } from '@/app/lib/amex-cobalt-core'
 import { FidoSwitchCard } from '@/app/components/FidoSwitchCard'
+import type { SpendMatrixView } from '@/app/components/TwoRogersCardsCard'
 
 const VERDICT_META = {
   cobalt: {
@@ -49,11 +51,14 @@ export function CobaltAnalysis({
   points,
   rogersSpend,
   switchBasis,
+  twoCards,
 }: {
   points: CobaltPointsData
   rogersSpend: RogersSpendData
   /** Real avg monthly non-phone domestic spend, by card — feeds the Fido calculator. */
   switchBasis: { monthsOfData: number; onRogersCard: number; onAllCards: number }
+  /** Per-cardholder spend for the §26 "two Rogers cards" scenario. */
+  twoCards: { byPerson: RogersSpendByPerson; matrix: SpendMatrixView; selfName: string; partnerName: string }
 }) {
   const [cpp, setCpp] = useState(DEFAULT_CENTS_PER_POINT)
   const [hasQualifyingService, setHasQualifyingService] = useState(false)
@@ -344,6 +349,7 @@ export function CobaltAnalysis({
         spendOnAllCards={switchBasis.onAllCards}
         monthsOfData={switchBasis.monthsOfData}
         cobaltCancelAnnualDelta={rogersAtBaseRate.annualizedCashback - analysis.netAnnualValue}
+        twoCards={twoCards}
       />
     </div>
   )
