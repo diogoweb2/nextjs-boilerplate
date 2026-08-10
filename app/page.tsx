@@ -46,6 +46,9 @@ import { loadInvestmentReportDue } from '@/app/actions/investmentReport'
 import { completedReportMonth, completedYearReportYear } from '@/app/lib/reportSchedule'
 import { SurplusAllocation } from '@/app/components/SurplusAllocation'
 import { GoalsSummary } from '@/app/components/GoalsSummary'
+import { CobaltOverviewCard } from '@/app/components/CobaltOverviewCard'
+import { computeCardShowdown } from '@/app/lib/amex-cobalt'
+import { loadCardRewardContext } from '@/app/actions/amex-cobalt'
 import { buildBudgetInsights } from '@/app/lib/dashboard-insights'
 import { computePaceAlerts } from '@/app/lib/pace-alerts'
 import { PaceAlertModal } from '@/app/components/PaceAlertModal'
@@ -146,6 +149,8 @@ export default async function Home({
         lastDigestRunQuery(),
         lastDigestPushQuery(),
       ])
+
+  const cardRewardCtx = await loadCardRewardContext()
 
   type SyncFailure = {
     label: string
@@ -665,6 +670,9 @@ export default async function Home({
 
           {/* Goals summary — read-only mini view of /accounts */}
           <GoalsSummary goals={goalsSummary.goals} />
+
+          {/* Amex Cobalt vs Rogers World Elite widget — full breakdown on Accounts › Amex Cobalt */}
+          <CobaltOverviewCard showdown={computeCardShowdown(allFlows, cardRewardCtx)} />
 
           {/* Quick insights */}
           {allInsightCards.length > 0 && (

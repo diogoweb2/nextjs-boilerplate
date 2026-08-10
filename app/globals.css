@@ -217,6 +217,19 @@ input[type="number"]::-webkit-inner-spin-button {
   animation: search-flash 2.5s ease-out;
 }
 
+/* One-shot pop for the Amex Cobalt verdict badge when it (re)settles. */
+@keyframes pop-in {
+  0% { opacity: 0; transform: scale(0.85); }
+  60% { opacity: 1; transform: scale(1.04); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.animate-pop {
+  animation: pop-in 0.35s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-pop { animation: none; }
+}
+
 /*
  * Pereira Lope$ brand mark (see components/Logo.tsx). The bill idles with a
  * lazy float; hovering the logo makes the wings flap — money attempting to

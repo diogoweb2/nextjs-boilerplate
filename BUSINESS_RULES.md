@@ -2098,3 +2098,205 @@ untruncated, the AI merchant note, links to open/download the original PDF, and 
 compras deste estabelecimento" shortcut that closes the modal and filters the page down to that
 exact `description`. The page itself has a "Filtros" card (month, category, free-text search
 over description) — the establishment shortcut just sets the search box.
+
+## 24. Amex Cobalt vs Rogers World Elite "worth it?" (`app/lib/amex-cobalt.ts`, `app/lib/amex-cobalt-core.ts`)
+
+A deterministic keep-or-switch model comparing the Amex Cobalt (points, $15.99/mo fee) against the
+no-fee Rogers Bank Mastercard World Elite (flat cash back) already sitting in the wallet — the real
+opportunity cost, not just "is $15.99 covered". Shown as a compact widget on the dashboard
+(`CobaltOverviewCard`, anchor `#amex-cobalt-worth-it`) and in full on the Accounts › Amex Cobalt tab
+(`/accounts/cobalt`, `CobaltAnalysis`). No AI involved — pure arithmetic over real spend, same as
+every other analytics page.
+
+- **Split across two files**: `amex-cobalt-core.ts` holds the pure, client-safe math (tier
+  classification, ¢/point re-pricing, the Cobalt-vs-Rogers comparison) so the Accounts tab's slider
+  can recompute on every tick with no server round trip. `amex-cobalt.ts` holds the DB-touching
+  bucketing (`computeCobaltPoints`, `computeRogersSpend`) — it imports `app/lib/analytics.ts`,
+  which pulls in `next/headers` via `demo.ts`, so it must never be imported from a `'use client'`
+  component (only the core file may be).
+- **Scope**: looks at up to the trailing 12 complete months of *all* purchase spend (every card,
+  not just Amex) — the question is what spend *would* earn on either card, not just what's
+  currently on Amex. Annualizes using the actual number of distinct months observed so a younger
+  ledger still produces a fair yearly estimate. Both cards' figures are computed over the identical
+  window so the comparison is apples-to-apples.
+- **Which rows count** (`cardEligiblePurchases`) is deliberately **not** "the expense flow", because
+  of gift cards (§10c). Rewards follow the *card swipe*, not the budgeting treatment:
+  - **Gift-card loads are included** even though `loadGiftCard` flips them to `flow = 'transfer'`.
+    Buying a $100 Amazon card at Metro is a real $100 swipe at a supermarket and earns 5x, whatever
+    the app later does with the row. Their ids come from `loadCardRewardContext`
+    (`app/actions/amex-cobalt.ts`), which also supplies the country map.
+  - **`source === 'manual'` rows are excluded** — gift-card *spends* (`goal:…:giftspend:…`) and
+    goal-funding offsets are app-generated. Paying with gift-card balance at the till involves no
+    card, so it earns nothing; counting it would both double-count the original load and invent
+    rewards from nothing.
+  - Ordinary transfers (CC payments, inter-account moves) stay excluded.
+- **Cobalt earn tiers** (`classifyCobaltTier`, matched by merchant-name keyword lists kept in the
+  file, same spirit as `BIGGEST_PURCHASE_EXCLUDE_MERCHANTS`):
+  - **5x — Groceries**: merchant name matches `metro`, `freshco`, `food basics`, or an explicit
+    `gift card` / `giftcard` label. **Amazon is deliberately absent** — an amazon.ca order is not a
+    grocery run and earns the base 1x. What earns 5x is buying an Amazon *gift card* at the
+    supermarket till, and that charge already posts under the supermarket's own name, so it matches
+    there. (It was briefly mis-modelled as "any Amazon charge = 5x"; the owner clarified the real
+    mechanic — gift card bought at the supermarket, then split onto a gift-card goal, §10c/§22 — so
+    only the supermarket swipe earns the multiplier.) The `gift card` keywords exist solely to catch
+    a split part the owner relabelled; per the owner, gift cards here are always bought at a
+    supermarket.
+  - **3x — Streaming**: merchant name matches a curated streaming-service list (Netflix, Spotify,
+    Disney+, Crave, Prime Video, Apple TV+, YouTube Premium, …) **and** the effective category is
+    `Subscriptions` — so phone/internet bills that also live in Subscriptions (Koodo, Fido,
+    Distributel, §4) don't get the multiplier.
+  - **2x — Gas / transit / rideshare**: merchant name matches known gas stations (Petro-Canada,
+    Esso, Shell, Circle K, Costco Gas, …) or transit/rideshare (Presto, GO/Union, TTC, Uber, Lyft).
+  - **1x — everything else**.
+  - Keywords match on **word boundaries** (precompiled regexes), never raw substrings. Plain
+    `includes` had `mobil` matching "Fido Mobile"/"Koodo Mobility" — filing phone bills as 2x gas —
+    plus `max` matching "Maxi" and `esso` matching "espresso". Keep any new keyword safe under
+    `\b…\b` (this is why the phone-bill list below carries "bell canada"/"bell mobility" rather than
+    a bare "bell", which would match Taco Bell and Campbell).
+- **Cobalt point value**: Membership Rewards points are re-priced by an adjustable ¢/point slider
+  on the Accounts tab (default **1.0¢**, range 0.5¢–1.5¢ reflecting statement-credit vs. best-case
+  transfer-partner redemptions). `computeCobaltPoints` buckets raw point totals once (independent
+  of the price assumption); `valueFromPoints` re-prices them.
+- **Rogers cash back** — bucketed server-side by `computeRogersSpend` (raw spend only, independent
+  of rates — same points/value split as Cobalt) and priced by the client-safe `cashbackFromSpend`.
+  Corrected after the owner caught a mismodel against the card's actual terms screenshot: the "2%"
+  is a **whole-card rate upgrade**, not a merchant-specific earn bonus on the Fido/Rogers bill itself:
+  - **Domestic** (`ROGERS_DOMESTIC_BASE_RATE` **1.5%**, or `ROGERS_DOMESTIC_BONUS_RATE` **2%** once
+    the "have ≥1 qualifying Rogers/Fido/Shaw/Comwave service" checkbox is on) applies to **all**
+    eligible domestic (CAD) spend, not just spend at Rogers/Fido. `familySpend` (Rogers/Fido bill
+    charges) is tracked as a **subset** of `domesticSpend` — it still earns the same flat rate as
+    everything else; it's kept separate only to cap the redemption bonus below.
+  - **Foreign** (`ROGERS_FOREIGN_NET_RATE`, net **0.5%**) — the card pays 3% back on USD purchases,
+    but Canada's standard 2.5% FX fee is already baked into the converted charge amount, netting
+    +0.5% (owner-confirmed math, not derived; flat regardless of the qualifying-service checkbox per
+    the card's terms). Read from `transactions.country` (the Merchant Country Code) via
+    `loadCardRewardContext` (`app/actions/amex-cobalt.ts`) — **only Master-format card rows carry a
+    real code** (§1); Amex/bank rows come back `null` and are treated as domestic
+    (`isForeignCountry`), so the foreign-spend total is a floor, not exact, when the owner's Amex is
+    used abroad.
+  - **Annual cap** (`ROGERS_ANNUAL_CAP`, **$61,000**) — per the cardholder agreement, *"These cash
+    back offers are available on the first $61,000 spent on your Account during your annual period.
+    After that, your eligible purchases will earn cash back at the base rate of 1.5% until your Reset
+    Date."* Both elevated offers stop there: domestic falls to 1.5%, and **foreign goes net negative
+    at −1%** (`ROGERS_FOREIGN_NET_RATE_POST_CAP` = 1.5% − 2.5% FX) — past the cap the card actively
+    costs money abroad, which the UI calls out. `cashbackFromSpend` is therefore **order-dependent**:
+    it walks months in calendar order accumulating spend, and splits the straddling month's domestic
+    and foreign amounts pro rata between the elevated and base rates. The cap is pro-rated to the
+    observed window (`cap × monthsOfData / 12`) so a sub-year ledger isn't given a full year of
+    headroom before being annualized back up. Exposes `annualizedSpend`, `hitsAnnualCap` and
+    `capCostAnnual` (annual $ lost vs. an uncapped world) for the warning on the assumptions card.
+    The **reset date is assumed to be the window boundary** — the real anniversary date isn't in the
+    data, so a mid-year reset would shift which months fall on which side of the line.
+  - Rates are assembled by **`rogersRates({ qualifying, redeemTowardBill })`** rather than by hand,
+    so no caller can set the elevated pair and forget the post-cap pair.
+  - **Redemption bonus** (`ROGERS_REDEMPTION_BONUS`, **+50%**) — a second, independent checkbox
+    ("redeem cash back toward the Rogers/Fido bill"). This is a *redemption*-time bonus, not an
+    earn-time one: applying accumulated cash back toward a qualifying bill is worth 1.5x a plain
+    statement credit. Capped in `cashbackFromSpend` at `min(earned cash back, familySpend)` per
+    month — the bonus can't exceed what's actually owed on the bill, nor what's been earned to
+    redeem in the first place.
+  - No annual fee. Both checkboxes and their caveats are shown directly on the assumptions/
+    comparison cards, not just here — default **off** (today's no-Fido state).
+- **Verdict** (`compareCards`): `advantage = cobalt.netAnnualValue − rogers.annualizedCashback`.
+  **Keep Cobalt** when the advantage exceeds one month's Cobalt fee, **switch to Rogers** when it's
+  a full month's fee under water the other way, **close call** in between (depends on the
+  point-value assumption). Cobalt's standalone `netAnnualValue` (points value − fee) also exposes
+  **break-even monthly spend** — how much you'd need to put on the card each month, at your actual
+  spend mix, just to cover the fee, independent of Rogers.
+- Dashboard widget shows the verdict badge, the annual advantage, both cards' headline numbers, and
+  a 6-month sparkline of month-by-month advantage; links to the full tab (rendered with both Rogers
+  checkboxes at their off defaults, so the dashboard number is the conservative 1.5%/no-bonus case).
+  The full tab adds the point-value slider, the two Rogers assumption checkboxes, a per-tier Cobalt
+  spend/value breakdown, a "Cobalt vs Rogers World Elite" card with each card's inputs plus a
+  12-month bar chart of monthly advantage, and the methodology notes above shown inline (so the
+  model stays auditable without reading this file).
+
+## 25. Switch 1 line to Fido? (`app/lib/fido-switch.ts`, `FidoSwitchCard.tsx`)
+
+A break-even calculator on the same Accounts › Amex Cobalt tab, below the Rogers comparison, for a
+real decision the owner is weighing: move one of two Koodo lines ($45.20/mo combined today) to Fido
+and pay the Fido bill on the Rogers Mastercard for the §24 bonus rate. **Not** modeled as "switch
+both lines" — the owner has confirmed two-line Koodo already beats two separate single-line bills,
+so the tool only ever asks about one line moving.
+
+**Only the plan price is hypothetical** — the spend the decision hinges on comes from real
+statements. The value of switching is dominated not by the phone bill but by the **card-wide
+1.5%→2% lift** on everything else: 0.5pp of a real month's spending dwarfs any cash back on a ~$25
+bill. Getting that backwards was the original bug (see "Corrections" below).
+
+- **Inputs — only the three hypothetical plan prices are typeable.** Everything the ledger already
+  knows is derived, never asked for:
+  - Current 2-line Koodo total (default `$45.20`, `DEFAULT_KOODO_TWO_LINE_TOTAL`).
+  - **Re-quoted price for the line staying on Koodo** (default: half the total, flagged in the UI to
+    be overwritten — Koodo's multi-line discount usually disappears at one line, so the honest number
+    is normally *higher* than half).
+  - Fido's quoted price for the moving line.
+- **Other spend on Rogers /mo is derived, not an input** — `computePhoneSwitchSpendBasis`
+  (`amex-cobalt.ts`) gives average monthly **non-phone, domestic** purchases over the trailing 12
+  months, and the UI renders it read-only. Phone bills are excluded (`isPhoneBillMerchant`) because
+  the calculator models them explicitly — counting them here would double-count; foreign spend is
+  excluded because its net 0.5% rate doesn't change with qualifying status. The **"also cancel
+  Cobalt" checkbox is the only thing that changes it**, switching the basis from `onRogersCard`
+  (`source === 'master'`, §1) to `onAllCards` — because cancelling Cobalt is precisely what moves
+  the rest of the spend onto the Rogers card. Known limitation: a second Master-format card in the
+  ledger would inflate `onRogersCard`, so the UI states which basis and how many months are in play
+  rather than hiding the derivation.
+- **Rates are not inputs**: a Fido line makes the household a qualifying Rogers customer *by
+  definition*, so the post-switch side is always `ROGERS_DOMESTIC_BONUS_RATE` (2%) and today's side
+  always `ROGERS_DOMESTIC_BASE_RATE` (1.5%) — independent of the §24 "have a qualifying service"
+  checkbox, which describes *today's*, pre-switch state. The §24 redemption-bonus checkbox does flow
+  through (a Fido bill is redeemable; a Koodo bill isn't, so that bonus is itself unlocked by
+  switching).
+- **The model** (`computeFidoSwitch`), symmetric on both sides so nothing is double-counted:
+  - Today: `cashback = (koodoTwoLineTotal + otherRogersSpend) × 1.5%`, no redemption bonus (Koodo is
+    not a Rogers brand). `netCost = koodoTwoLineTotal − cashback`.
+  - After: `cashback = (remainingKoodo + fido + otherRogersSpend) × 2%`, plus
+    `min(cashback, fidoPrice) × ROGERS_REDEMPTION_BONUS` when redeeming toward the bill (capped by
+    both what you earned and what you owe). `netCost = (remainingKoodo + fido) − cashback`.
+  - `monthlyDelta = todayNetCost − afterNetCost`, also surfaced split into its two drivers
+    (`planCostDelta`, `cashbackDelta`) so the UI can show what's actually carrying the decision.
+  - Both sides also respect the **$61k annual cap**: `monthlyCashback` annualizes, splits at the cap,
+    and comes back to monthly. This is what stops the calculator promising unlimited upside — the
+    break-even rises with the spend base only until the cap, then **plateaus** (at the owner's
+    figures: $22.83 at $0/mo other spend → $38.14 at $3,000/mo → flat at **$48.40** once total card
+    spend passes $61k/yr, because every marginal dollar past it earns 1.5% with or without Fido).
+  - **Break-even is solved numerically** (60-step bisection on net cost, which rises monotonically
+    with the Fido price). Both the redemption-bonus `min()` and the annual cap make net cost
+    piecewise-linear, so a closed form would have to quietly ignore one of them; bisection is simpler
+    and honest. Returns `Infinity` when even a $1,000 plan wins (a large enough spend base can do that).
+- **Verdict**: **switch** when the monthly delta favours the move by more than $2, **stay** when it's
+  worse by more than $2, **toss-up** in between (small enough to come down to porting hassle, not
+  dollars).
+- **Combine with canceling Cobalt** (checkbox): ticking it rewrites the "other spend" input to
+  `switchBasis.onAllCards` (all cards' non-phone domestic spend — what would reach Rogers if Cobalt
+  were gone) rather than hiding a second number, so there's one visible source of truth the owner can
+  still edit. The "Combined annual impact" line then adds
+  `cobaltCancelAnnualDelta = rogersAtBaseRate.annualizedCashback − cobalt.netAnnualValue` —
+  deliberately the **base**-rate delta, because the qualifying-rate lift is already inside the
+  scenario's own numbers; using the bonus-rate delta would count the same 0.5pp twice. It is also the
+  honest figure for the warning line ("cancel Cobalt but stay on Koodo"), since without a Fido line
+  there is no qualifying service and hence no 2%.
+
+### Corrections (things this section got wrong first, so they aren't reintroduced)
+0. **Rewards follow the card swipe, not the expense flow.** Gift-card loads (real supermarket
+   swipes) were being dropped because §10c flips them to `transfer`, while `manual` gift-card
+   *spends* (no card involved) were being counted. See `cardEligiblePurchases` in §24. Related:
+   "Amazon" was mis-modelled as a 5x grocery merchant.
+1. **"2%" is a whole-card rate, not a merchant bonus.** First modelled as extra cash back on the
+   Rogers/Fido bill only. It is a rate upgrade on *all* eligible purchases, unlocked by holding any
+   qualifying service — plus a separate 1.5x *redemption* bonus. §24 was rewritten accordingly.
+2. **The lift needs a spend base, and the app already has one.** Even after (1), the break-even
+   barely moved ($23.06 → ~$23.06) because the lift was applied to a `0`-defaulted, owner-typed
+   spend field. It is now derived from real transactions, which is what makes the number respond.
+   Later tightened further: it was briefly an *editable prefill*, which still implied the app didn't
+   know the figure. **The rule is that anything already in the ledger is displayed, not asked for** —
+   only genuinely hypothetical values (unquoted plan prices) get an input box.
+3. **Today's Koodo bill also earns cash back.** The original formula compared *gross* Koodo cost
+   against *net* Fido cost, overstating the switch. Both sides are now netted at their own rate
+   (this correctly moved the no-other-spend break-even slightly *down*, to ~$22.83).
+4. **The remaining Koodo line earns the new rate too.** It was previously excluded from post-switch
+   cash back; it is domestic spend on the same card, so it now earns the 2%.
+5. **`extraMonthlyBenefit` was divided by `(1 − rate)`** in the old closed-form break-even, inflating
+   the lift by the cash-back factor. The bisection model has no such term.
+6. **The elevated rates are capped at $61k of annual spend.** Modelled as unlimited at first, which
+   overstated both the Rogers-vs-Cobalt comparison and the Fido lift for a heavy-spending year.

@@ -7,6 +7,7 @@ const TABS = [
   { href: '/accounts/investments', label: 'Investments' },
   { href: '/accounts/retirement', label: 'Retirement' },
   { href: '/accounts/networth', label: 'Net worth' },
+  { href: '/accounts/cobalt', label: 'Amex Cobalt' },
 ]
 
 export default function AccountsLayout({ children }: { children: React.ReactNode }) {
