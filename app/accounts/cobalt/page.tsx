@@ -2,6 +2,7 @@ import { CobaltAnalysis } from '@/app/components/CobaltAnalysis'
 import {
   computeCobaltPoints,
   computeRogersSpend,
+  computeRogersCardSpend,
   computePhoneSwitchSpendBasis,
   computeRogersSpendByPerson,
   computeSpendMatrix,
@@ -20,7 +21,12 @@ export default async function AccountsCobaltPage() {
     : await Promise.all([loadAllFlows(), loadCardRewardContext()])
 
   const points = computeCobaltPoints(allFlows, ctx)
+  // The tier chart reads the real card; the showdown below keeps the
+  // all-card hypothetical, so the two sides stay like-for-like.
+  const pointsOnCard = computeCobaltPoints(allFlows, ctx, { onlyOnCard: true })
   const rogersSpend = computeRogersSpend(allFlows, ctx)
+  // Spend genuinely on the Mastercard, for the real-card half of §-tiers.
+  const rogersCardSpend = computeRogersCardSpend(allFlows, ctx)
   const switchBasis = computePhoneSwitchSpendBasis(allFlows, ctx)
 
   // Names come from .env.local (never the DB or this public repo) and are
@@ -36,7 +42,9 @@ export default async function AccountsCobaltPage() {
   return (
     <CobaltAnalysis
       points={points}
+      pointsOnCard={pointsOnCard}
       rogersSpend={rogersSpend}
+      rogersCardSpend={rogersCardSpend}
       switchBasis={switchBasis}
       twoCards={twoCards}
     />

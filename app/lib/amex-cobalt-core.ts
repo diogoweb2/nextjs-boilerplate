@@ -12,10 +12,11 @@ export const COBALT_FEE_MONTHLY = 15.99
  *  partners). Shown as an adjustable slider on the accounts tab. */
 export const DEFAULT_CENTS_PER_POINT = 1.0
 
-export type CobaltTier = 'grocery5x' | 'streaming3x' | 'transit2x' | 'base1x'
+export type CobaltTier = 'grocery5x' | 'eats5x' | 'streaming3x' | 'transit2x' | 'base1x'
 
 export const TIER_META: Record<CobaltTier, { label: string; multiplier: number; color: string }> = {
   grocery5x: { label: 'Groceries (5x)', multiplier: 5, color: '#22c55e' },
+  eats5x: { label: 'Eats & drinks (5x)', multiplier: 5, color: '#f59e0b' },
   streaming3x: { label: 'Streaming (3x)', multiplier: 3, color: '#a855f7' },
   transit2x: { label: 'Gas / transit / rideshare (2x)', multiplier: 2, color: '#3b82f6' },
   base1x: { label: 'Everything else (1x)', multiplier: 1, color: '#94a3b8' },
@@ -33,7 +34,11 @@ export const TIER_META: Record<CobaltTier, { label: string; multiplier: number; 
 // name (Metro/Freshco/…), so it matches on that. The explicit "gift card"
 // keywords only catch a split part the owner relabelled (§4/§10c) — per the
 // owner, gift cards on this ledger are always bought at a supermarket.
-const GROCERY_KEYWORDS = ['metro', 'freshco', 'food basics', 'gift card', 'giftcard']
+// Oddbunch is a grocery-delivery box; Amex pays it 5x (verified on the Apr/Aug
+// 2026 Membership Rewards statements: $35.99 → 180 points, every week).
+// Walmart, LCBO and Dollarama are deliberately absent — the same statements
+// show them at a flat 1x, so a "supermarket-ish" heuristic would overstate.
+const GROCERY_KEYWORDS = ['metro', 'freshco', 'food basics', 'oddbunch', 'gift card', 'giftcard']
 const STREAMING_KEYWORDS = [
   'netflix', 'spotify', 'disney', 'crave', 'prime video', 'apple tv', 'youtube premium',
   'youtube tv', 'paramount', 'crunchyroll', 'hbo', 'max', 'peacock', 'deezer', 'tidal', 'apple music',
@@ -55,13 +60,48 @@ const STREAMING_RE = wordMatcher(STREAMING_KEYWORDS)
 const GAS_TRANSIT_RE = wordMatcher([...GAS_KEYWORDS, ...TRANSIT_KEYWORDS])
 
 /**
- * Classifies a transaction into an Amex Cobalt earn tier. "Amazon" is treated
- * as the grocery tier per the owner's confirmation that every Amazon charge on
- * this ledger is a gift card bought at the supermarket checkout, not an
- * amazon.com order — re-check this assumption if that ever changes.
+ * The card's monthly fee. It posts as an ordinary Amex charge but earns **zero**
+ * points (confirmed on every monthly rewards statement: $15.99 → 0), and it is
+ * already modelled as `annualFee`, so counting it as spend would both invent
+ * points and double-count the cost.
  */
-export function classifyCobaltTier(merchantName: string, categoryName: string): CobaltTier {
-  if (GROCERY_RE.test(merchantName)) return 'grocery5x'
+const NO_EARN_RE = wordMatcher(['membership fee'])
+
+export function earnsNoPoints(merchantName: string): boolean {
+  return NO_EARN_RE.test(merchantName)
+}
+
+/**
+ * Classifies a transaction into an Amex Cobalt earn tier.
+ *
+ * Calibrated against the owner's real Membership Rewards statements
+ * (Jan–Aug 2026), which reconcile April 2026 to within 1 point:
+ *
+ * - **5x eats & drinks** is keyed off the `Dining` category rather than a
+ *   restaurant-name list — restaurants are too long a tail to enumerate, and
+ *   the ledger already classifies them. Verified: Tim Hortons $7.76 → 39,
+ *   Me Va Me $18.02 → 90, Pizza Nova $10.74 → 54, McDonald's $24.27 → 121.
+ * - **Travel earns 1x**, not 2x. The statements are unambiguous: Air Canada
+ *   $2,193.52 → 2,194, Airbnb $1,133.96 → 1,134, LNER $528.44 → 528. Only
+ *   local transit (Presto, GO) still pays 2x: $24.64 → 49.
+ * - **Both 5x tiers are Canada-only.** `isForeign` drops a foreign purchase to
+ *   1x — a London restaurant paid 1x (Brunch & Crunch $146.23 → 146) while an
+ *   identical Toronto one paid 5x. Amex rows carry no merchant country code
+ *   (only Master-format rows do), so foreign Amex dining is caught by the
+ *   ledger filing those trips under `Travel`, not `Dining`. Pass `isForeign`
+ *   where the country *is* known rather than relying on that alone.
+ *
+ * "Amazon" is treated as the grocery tier per the owner's confirmation that
+ * every Amazon charge on this ledger is a gift card bought at the supermarket
+ * checkout, not an amazon.com order — re-check this if that ever changes.
+ */
+export function classifyCobaltTier(
+  merchantName: string,
+  categoryName: string,
+  isForeign = false,
+): CobaltTier {
+  if (!isForeign && GROCERY_RE.test(merchantName)) return 'grocery5x'
+  if (!isForeign && categoryName === 'Dining') return 'eats5x'
   if (categoryName === 'Subscriptions' && STREAMING_RE.test(merchantName)) return 'streaming3x'
   if (GAS_TRANSIT_RE.test(merchantName)) return 'transit2x'
   return 'base1x'

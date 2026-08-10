@@ -48,7 +48,7 @@ import { SurplusAllocation } from '@/app/components/SurplusAllocation'
 import { GoalsSummary } from '@/app/components/GoalsSummary'
 import { CobaltOverviewCard } from '@/app/components/CobaltOverviewCard'
 import { RogersOverviewCard } from '@/app/components/RogersOverviewCard'
-import { computeCardShowdown, computeRogersCardSpend } from '@/app/lib/amex-cobalt'
+import { computeCobaltAnalysis, computeRogersCardSpend } from '@/app/lib/amex-cobalt'
 import { cashbackFromSpend } from '@/app/lib/amex-cobalt-core'
 import { loadCardRewardContext } from '@/app/actions/amex-cobalt'
 import { buildBudgetInsights } from '@/app/lib/dashboard-insights'
@@ -674,7 +674,9 @@ export default async function Home({
           <GoalsSummary goals={goalsSummary.goals} />
 
           {/* Cobalt points vs fee — the Rogers comparison lives on Accounts › Amex Cobalt */}
-          <CobaltOverviewCard cobalt={computeCardShowdown(allFlows, cardRewardCtx).cobalt} />
+          <CobaltOverviewCard
+            cobalt={computeCobaltAnalysis(allFlows, cardRewardCtx, { onlyOnCard: true })}
+          />
 
           {/* Same idea for the Rogers Mastercard, priced on what it actually carries */}
           <RogersOverviewCard

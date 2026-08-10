@@ -55,7 +55,13 @@ function ReviewRow({ review }: { review: PendingReview }) {
   const [pending, startTransition] = useTransition()
   const inbound = review.direction === 'in'
   const treatments = inbound ? INBOUND_TREATMENTS : OUTBOUND_TREATMENTS
-  const [treatment, setTreatment] = useState<Treatment>(inbound ? 'goal' : 'expense')
+  // An outsized "Mb-Transfer" lump is already classified as extra principal — the
+  // review only asks the owner to confirm it wasn't an investment move, so start
+  // on the answer that keeps what the importer decided.
+  const preclassifiedMortgage = !inbound && review.merchant === 'Mortgage'
+  const [treatment, setTreatment] = useState<Treatment>(
+    inbound ? 'goal' : preclassifiedMortgage ? 'mortgage' : 'expense'
+  )
 
   const defaultAllocations = (t: Treatment): ReviewAllocation[] => {
     if (!review.goals.length) return []
@@ -64,7 +70,9 @@ function ReviewRow({ review }: { review: PendingReview }) {
     return [{ goalId: review.suggestedGoalId ?? review.goals[0].id, amount: review.amount }]
   }
 
-  const [allocations, setAllocations] = useState<ReviewAllocation[]>(() => defaultAllocations(inbound ? 'goal' : 'expense'))
+  const [allocations, setAllocations] = useState<ReviewAllocation[]>(() =>
+    defaultAllocations(inbound ? 'goal' : preclassifiedMortgage ? 'mortgage' : 'expense')
+  )
   const [registeredAccountId, setRegisteredAccountId] = useState<number>(0)
 
   const allocatable = inbound ? treatment === 'goal' : treatment === 'expense' || treatment === 'neutral'
@@ -98,7 +106,12 @@ function ReviewRow({ review }: { review: PendingReview }) {
         <span className="tabular-nums text-lg font-bold">{formatCurrency(review.amount)}</span>
       </div>
       <p className="mb-3 text-xs text-[var(--muted)]">
-        {formatLongDate(review.date)} · {inbound ? 'money landed in chequing — what for?' : 'what was this for?'}
+        {formatLongDate(review.date)} ·{' '}
+        {inbound
+          ? 'money landed in chequing — what for?'
+          : preclassifiedMortgage
+            ? 'bigger than your usual top-up — still extra principal?'
+            : 'what was this for?'}
       </p>
 
       {/* Treatment */}

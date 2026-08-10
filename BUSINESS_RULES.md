@@ -90,10 +90,11 @@ by description + sub-description + sign. Highlights (owner-confirmed):
   Haven/Kumon → Kids; Koodo → Subscriptions; Highway 407 → Cars; service charge → Bank Fees;
   abm withdrawal → Cash; `pos purchase` → the normal merchant-learning path (merchant text in
   the sub-description).
-- **Scotia "customer transfer dr."** split: **−$1,100 → Home** (extra mortgage), **−$900 →
-  Investment**;
-  `Mb-Credit Card/Loc Pay` → CC Payment; any other amount → **Investment** (legacy lump
-  transfers default here and can be reclassified per-transaction).
+- **Scotia "customer transfer dr."** split, decided on the **sub-description, not the amount**
+  (the monthly extra mortgage payment is deliberately variable): sub `Mb-Transfer` → **Home /
+  Mortgage** (extra principal, any amount); **blank** sub → **Investment (iTrade)**;
+  `Mb-Credit Card/Loc Pay` → CC Payment. Either side can be reclassified per-transaction, and
+  an unusually large `Mb-Transfer` is queued for review (§ review queues).
 - **Investment** (incl. Scotia iTrade) is an **expense** in category `Investment` (so the
   income−spend gap reflects it; trivially re-bucketed later).
 
@@ -756,13 +757,19 @@ new **`Goal Spend`** income category, so it shows on the Income page as its own 
 
 ### Import hook (`app/actions/import.ts` → `createTransferReviews` / `createWithdrawalReviews` / `createInboundReviews`)
 After each import, amount rules run **first** (`applyAmountRules`): any transaction matching a
-remembered merchant+amount (§3) is considered already decided and is **skipped by all three
-review queues** below. Then:
+remembered merchant+amount (§3) is considered already decided and is skipped by the
+**withdrawal** and **inbound** queues below. It is **not** skipped by the transfer queue — an
+amount rule remembers a category and a note, not which goal the money went to, so the recurring
+**$900** iTrade transfer is prompted every month. Then:
 - **Outbound** (`createTransferReviews`, `direction='out'`): every newly-inserted Scotia transfer the
-  classifier routed to the **`Investment (iTrade)`** payee (the recurring **$900** and any
-  **non-$1,100** customer transfer — `classifyScotia`) gets a `pending` review. The exact
-  **$1,100 → Mortgage** still auto-classifies with **no** prompt. `suggestedGoalId` is learned: the goal
-  most often tagged on a prior transfer of the same rounded amount.
+  classifier routed to the **`Investment (iTrade)`** payee (the recurring **$900** and any other
+  blank-sub customer transfer — `classifyScotia`) gets a `pending` review. `suggestedGoalId` is
+  learned: the goal most often tagged on a prior transfer of the same rounded amount.
+  Extra mortgage top-ups (`Mb-Transfer`) auto-classify to Home / Mortgage with **no** prompt
+  **unless** the amount is outsized — more than **2×** the median of the last **6** extras
+  (`outsizedMortgageExtras`), or there is no history yet. Those get a review pre-set to
+  "Extra mortgage"; choosing "Count as expense" / "Don't count" moves the transaction **off**
+  the Mortgage payee to `Investment (iTrade)` so the payoff projection stops counting it.
 - **Outbound withdrawals** (`createWithdrawalReviews`, `direction='out'`): every newly-inserted
   *unidentified* bank outflow — the catch-all `AMBIGUOUS_OUTBOUND_MERCHANTS` (**E-Transfer Out**,
   **Bank Withdrawal**, **Cheque Withdrawal**) — also gets a `pending` review. This is the **debit leg of
@@ -2147,13 +2154,29 @@ every other analytics page.
     only the supermarket swipe earns the multiplier.) The `gift card` keywords exist solely to catch
     a split part the owner relabelled; per the owner, gift cards here are always bought at a
     supermarket.
+    Oddbunch (grocery-delivery box) is in the list; Walmart, LCBO and Dollarama are deliberately
+    **not** — the rewards statements show all three at a flat 1x.
+  - **5x — Eats & drinks**: effective category is `Dining`. Keyed off the category, not a merchant
+    list: restaurants are too long a tail to enumerate and the ledger already classifies them.
+  - **Both 5x tiers are Canada-only.** A known-foreign purchase (`isForeign`, from the Master-format
+    merchant country code) falls to 1x. Amex rows carry no country code, so foreign Amex dining is
+    caught only by the ledger filing those trips under `Travel` rather than `Dining`.
   - **3x — Streaming**: merchant name matches a curated streaming-service list (Netflix, Spotify,
     Disney+, Crave, Prime Video, Apple TV+, YouTube Premium, …) **and** the effective category is
     `Subscriptions` — so phone/internet bills that also live in Subscriptions (Koodo, Fido,
     Distributel, §4) don't get the multiplier.
   - **2x — Gas / transit / rideshare**: merchant name matches known gas stations (Petro-Canada,
     Esso, Shell, Circle K, Costco Gas, …) or transit/rideshare (Presto, GO/Union, TTC, Uber, Lyft).
-  - **1x — everything else**.
+    **Travel is not in this tier** — airlines, hotels, Airbnb and intercity rail all earn 1x.
+  - **1x — everything else**, including all travel and all foreign spend.
+  - **0x — the membership fee** (`earnsNoPoints`). It posts as an ordinary Amex charge but earns
+    nothing, and is already modelled as `annualFee`, so it is dropped before bucketing.
+  - **Calibration**: the tiers above were reconciled against the owner's real Membership Rewards
+    statements (Jan–Aug 2026, exported per month). August 2026 matches to the point (1,995) and
+    July to within 1; April is 33 low, entirely a single PayPal hold Amex paid 2x. Before this
+    calibration the model was ~20% low: it had no eats tier, paid travel 2x, missed Oddbunch, and
+    counted the fee as spend. If the earn rules are ever re-checked, re-export a month and redo
+    this comparison rather than reasoning from the card's marketing copy.
   - Keywords match on **word boundaries** (precompiled regexes), never raw substrings. Plain
     `includes` had `mobil` matching "Fido Mobile"/"Koodo Mobility" — filing phone bills as 2x gas —
     plus `max` matching "Maxi" and `esso` matching "espresso". Keep any new keyword safe under

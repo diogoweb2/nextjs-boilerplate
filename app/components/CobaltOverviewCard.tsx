@@ -119,6 +119,10 @@ export function CobaltOverviewCard({ cobalt }: { cobalt: CobaltAnalysis }) {
             Fee <span className="font-medium text-[var(--foreground)]">{formatCurrency(feeMonthly)}/month</span> (
             {formatCurrency(feeMonthly * 12)}/year)
           </li>
+          <li>
+            Counts only purchases <span className="font-medium text-[var(--foreground)]">actually on the Amex</span> —
+            the Cobalt vs Rogers page instead prices <em>all</em> card spend as if it ran through this card
+          </li>
         </ul>
       </details>
     </Card>

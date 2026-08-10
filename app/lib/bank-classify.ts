@@ -109,7 +109,6 @@ function classifyScotia(input: BankInput): BankClass {
   const desc = input.description.toLowerCase()
   const sub = input.subDescription.toLowerCase()
   const both = `${desc} ${sub}`
-  const out = Math.abs(input.amount)
 
   // --- Income (credits) ---
   if (has(desc, 'payroll deposit')) return income('Salary', 'University Health Network')
@@ -149,10 +148,16 @@ function classifyScotia(input: BankInput): BankClass {
   // sub-description (which holds the merchant text), like card statements.
   if (has(desc, 'pos purchase')) return { flow: 'expense', category: null, merchant: null, recurring: false }
 
-  // Recurring outbound "customer transfer dr." split (owner-confirmed):
-  // $1,100 = extra mortgage, $900 = iTrade investment, everything else = investment (review).
+  // Outbound "customer transfer dr." split — on the SUB-description, not the
+  // amount (the extra mortgage payment changes every month, so an amount rule
+  // like the old `=== 1100` breaks the moment the owner pays a different top-up).
+  // Owner-confirmed from two years of statements: the mortgage top-ups are all
+  // "Mb-Transfer" (2000 → 1100 → variable, plus lump sums); the iTrade moves
+  // ($900 and friends) carry a blank sub-description.
+  // Unusually large Mb-Transfers still get a review queued (see import.ts
+  // `createTransferReviews`) so a one-off lump can be flipped to investment.
   if (has(desc, 'customer transfer')) {
-    if (out === 1100) return expense('Home', 'Mortgage', true)
+    if (has(sub, 'mb-transfer')) return expense('Home', 'Mortgage', true)
     return expense('Investment', 'Investment (iTrade)')
   }
 

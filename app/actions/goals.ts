@@ -683,6 +683,13 @@ async function merchantIdByName(name: string, categoryName?: string): Promise<nu
   return created.id
 }
 
+/** True when a transaction currently sits on the "Mortgage" payee. */
+async function isMortgageTxn(merchantId: number | null): Promise<boolean> {
+  if (!merchantId) return false
+  const [m] = await db.select({ name: merchants.name }).from(merchants).where(eq(merchants.id, merchantId)).limit(1)
+  return m?.name === 'Mortgage'
+}
+
 /** Current savings value of a goal straight from its ledger (pre/post deltas). */
 async function currentSavingsValue(goalId: number): Promise<number> {
   const rows = await db
@@ -1550,13 +1557,24 @@ export async function resolveTransferReview(input: {
     return
   }
 
-  // expense | neutral
+  // expense | neutral. Both mean "this was NOT extra principal", so a row the
+  // classifier put on the Mortgage payee (an outsized "Mb-Transfer" lump) also
+  // has to leave that payee — otherwise the payoff projection keeps counting it.
+  const investMerchantId = await merchantIdByName('Investment (iTrade)', 'Investment')
+  const offMortgage = { merchantId: investMerchantId }
+  const wasMortgage = await isMortgageTxn(txn.merchantId)
   if (input.treatment === 'neutral') {
     const transferId = await categoryIdByName('Transfer')
-    await db.update(transactions).set({ flow: 'transfer', categoryId: transferId }).where(eq(transactions.id, txn.id))
+    await db
+      .update(transactions)
+      .set({ flow: 'transfer', categoryId: transferId, ...(wasMortgage ? offMortgage : {}) })
+      .where(eq(transactions.id, txn.id))
   } else {
     const investId = await categoryIdByName('Investment')
-    await db.update(transactions).set({ flow: 'expense', categoryId: investId }).where(eq(transactions.id, txn.id))
+    await db
+      .update(transactions)
+      .set({ flow: 'expense', categoryId: investId, ...(wasMortgage ? offMortgage : {}) })
+      .where(eq(transactions.id, txn.id))
   }
   await allocateToGoals(input.allocations ?? [], txn, 1, 'From transfer')
   // Tag the transfer to a registered account (TFSA/RESP) if chosen, so the

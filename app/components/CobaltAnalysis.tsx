@@ -49,12 +49,19 @@ const VERDICT_META = {
 
 export function CobaltAnalysis({
   points,
+  pointsOnCard,
   rogersSpend,
+  rogersCardSpend,
   switchBasis,
   twoCards,
 }: {
   points: CobaltPointsData
+  /** The same buckets, but only for purchases actually on the Amex — the tier
+   *  chart reads the real card, while `points` drives the all-card showdown. */
+  pointsOnCard: CobaltPointsData
   rogersSpend: RogersSpendData
+  /** Spend actually on the Rogers Mastercard — the real-card half of §-tiers. */
+  rogersCardSpend: RogersSpendData
   /** Real avg monthly non-phone domestic spend, by card — feeds the Fido calculator. */
   switchBasis: { monthsOfData: number; onRogersCard: number; onAllCards: number }
   /** Per-cardholder spend for the §26 "two Rogers cards" scenario. */
@@ -74,6 +81,10 @@ export function CobaltAnalysis({
   const qualifyingBillMonthly = switchBothLines ? fidoQuotedPrice * 2 : fidoQuotedPrice
 
   const analysis = useMemo(() => valueFromPoints(points, cpp, COBALT_FEE_MONTHLY), [points, cpp])
+  const onCard = useMemo(
+    () => valueFromPoints(pointsOnCard, cpp, COBALT_FEE_MONTHLY),
+    [pointsOnCard, cpp],
+  )
   const rogers = useMemo(
     () =>
       cashbackFromSpend(
@@ -102,6 +113,21 @@ export function CobaltAnalysis({
     [rogersSpend, redeemTowardBill],
   )
 
+  // The Mastercard as it is actually used, priced at the same rates as the
+  // comparison below so the toggles there move both consistently.
+  const rogersCard = useMemo(
+    () =>
+      cashbackFromSpend(
+        rogersCardSpend,
+        rogersRates({
+          qualifying: hasQualifyingService,
+          redeemTowardBill,
+          redemptionCapMonthly: qualifyingBillMonthly,
+        }),
+      ),
+    [rogersCardSpend, hasQualifyingService, redeemTowardBill, qualifyingBillMonthly],
+  )
+
   if (points.monthsOfData === 0) {
     return (
       <Card title="Amex Cobalt: worth it?">
@@ -111,7 +137,32 @@ export function CobaltAnalysis({
   }
 
   const v = VERDICT_META[showdown.verdict]
-  const maxTierValue = Math.max(1, ...analysis.tiers.map((t) => t.valueDollars))
+  const rogersMonths = Math.max(1, rogersCardSpend.monthsOfData)
+  const annualize = (v: number) => (v / rogersMonths) * 12
+  const rogersDomesticRate = hasQualifyingService ? ROGERS_DOMESTIC_BONUS_RATE : ROGERS_DOMESTIC_BASE_RATE
+  // Bands are shown at the headline rates; the cap and the redemption bonus are
+  // whole-card effects, so they live in the totals rather than in a band.
+  const rogersCardBands = [
+    {
+      label: `Canadian purchases (${(rogersDomesticRate * 100).toFixed(1)}%)`,
+      color: '#3b82f6',
+      annualSpend: annualize(rogersCardSpend.domesticSpend),
+      annualValue: annualize(rogersCardSpend.domesticSpend * rogersDomesticRate),
+    },
+    {
+      label: `Foreign purchases (${(ROGERS_FOREIGN_NET_RATE * 100).toFixed(1)}% after FX fee)`,
+      color: '#f59e0b',
+      annualSpend: annualize(rogersCardSpend.foreignSpend),
+      annualValue: annualize(rogersCardSpend.foreignSpend * ROGERS_FOREIGN_NET_RATE),
+    },
+  ]
+  const rogersCardAnnualSpend = annualize(rogersCardSpend.domesticSpend + rogersCardSpend.foreignSpend)
+  // One scale across both panels, so the bars compare card to card.
+  const maxRewardValue = Math.max(
+    1,
+    ...onCard.tiers.map((t) => (t.valueDollars / Math.max(1, pointsOnCard.monthsOfData)) * 12),
+    ...rogersCardBands.map((b) => b.annualValue),
+  )
   const rogersByMonth = new Map(rogers.monthly.map((m) => [m.ym, m]))
   const monthlyDelta = analysis.monthly.map((m) => ({
     ym: m.ym,
@@ -281,47 +332,150 @@ export function CobaltAnalysis({
         </div>
       </Card>
 
-      {/* Tier breakdown */}
+      {/* Tier breakdown, one panel per real card */}
       <Card
-        title="Where the points come from"
-        action={<span className="text-xs text-[var(--muted)]">annualized spend × multiplier</span>}
+        title="Where the rewards come from"
+        action={<span className="text-xs text-[var(--muted)]">what each card actually earns today</span>}
       >
-        <ul className="flex flex-col gap-3">
-          {analysis.tiers.map((t) => {
-            const annualSpend = (t.spend / Math.max(1, points.monthsOfData)) * 12
-            const annualValue = (t.valueDollars / Math.max(1, points.monthsOfData)) * 12
-            return (
-              <li key={t.tier} className="flex flex-col gap-1">
-                <div className="flex items-baseline justify-between gap-3 text-sm">
-                  <span className="flex items-center gap-2 font-medium">
-                    <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: t.color }} />
-                    {t.label}
-                  </span>
-                  <span className="shrink-0 tabular-nums text-[var(--muted)]">
-                    {formatCurrency(annualSpend)}/yr spend
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-[var(--surface-2)]">
-                    <div
-                      className="h-full rounded-full transition-all"
-                      style={{ width: `${(t.valueDollars / maxTierValue) * 100}%`, background: t.color }}
-                    />
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          {/* Amex — tiered, so it gets the multiplier bars */}
+          <div className="flex flex-col gap-3">
+            <div className="flex items-baseline justify-between gap-3">
+              <h3 className="text-sm font-semibold">Amex Cobalt</h3>
+              <span className="text-xs tabular-nums text-[var(--muted)]">
+                {formatCurrency(onCard.annualizedSpend)}/yr spend
+              </span>
+            </div>
+            <ul className="flex flex-col gap-3">
+              {onCard.tiers.map((t) => {
+                const annualSpend = (t.spend / Math.max(1, pointsOnCard.monthsOfData)) * 12
+                const annualValue = (t.valueDollars / Math.max(1, pointsOnCard.monthsOfData)) * 12
+                return (
+                  <li key={t.tier} className="flex flex-col gap-1">
+                    <div className="flex items-baseline justify-between gap-3 text-sm">
+                      <span className="flex items-center gap-2 font-medium">
+                        <span
+                          className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                          style={{ background: t.color }}
+                        />
+                        {t.label}
+                      </span>
+                      <span className="shrink-0 tabular-nums text-[var(--muted)]">
+                        {formatCurrency(annualSpend)}/yr
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="h-2 flex-1 overflow-hidden rounded-full bg-[var(--surface-2)]">
+                        <div
+                          className="h-full rounded-full transition-all"
+                          style={{ width: `${(annualValue / maxRewardValue) * 100}%`, background: t.color }}
+                        />
+                      </div>
+                      <span className="w-24 shrink-0 text-right text-xs font-semibold tabular-nums">
+                        {formatCurrency(annualValue)}/yr
+                      </span>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+            <div className="flex items-baseline justify-between border-t border-[var(--border)] pt-2 text-sm">
+              <span className="font-medium">Points earned</span>
+              <span className="font-semibold tabular-nums">
+                {formatCurrency(onCard.annualizedPointsValue)}/yr
+              </span>
+            </div>
+            <div className="flex items-baseline justify-between text-sm">
+              <span className="text-[var(--muted)]">Less membership fee</span>
+              <span className="tabular-nums text-[var(--negative)]">
+                −{formatCurrency(onCard.annualFee)}/yr
+              </span>
+            </div>
+            <div className="flex items-baseline justify-between text-sm">
+              <span className="font-medium">Net</span>
+              <span
+                className="font-semibold tabular-nums"
+                style={{ color: onCard.netAnnualValue >= 0 ? 'var(--positive)' : 'var(--negative)' }}
+              >
+                {onCard.netAnnualValue >= 0 ? '+' : ''}
+                {formatCurrency(onCard.netAnnualValue)}/yr
+              </span>
+            </div>
+          </div>
+
+          {/* Rogers — one flat rate, so the only split that means anything is
+              domestic vs foreign (the FX fee eats most of the foreign rate). */}
+          <div className="flex flex-col gap-3">
+            <div className="flex items-baseline justify-between gap-3">
+              <h3 className="text-sm font-semibold">Rogers Mastercard</h3>
+              <span className="text-xs tabular-nums text-[var(--muted)]">
+                {formatCurrency(rogersCardAnnualSpend)}/yr spend
+              </span>
+            </div>
+            <ul className="flex flex-col gap-3">
+              {rogersCardBands.map((b) => (
+                <li key={b.label} className="flex flex-col gap-1">
+                  <div className="flex items-baseline justify-between gap-3 text-sm">
+                    <span className="flex items-center gap-2 font-medium">
+                      <span
+                        className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ background: b.color }}
+                      />
+                      {b.label}
+                    </span>
+                    <span className="shrink-0 tabular-nums text-[var(--muted)]">
+                      {formatCurrency(b.annualSpend)}/yr
+                    </span>
                   </div>
-                  <span className="w-24 shrink-0 text-right text-xs font-semibold tabular-nums">
-                    {formatCurrency(annualValue)}/yr
-                  </span>
-                </div>
-              </li>
-            )
-          })}
-        </ul>
+                  <div className="flex items-center gap-2">
+                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-[var(--surface-2)]">
+                      <div
+                        className="h-full rounded-full transition-all"
+                        style={{
+                          width: `${(Math.max(0, b.annualValue) / maxRewardValue) * 100}%`,
+                          background: b.color,
+                        }}
+                      />
+                    </div>
+                    <span className="w-24 shrink-0 text-right text-xs font-semibold tabular-nums">
+                      {formatCurrency(b.annualValue)}/yr
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <div className="flex items-baseline justify-between border-t border-[var(--border)] pt-2 text-sm">
+              <span className="font-medium">Cash back earned</span>
+              <span className="font-semibold tabular-nums">
+                {formatCurrency(rogersCard.annualizedCashback)}/yr
+              </span>
+            </div>
+            <div className="flex items-baseline justify-between text-sm">
+              <span className="text-[var(--muted)]">Less annual fee</span>
+              <span className="tabular-nums text-[var(--muted)]">−{formatCurrency(0)}/yr</span>
+            </div>
+            <div className="flex items-baseline justify-between text-sm">
+              <span className="font-medium">Net</span>
+              <span className="font-semibold tabular-nums text-[var(--positive)]">
+                +{formatCurrency(rogersCard.annualizedCashback)}/yr
+              </span>
+            </div>
+          </div>
+        </div>
+
         <p className="mt-4 text-xs text-[var(--muted)]">
-          Groceries assumes Metro, Freshco and Food Basics — plus every &ldquo;Amazon&rdquo; charge,
-          since on this ledger that&apos;s always a gift card bought at the supermarket register, not
-          an amazon.com order. Streaming only counts recognized streaming services inside the
-          Subscriptions category (phone/internet bills don&apos;t get the multiplier). Gas/transit/
-          rideshare matches known gas stations, Presto/transit and Uber/Lyft.
+          Both panels are the cards as they are used today, over the last{' '}
+          {pointsOnCard.monthsOfData} months — not the &ldquo;what if it all moved&rdquo; scenario
+          the comparison below runs. Rogers is priced at the same rates as that comparison, so the
+          toggles under it move these numbers too.
+        </p>
+        <p className="mt-2 text-xs text-[var(--muted)]">
+          Groceries matches Metro, Freshco and Food Basics, plus any charge relabelled
+          &ldquo;gift card&rdquo; — on this ledger those are always bought at the supermarket
+          register. A plain amazon.ca order earns 1x. Streaming only counts recognized streaming
+          services inside the Subscriptions category (phone/internet bills don&apos;t get the
+          multiplier). Gas/transit/rideshare matches known gas stations, Presto/transit and
+          Uber/Lyft.
         </p>
       </Card>
 

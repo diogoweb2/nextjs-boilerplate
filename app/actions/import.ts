@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { after } from 'next/server'
-import { and, eq, inArray, ilike } from 'drizzle-orm'
+import { and, asc, eq, inArray, ilike } from 'drizzle-orm'
 import { db } from '@/db'
 import {
   transactions,
@@ -22,6 +22,7 @@ import { reconcileNetZeroGoals } from '@/app/actions/goals'
 import { runAutoFillForAllProjects } from '@/app/actions/projects'
 import { maybeTriggerDigest } from '@/app/lib/digest'
 import { applyPlannedSplits } from '@/app/lib/planned-splits'
+import { isExtraMortgagePayment } from '@/app/lib/mortgage'
 
 export type ImportResult =
   | { ok: true; source: ImportSource; inserted: number; skipped: number; period: string }
@@ -254,14 +255,19 @@ export async function ingestStatement(
 
   // Apply merchant+amount rules first: auto-fill category and note on matching new
   // txns. A remembered merchant+amount is already explained, so matched txns are
-  // excluded from the transfer-review prompts below.
+  // excluded from the withdrawal/deposit prompts below.
   const remembered = await applyAmountRules(inserted.map((r) => r.id))
   const unexplained = inserted.map((r) => r.id).filter((id) => !remembered.has(id))
 
   // Queue investment transfers (out), unknown outbound withdrawals (out, e.g. an
   // internal Tangerine↔Scotia transfer), and unknown inbound deposits (in) for the
   // dashboard "what was this for?" prompt.
-  await createTransferReviews(unexplained)
+  //
+  // Transfers get the FULL list, not `unexplained`: an amount rule only remembers
+  // a category and a note, which is not the question a transfer review asks (which
+  // goal did this money go to?). Letting it suppress the prompt is how the
+  // recurring $900 iTrade transfer ended up silently auto-filed.
+  await createTransferReviews(inserted.map((r) => r.id))
   await createWithdrawalReviews(unexplained)
   await createInboundReviews(unexplained)
 
@@ -361,27 +367,78 @@ export async function reconcileBelairSplit(): Promise<void> {
   }
 }
 
+/** A top-up bigger than this multiple of the recent norm is not routine. */
+const MORTGAGE_EXTRA_OUTLIER_FACTOR = 2
+
 /**
- * Queue a Goals review for every freshly-imported investment transfer. The
- * classifier sends both the recurring $900 (kitchen) and any non-$1,100 customer
- * transfer to the "Investment (iTrade)" payee; those are the ones the owner needs
- * to attribute. The exact $1,100 → Mortgage is auto-classified and never queued.
+ * The freshly-imported extra mortgage prepayments that are too big to trust as
+ * routine — worth a review before they silently count as principal.
+ *
+ * "Too big" is relative, because the monthly top-up is deliberately variable
+ * (whatever the payoff-by-50 projection asks for that month): more than
+ * MORTGAGE_EXTRA_OUTLIER_FACTOR × the median of the last 6 extras. That leaves
+ * the normal month — $1,100, $493.30, anything in that band — auto-classified and
+ * silent, and catches the $4,000 / $7,000 lumps that might have been an
+ * investment move instead. With no history yet, every extra gets reviewed.
+ */
+async function outsizedMortgageExtras(insertedIds: number[]): Promise<{ id: number; amount: string }[]> {
+  const all = await db
+    .select({
+      id: transactions.id,
+      amount: transactions.amount,
+      flow: transactions.flow,
+      rawDescription: transactions.rawDescription,
+      merchantName: merchants.name,
+    })
+    .from(transactions)
+    .innerJoin(merchants, eq(transactions.merchantId, merchants.id))
+    .where(eq(merchants.name, 'Mortgage'))
+    .orderBy(asc(transactions.txnDate))
+
+  const extras = all.filter(isExtraMortgagePayment)
+  const fresh = new Set(insertedIds)
+  const priorAmounts = extras
+    .filter((t) => !fresh.has(t.id))
+    .map((t) => Math.abs(Number(t.amount)))
+    .slice(-6)
+    .sort((a, b) => a - b)
+  const median = priorAmounts.length ? priorAmounts[Math.floor(priorAmounts.length / 2)] : 0
+
+  return extras
+    .filter((t) => fresh.has(t.id) && (median === 0 || Math.abs(Number(t.amount)) > median * MORTGAGE_EXTRA_OUTLIER_FACTOR))
+    .map((t) => ({ id: t.id, amount: t.amount }))
+}
+
+/**
+ * Queue a Goals review for every freshly-imported investment transfer — the
+ * "Investment (iTrade)" payee (the recurring $900 kitchen transfer and any other
+ * blank-sub customer transfer), which the owner needs to attribute to a goal.
+ *
+ * Also queues the *unusually large* extra mortgage top-ups: `classifyScotia`
+ * sends every "Mb-Transfer" customer transfer straight to Home / Mortgage at any
+ * amount (the monthly top-up changes), which is right for the routine payment but
+ * not necessarily for a one-off lump. `outsizedMortgageExtras` picks those out so
+ * the owner can flip them to investment; routine top-ups auto-classify silently.
+ *
  * suggestedGoalId is learned: the goal most often tagged on a prior transfer of
  * the same rounded amount. Idempotent (transactionId is unique).
  */
 async function createTransferReviews(insertedIds: number[]): Promise<void> {
   if (insertedIds.length === 0) return
 
-  const rows = await db
-    .select({ id: transactions.id, amount: transactions.amount })
-    .from(transactions)
-    .innerJoin(merchants, eq(transactions.merchantId, merchants.id))
-    .where(
-      and(
-        inArray(transactions.id, insertedIds),
-        eq(merchants.name, 'Investment (iTrade)')
-      )
-    )
+  const rows = [
+    ...(await db
+      .select({ id: transactions.id, amount: transactions.amount })
+      .from(transactions)
+      .innerJoin(merchants, eq(transactions.merchantId, merchants.id))
+      .where(
+        and(
+          inArray(transactions.id, insertedIds),
+          eq(merchants.name, 'Investment (iTrade)')
+        )
+      )),
+    ...(await outsizedMortgageExtras(insertedIds)),
+  ]
   if (rows.length === 0) return
 
   // Learn amount → goal from prior tagged contributions (rounded to the dollar).

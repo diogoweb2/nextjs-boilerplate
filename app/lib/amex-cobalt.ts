@@ -3,6 +3,7 @@ import { addMonths, anchorMonth } from '@/app/lib/analytics'
 import {
   TIER_META,
   classifyCobaltTier,
+  earnsNoPoints,
   valueFromPoints,
   cashbackFromSpend,
   compareCards,
@@ -93,10 +94,24 @@ export type CardRewardContext = {
  * app/lib/analytics.ts (and therefore next/headers via demo.ts), so this
  * function must never be imported from a 'use client' component — see
  * amex-cobalt-core.ts for the client-safe re-pricing half.
+ *
+ * `opts.onlyOnCard` narrows it to what is **actually** on the Amex today
+ * (`source === 'amex'`). The dashboard box uses that, because "is my Cobalt
+ * paying for itself" is a question about the real card; the §24 comparison
+ * deliberately does not, because there the whole point is the hypothetical.
  */
-export function computeCobaltPoints(flows: EnrichedTxn[], ctx: CardRewardContext): CobaltPointsData {
-  const purchases = cardEligiblePurchases(flows, ctx.giftCardLoadIds)
+export function computeCobaltPoints(
+  flows: EnrichedTxn[],
+  ctx: CardRewardContext,
+  opts: { onlyOnCard?: boolean } = {},
+): CobaltPointsData {
+  const all = cardEligiblePurchases(flows, ctx.giftCardLoadIds)
+  const purchases = opts.onlyOnCard ? all.filter((t) => t.source === 'amex') : all
   const anchor = anchorMonth(flows)
+
+  // The $15.99 monthly fee posts as an Amex charge but earns nothing and is
+  // already counted as `annualFee` — see `earnsNoPoints`.
+  const earning = purchases.filter((t) => !earnsNoPoints(t.merchantName))
 
   const emptyTiers: CobaltPointsTier[] = (Object.keys(TIER_META) as CobaltTier[]).map((tier) => ({
     tier,
@@ -104,17 +119,18 @@ export function computeCobaltPoints(flows: EnrichedTxn[], ctx: CardRewardContext
     spend: 0,
     points: 0,
   }))
-  if (!anchor || purchases.length === 0) {
+  if (!anchor || earning.length === 0) {
     return { monthsOfData: 0, annualizedSpend: 0, tiers: emptyTiers, monthly: [] }
   }
 
   const months = trailingTwelveMonths(anchor)
   const monthSet = new Set(months)
-  const inWindow = purchases.filter((t) => monthSet.has(t.txnDate.slice(0, 7)))
+  const inWindow = earning.filter((t) => monthSet.has(t.txnDate.slice(0, 7)))
   const monthsOfData = new Set(inWindow.map((t) => t.txnDate.slice(0, 7))).size || 1
 
   const tierTotals: Record<CobaltTier, { spend: number; points: number }> = {
     grocery5x: { spend: 0, points: 0 },
+    eats5x: { spend: 0, points: 0 },
     streaming3x: { spend: 0, points: 0 },
     transit2x: { spend: 0, points: 0 },
     base1x: { spend: 0, points: 0 },
@@ -123,7 +139,8 @@ export function computeCobaltPoints(flows: EnrichedTxn[], ctx: CardRewardContext
   const pointsByMonth = new Map<string, number>()
 
   for (const t of inWindow) {
-    const tier = classifyCobaltTier(t.merchantName, t.categoryName)
+    // Both 5x tiers are Canada-only, so a known-foreign purchase drops to 1x.
+    const tier = classifyCobaltTier(t.merchantName, t.categoryName, isForeignCountry(ctx.countryById.get(t.id)))
     const points = t.amount * TIER_META[tier].multiplier
     tierTotals[tier].spend += t.amount
     tierTotals[tier].points += points
@@ -154,10 +171,10 @@ export function computeCobaltPoints(flows: EnrichedTxn[], ctx: CardRewardContext
 export function computeCobaltAnalysis(
   flows: EnrichedTxn[],
   ctx: CardRewardContext,
-  opts: { centsPerPoint?: number; feeMonthly?: number } = {},
+  opts: { centsPerPoint?: number; feeMonthly?: number; onlyOnCard?: boolean } = {},
 ): CobaltAnalysis {
   return valueFromPoints(
-    computeCobaltPoints(flows, ctx),
+    computeCobaltPoints(flows, ctx, { onlyOnCard: opts.onlyOnCard }),
     opts.centsPerPoint ?? DEFAULT_CENTS_PER_POINT,
     opts.feeMonthly ?? COBALT_FEE_MONTHLY,
   )
