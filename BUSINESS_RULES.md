@@ -1202,13 +1202,27 @@ runway `Card`, after `RunwayWidget`). State is one singleton table, `cashflow_co
 
 - **The trough model** (`projectAccount`): build a forward calendar of scheduled events per account
   (income +, bills/CC payment −), walk a **45-day** window day-by-day from today, and take the
-  **lowest running balance** (the trough). `safeToMove = max(0, trough − buffer)`. The day-of-month
+  **lowest running balance** (the trough). `safeToMove = max(0, trough − buffer)`. Every occurrence in
+  the window counts, so biweekly pay contributes the 3 (sometimes 4) cheques it really pays.
+  `paydaysInWindow` surfaces that count next to *Next pay*. The day-of-month
   variation falls out naturally — less is movable before bills hit, more right after payday. The
   function is pure so the **client recomputes it live** as the owner edits the inputs.
 - **Schedule = inferred, then editable** (`inferSchedule` + `applyOverrides`):
   - **Income** — `Salary` + other income-kind deposits (reimbursements excluded), split by the bank
-    they land in (Tangerine/Scotia), typical day = median day-of-month, amount = recent-month
-    average. Needs ≥ 2 months of signal.
+    they land in (Tangerine/Scotia). Needs ≥ 2 months of signal. Deposits are merged **per day**
+    first (a split direct deposit posts twice on one day = one payday), then a cadence is inferred
+    from the actual dates (`payCadence`):
+    - **Biweekly/weekly pay → a day-cadence event** (`cadenceDays`, 14 or 7): it repeats every N days
+      from the **last real payday**, `amount` is **one cheque** (median of the last 6), and
+      `dayOfMonth`/`cadenceMonths` are ignored. Required: median gap 6–16 days, ≥ 4 paydays, ≥ 70% of
+      gaps within ±3 days of the median, and ≥ 4 **distinct days-of-month** — that last test is what
+      separates drifting biweekly pay from semi-monthly pay on two fixed dates. A biweekly cheque
+      modelled as "monthly on the median day" both mis-dates *Next pay* (once that day-of-month has
+      passed it jumps to next month) and drops a cheque from the 45-day window, so this matters.
+      Its override key carries the cadence (`income:14d:tangerine|Salary`) so an `amount` override
+      saved against the monthly shape (a month's total) can never be re-applied as one cheque.
+    - **Everything else stays monthly** — typical day = median day-of-month, amount = recent-month
+      average. Child benefit, interest and semi-monthly deposits belong here.
   - **Bills** — bank-paid recurring merchants: the fixed **Home** category, projection-rule
     merchants (§8c), or any `isRecurring` bank-sourced merchant. Account = the bank they post from,
     day = median, cadence inferred from month-gaps (so quarterly Water lands every 3rd month),
@@ -1225,7 +1239,9 @@ runway `Card`, after `RunwayWidget`). State is one singleton table, `cashflow_co
 - **Owner edits persist** in `cashflow_config` (singleton): per-account `buffers` (fixed $ cushion),
   `cardAccounts` (card→bank), `ccPaymentDay` (int) + `ccPendingBuffer` (the card-payment day &
   pending cushion above), per-event `overrides` (`dayOfMonth`/`amount`/`account`/`enabled`), and
-  `unplannedExpense`. Inference is always the default; overrides only correct it. The editor
+  `unplannedExpense` (day-cadence income takes `anchorDate` — the next date it lands — instead of
+  `dayOfMonth`, and later occurrences step from it). Inference is always the default; overrides only
+  correct it. The editor
   round-trips them via `saveCashflowConfig` (blocked in demo by `requireAuth`).
 - **Info "i"** — a toggle in the widget header (`InfoPanel`) explains, in plain language, exactly how
   each figure is derived (the trough model, money in/out, the card payment day, the pending cushion,
@@ -2194,8 +2210,8 @@ every other analytics page.
     the "have ≥1 qualifying Rogers/Fido/Shaw/Comwave service" checkbox is on) applies to **all**
     eligible domestic (CAD) spend, not just spend at Rogers/Fido. `familySpend` (Rogers/Fido bill
     charges) is tracked as a **subset** of `domesticSpend` — it still earns the same flat rate as
-    everything else. It is now only a *fallback* cap for the redemption bonus; see
-    `redemptionCapMonthly` below for why a ledger-derived figure was the wrong basis.
+    everything else. It is reported for information only — since the redemption bonus was dropped
+    (see below) nothing prices off it.
   - **Foreign** (`ROGERS_FOREIGN_NET_RATE`, net **0.5%**) — the card pays 3% back on USD purchases,
     but Canada's standard 2.5% FX fee is already baked into the converted charge amount, netting
     +0.5% (owner-confirmed math, not derived; flat regardless of the qualifying-service checkbox per
@@ -2217,26 +2233,24 @@ every other analytics page.
     `capCostAnnual` (annual $ lost vs. an uncapped world) for the warning on the assumptions card.
     The **reset date is assumed to be the window boundary** — the real anniversary date isn't in the
     data, so a mid-year reset would shift which months fall on which side of the line.
-  - Rates are assembled by **`rogersRates({ qualifying, redeemTowardBill })`** rather than by hand,
-    so no caller can set the elevated pair and forget the post-cap pair.
-  - **Redemption bonus** (`ROGERS_REDEMPTION_BONUS`, **+50%**) — a second, independent checkbox
-    ("redeem cash back toward the Fido bill"). This is a *redemption*-time bonus, not an earn-time
-    one: applying accumulated cash back toward a qualifying bill is worth 1.5x a plain statement
-    credit. Capped in `cashbackFromSpend` at `min(earned cash back, qualifyingBill)` per month — the
-    bonus can't exceed what's actually owed on the bill, nor what's been earned to redeem.
-  - **The qualifying bill is `rates.redemptionCapMonthly`, not `familySpend`.** The bill you would
-    redeem against is the **hypothetical Fido plan being priced**, which by definition is not in the
-    statements — the household is on Koodo. `CobaltAnalysis` therefore owns the quoted Fido price
-    (lifted out of `FidoSwitchCard`, since two sibling cards need it) and passes it in. `null` falls
-    back to the ledger's `familySpend`, which is only right when no scenario is modelled at all —
-    i.e. the dashboard's default showdown, where the bonus is off anyway.
-  - `rogersAtBaseRate` (the "cancel Cobalt but stay on Koodo" comparison feeding §25) passes
-    `redemptionCapMonthly: 0` — no Fido line means no redeemable bill, so no bonus. Same reasoning as
-    its `qualifying: false`.
-  - `RogersAnalysis` exposes `annualizedRedemptionBonus` so the UI can state what ticking the box is
-    actually worth. It was silently $0 before; a bonus that quietly evaluates to nothing is worse
-    than no checkbox.
-  - No annual fee. Both checkboxes and their caveats are shown directly on the assumptions/
+  - Rates are assembled by **`rogersRates({ qualifying })`** rather than by hand, so no caller can
+    set the elevated pair and forget the post-cap pair.
+  - **No redemption bonus (rule change, Aug 2026).** Rogers used to pay **1.5x** when accumulated
+    cash back was applied to a Rogers/Fido/Shaw/Comwave bill rather than taken as a plain statement
+    credit. **That is gone.** Cash back is now worth face value however it is redeemed, and the
+    qualifying-service rate lift (1.5% → 2%) is the *only* thing being a Rogers customer buys.
+    - The whole mechanic was **removed from the model, not zeroed**: `ROGERS_REDEMPTION_BONUS`,
+      `ROGERS_REDEMPTION_MULTIPLIER`, `redemptionBonusValue`, the `redeemTowardBill` /
+      `redemptionCapMonthly` rate fields, `RogersAnalysis.annualizedRedemptionBonus`, the §24
+      checkbox and the `oneCardQualifyingBill` / `twoCardQualifyingBillEach` options on
+      `compareOneVsTwoCards` are all deleted. A flag left defaulting to off is a mechanic waiting to
+      be switched back on by accident.
+    - Consequences that follow, each documented at its own section below: **§25** — moving the
+      *second* line to Fido now has no cash-back upside at all (one qualifying line already holds
+      the 2% rate), so "both lines" is purely a plan-price question. **§26** — a second Rogers
+      account earns **cap headroom and nothing else**, so it is worth exactly $0 until household
+      spend passes $61,000/yr; `capGainAnnual === cashbackGain` by construction.
+  - No annual fee. The one remaining checkbox and its caveats are shown directly on the assumptions/
     comparison cards, not just here — default **off** (today's no-Fido state).
 - **Verdict** (`compareCards`): `advantage = cobalt.netAnnualValue − rogers.annualizedCashback`.
   **Keep Cobalt** when the advantage exceeds one month's Cobalt fee, **switch to Rogers** when it's
@@ -2245,9 +2259,9 @@ every other analytics page.
   **break-even monthly spend** — how much you'd need to put on the card each month, at your actual
   spend mix, just to cover the fee, independent of Rogers.
 - Dashboard widget shows the verdict badge, the annual advantage, both cards' headline numbers, and
-  a 6-month sparkline of month-by-month advantage; links to the full tab (rendered with both Rogers
-  checkboxes at their off defaults, so the dashboard number is the conservative 1.5%/no-bonus case).
-  The full tab adds the point-value slider, the two Rogers assumption checkboxes, a per-tier Cobalt
+  a 6-month sparkline of month-by-month advantage; links to the full tab (rendered with the Rogers
+  qualifying-service checkbox at its off default, so the dashboard number is the conservative 1.5%
+  case). The full tab adds the point-value slider, the Rogers assumption checkbox, a per-tier Cobalt
   spend/value breakdown, a "Cobalt vs Rogers World Elite" card with each card's inputs plus a
   12-month bar chart of monthly advantage, and the methodology notes above shown inline (so the
   model stays auditable without reading this file).
@@ -2261,17 +2275,19 @@ to Fido and pay the Fido bill on the Rogers Mastercard for the §24 bonus rate.
 - **`switchBothLines` toggles the scenario.** One line → the household keeps a re-quoted Koodo line
   alongside one Fido line. Both lines → Koodo is gone, the re-quote input disappears (there is
   nothing left to re-quote), and the phone cost is `fidoQuotedPrice × 2`.
-- **Both lines is not simply "one line, doubled".** It also **doubles the redeemable Rogers-family
-  bill**, so the redemption bonus can be worth up to twice as much — subject to its own `bill / 1.5`
-  ceiling (§24 correction 12). That is why moving both can win even though the plan cost is worse:
-  on the owner's spend, `breakEvenPrice` per line goes $48.40 → $35.50 with the bonus off, but
-  $73.16 → $53.66 with it on.
+- **Both lines is now purely a plan-price question.** One qualifying line already holds the whole
+  card at 2%, and since the redemption bonus was dropped (§24) the second Fido bill earns nothing
+  the first one didn't — it is just another charge at the ordinary domestic rate. So moving both is
+  strictly more phone cost for zero extra cash back, and `breakEvenPrice` per line falls accordingly
+  (on the owner's spend, $48.40 one line → $35.50 per line for both). It used to be able to win on
+  the strength of a second redeemable bill; that route is closed.
 - **`breakEvenPrice` is always per line**, and `linesOnFido` is echoed back on the scenario so the UI
   only says "per line" when that distinction matters. With both lines moved the ceiling is paid
   twice, so it necessarily sits well below the one-line figure.
 - Originally modelled as one line only, on the owner's early note that two-line Koodo beats two
-  single-line bills. That is still true on plan price alone — it stops being the whole story once the
-  second Fido bill's redemption bonus is counted.
+  single-line bills. With the redemption bonus gone that note is simply correct again: the
+  both-lines scenario is kept because the owner still wants it priced, not because it can win on
+  cash back.
 
 **Only the plan price is hypothetical** — the spend the decision hinges on comes from real
 statements. The value of switching is dominated not by the phone bill but by the **card-wide
@@ -2298,15 +2314,13 @@ bill. Getting that backwards was the original bug (see "Corrections" below).
 - **Rates are not inputs**: a Fido line makes the household a qualifying Rogers customer *by
   definition*, so the post-switch side is always `ROGERS_DOMESTIC_BONUS_RATE` (2%) and today's side
   always `ROGERS_DOMESTIC_BASE_RATE` (1.5%) — independent of the §24 "have a qualifying service"
-  checkbox, which describes *today's*, pre-switch state. The §24 redemption-bonus checkbox does flow
-  through (a Fido bill is redeemable; a Koodo bill isn't, so that bonus is itself unlocked by
-  switching).
+  checkbox, which describes *today's*, pre-switch state.
 - **The model** (`computeFidoSwitch`), symmetric on both sides so nothing is double-counted:
-  - Today: `cashback = (koodoTwoLineTotal + otherRogersSpend) × 1.5%`, no redemption bonus (Koodo is
-    not a Rogers brand). `netCost = koodoTwoLineTotal − cashback`.
-  - After: `cashback = (remainingKoodo + fido + otherRogersSpend) × 2%`, plus
-    `min(cashback, fidoPrice) × ROGERS_REDEMPTION_BONUS` when redeeming toward the bill (capped by
-    both what you earned and what you owe). `netCost = (remainingKoodo + fido) − cashback`.
+  - Today: `cashback = (koodoTwoLineTotal + otherRogersSpend) × 1.5%`.
+    `netCost = koodoTwoLineTotal − cashback`.
+  - After: `cashback = (remainingKoodo + fido + otherRogersSpend) × 2%`.
+    `netCost = (remainingKoodo + fido) − cashback`. The phone bills earn the same rate as any other
+    purchase — there is no longer anything special about paying a Fido bill with the card.
   - `monthlyDelta = todayNetCost − afterNetCost`, also surfaced split into its two drivers
     (`planCostDelta`, `cashbackDelta`) so the UI can show what's actually carrying the decision.
   - Both sides also respect the **$61k annual cap**: `monthlyCashback` annualizes, splits at the cap,
@@ -2315,9 +2329,8 @@ bill. Getting that backwards was the original bug (see "Corrections" below).
     figures: $22.83 at $0/mo other spend → $38.14 at $3,000/mo → flat at **$48.40** once total card
     spend passes $61k/yr, because every marginal dollar past it earns 1.5% with or without Fido).
   - **Break-even is solved numerically** (60-step bisection on net cost, which rises monotonically
-    with the Fido price). Both the redemption-bonus `min()` and the annual cap make net cost
-    piecewise-linear, so a closed form would have to quietly ignore one of them; bisection is simpler
-    and honest. Returns `Infinity` when even a $1,000 plan wins (a large enough spend base can do that).
+    with the Fido price). The annual cap makes net cost piecewise-linear, so a closed form would have
+    to quietly ignore it; bisection is simpler and honest. Returns `Infinity` when even a $1,000 plan wins (a large enough spend base can do that).
 - **Verdict**: **switch** when the monthly delta favours the move by more than $2, **stay** when it's
   worse by more than $2, **toss-up** in between (small enough to come down to porting hassle, not
   dollars).
@@ -2365,16 +2378,17 @@ two caps, and up to $122,000/yr at the elevated rates. Rendered as a card inside
 - **The second card is free.** Rogers World Elite has no annual fee, so nothing in this model can
   make the *card* a cost. Any negative verdict is entirely `extraPlanCostMonthly` — the second Fido
   line. The card says so in those words, because a negative next to a fee-free card reads as a bug.
-- **A second account earns two distinct things**, and `cashbackGain` is reported split between them:
-  - `capGainAnnual` — the second $61k band. Below one cap this is **exactly** zero, since the rate is
-    whole-card and identical on both accounts; a second card cannot rescue spend one cap already
-    covered. Verified: `$0.00` at $30k and at exactly $61k of household spend, and above it the gain
-    equals `spendRescuedFromCap × (2% − 1.5%)` to the cent.
-  - `redemptionGainAnnual` — **each account redeems against its own Fido bill**, so two accounts
-    collect two capped bonuses where one account collects one. `qualifyingBillPerAccount` is
-    therefore the *same* number on both sides (one line's price); the doubling comes from the number
-    of accounts, not the bill. On the owner's real split this is worth *more* than the cap effect and
-    flips the verdict — it was missing entirely at first (see correction 9).
+- **A second account earns cap headroom and nothing else** (rule change, Aug 2026):
+  `capGainAnnual === cashbackGain` by construction, and the field is kept separate only because the
+  card labels it. Below one cap the gain is **exactly** zero, since the rate is whole-card and
+  identical on both accounts; a second card cannot rescue spend one cap already covered. Verified:
+  `$0.00` at $30k and at exactly $61k of household spend, and above it the gain equals
+  `spendRescuedFromCap × (2% − 1.5%)` to the cent.
+  - It used to *also* earn a second redemption bonus — each account redeeming against its own Fido
+    bill — which on the owner's real split was worth more than the cap effect and was what flipped
+    the verdict to "worth it" (see corrections 9 and 12). **Rogers removed that bonus**, so the whole
+    scenario now hangs on cap headroom alone: below $61,000/yr of household spend, a second Rogers
+    account is worth $0 and the extra Fido line makes it a straight loss.
 - **Both sides assume Amex is already cancelled** — the scenario only exists once all household
   spend is landing on Rogers. Both sides also assume a qualifying service, so both are priced at 2%.
 - **Two accounts need two qualifying services**, so this assumes *both* Koodo lines move to Fido
@@ -2393,11 +2407,9 @@ two caps, and up to $122,000/yr at the elevated rates. Rendered as a card inside
   is purely informational.
 - **`switchBothLines` in §25 changes this scenario's cost to zero.** With both lines already on
   Fido, a second account buys no extra line — it just splits the two bills the household already
-  pays. `extraPlanCostMonthly` becomes 0, so the comparison is pure upside. That is also why the two
-  sides take *separate* qualifying bills: `oneCardQualifyingBill` is the total of every line (they
-  all bill to one card), while `twoCardQualifyingBillEach` is one line's price. When both lines have
-  already moved, splitting them across two accounts redeems the same total, so
-  `redemptionGainAnnual` correctly collapses toward zero and only the cap effect remains.
+  pays. `extraPlanCostMonthly` becomes 0, so the comparison is pure upside (all of it cap headroom,
+  which is $0 below the cap). The two per-account qualifying-bill options this section used to
+  describe went away with the redemption bonus.
 - **Attribution by cardholder** — `computeRogersSpendByPerson` splits the same trailing-12-month
   eligible-purchase set (§24 `cardEligiblePurchases`) using `ctx.personById`, resolved from the card
   last-4 through `app/lib/cardholders.ts`. Names live only in `.env.local`; the model itself carries
@@ -2418,9 +2430,9 @@ two caps, and up to $122,000/yr at the elevated rates. Rendered as a card inside
 - **Verdict band is deliberately wider than the rest of the page** (±$120/yr, vs ±$2/mo in §25):
   running a second card *and* a second carrier account is real ongoing admin, so a near-wash is not
   worth doing.
-- **Phone bills are held at their historical amounts.** Switching carrier changes which bills are
-  redemption-bonus eligible, but both scenarios have Fido, so that effect is identical on both sides
-  and cancels out of the difference. It does shift the absolute totals shown.
+- **Phone bills are held at their historical amounts.** Both scenarios have a Fido line and so are
+  priced at 2% either way, so the carrier switch is identical on both sides and cancels out of the
+  difference. It does shift the absolute totals shown.
 - **Spend table** (`computeSpendMatrix`) — annualized purchase spend per cardholder per card source,
   plus both together. Purchases only; card payments, transfers and bank/debit rows excluded,
   gift-card loads included.
@@ -2428,6 +2440,12 @@ two caps, and up to $122,000/yr at the elevated rates. Rendered as a card inside
   redeclared in the client-safe core), so the two unions drifting apart is a compile error.
 
 ### §24 corrections (continued)
+
+> **Corrections 7, 9 and 12 are historical.** They all concern the 1.5x redemption bonus, which
+> **Rogers removed in Aug 2026**; the mechanic and every knob attached to it are gone from the model
+> (see §24, "No redemption bonus"). They are kept because the *general* lessons still bind — a value
+> the ledger cannot know must come from the scenario inputs (7), a fee-free card cannot produce a
+> negative on its own (9), and a cap must be applied to the quantity the terms actually cap (12).
 
 7. **The redemption bonus was capped by ledger data, so it silently did nothing.** The checkbox
    capped the bonus at `familySpend` — merchant-name matches for rogers/fido/shaw/comwave in the
@@ -2494,8 +2512,8 @@ Rendered as a card inside `/accounts/cobalt`, between §25 and §26.
   "also cancel Cobalt" line. The 0.5pp lift on the Amex spend is already inside
   `cancelAmex.annualDelta` (it prices the switch against `spendOnAllCards`); adding a bonus-rate
   delta on top would count the same half-point twice — §25 correction 3 in a new place.
-- **The Fido line cancels out.** Its plan cost and its redemption bonus are identical on both sides,
-  so the gap is purely: Amex points + fee vs. 2% on the Amex spend. The card says this in words,
+- **The Fido line cancels out.** Its plan cost and the 2% rate it unlocks are identical on both
+  sides, so the gap is purely: Amex points + fee vs. 2% on the Amex spend. The card says this in words,
   because a reader who has just typed three plan prices will assume they drive this number.
 - **The cap can favour keeping the Amex.** Keeping it leaves less spend on the Rogers card, so the
   $61,000/yr line bites later. `spendPushedPastCap` is the annualized spend that *only* the cancel

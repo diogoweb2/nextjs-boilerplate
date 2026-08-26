@@ -195,8 +195,9 @@ function InfoPanel({ plan }: { plan: CashflowPlan }) {
       </p>
       <ul className="mt-1.5 flex flex-col gap-1">
         <li>
-          <span className="text-[var(--foreground)]">Money in:</span> salary &amp; recurring deposits, on their
-          usual day, into the account they land in.
+          <span className="text-[var(--foreground)]">Money in:</span> salary &amp; recurring deposits, into the
+          account they land in — biweekly pay is scheduled every 14 days from your last one (not once a month), so
+          every cheque in the window counts.
         </li>
         <li>
           <span className="text-[var(--foreground)]">Money out:</span> your recurring bills on their due day, plus
@@ -253,7 +254,11 @@ function AccountCard({
       </p>
       <Sparkline timeline={result.timeline} buffer={buffer} />
       <p className="mt-1 text-[11px] text-[var(--muted)]">
-        {result.nextPayday ? `Next pay ${formatShortDate(result.nextPayday)}.` : 'No income scheduled in window.'}
+        {result.nextPayday
+          ? `Next pay ${formatShortDate(result.nextPayday)}${
+              result.paydaysInWindow > 1 ? ` · ${result.paydaysInWindow} pays in the next 45 days` : ''
+            }.`
+          : 'No income scheduled in window.'}
       </p>
     </div>
   )
@@ -328,8 +333,8 @@ function ScheduleEditor({
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-3 text-xs">
       <p className="text-[var(--muted)]">
-        Inferred from your statements — correct anything that&apos;s off. Days are day-of-month; amounts are the
-        expected payment.
+        Inferred from your statements — correct anything that&apos;s off. Days are day-of-month; biweekly pay shows
+        its next date instead. Amounts are the expected payment (one cheque for biweekly pay).
       </p>
 
       {/* Card → account mapping + the shared payment day / pending cushion */}
@@ -403,15 +408,31 @@ function ScheduleEditor({
                 {e.kind === 'income' ? '↑' : e.kind === 'cc' ? '✦' : '↓'}
               </span>
               <span className="min-w-0 flex-1 truncate">{e.label}</span>
-              <span className="text-[var(--muted)]">day</span>
-              <input
-                type="number"
-                min={1}
-                max={31}
-                value={Number(val(e, 'dayOfMonth'))}
-                onChange={(ev) => edit(e.key, { dayOfMonth: Math.min(31, Math.max(1, Number(ev.target.value) || 1)) })}
-                className="w-12 rounded border border-[var(--border)] bg-transparent px-1 py-1 text-right tabular-nums"
-              />
+              {e.cadenceDays ? (
+                <>
+                  <span className="text-[var(--muted)]" title={`Repeats every ${e.cadenceDays} days`}>
+                    every {e.cadenceDays}d, next
+                  </span>
+                  <input
+                    type="date"
+                    value={String(val(e, 'anchorDate') ?? e.nextDue)}
+                    onChange={(ev) => edit(e.key, { anchorDate: ev.target.value || undefined })}
+                    className="rounded border border-[var(--border)] bg-transparent px-1 py-1 tabular-nums"
+                  />
+                </>
+              ) : (
+                <>
+                  <span className="text-[var(--muted)]">day</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={Number(val(e, 'dayOfMonth'))}
+                    onChange={(ev) => edit(e.key, { dayOfMonth: Math.min(31, Math.max(1, Number(ev.target.value) || 1)) })}
+                    className="w-12 rounded border border-[var(--border)] bg-transparent px-1 py-1 text-right tabular-nums"
+                  />
+                </>
+              )}
               <span className="text-[var(--muted)]">$</span>
               <input
                 type="number"

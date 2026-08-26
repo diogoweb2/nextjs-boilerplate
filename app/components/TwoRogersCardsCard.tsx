@@ -152,11 +152,7 @@ export function TwoRogersCardsCard({
           value={`+${formatCurrency(cmp.capGainAnnual)}/yr`}
           tone={cmp.capGainAnnual > 0 ? 'positive' : undefined}
         />
-        <Line
-          label="From the 2nd bonus"
-          value={`+${formatCurrency(cmp.redemptionGainAnnual)}/yr`}
-          tone={cmp.redemptionGainAnnual > 0 ? 'positive' : undefined}
-        />
+        <Line label="Second card's fee" value="$0.00/yr" tone="positive" />
         <Line
           label={`${nameOf('self')} alone`}
           value={`${formatCurrency(cmp.self.annualizedSpend)}/yr spend`}
@@ -165,7 +161,6 @@ export function TwoRogersCardsCard({
           label={`${nameOf('partner')} alone`}
           value={`${formatCurrency(cmp.partner.annualizedSpend)}/yr spend`}
         />
-        <Line label="Second card's fee" value="$0.00/yr" tone="positive" />
         <Line
           label="Extra Fido line"
           value={`${cmp.netExtraPlanCostAnnual >= 0 ? '−' : '+'}${formatCurrency(
@@ -255,8 +250,8 @@ export function TwoRogersCardsCard({
           whole page, along with card payments and transfers; gift-card loads are included (§10c).
           Attribution is by the card last-4 on each statement row, which both importers carry; any row
           that somehow lacks one falls to {selfName}. Phone bills are held at today&apos;s amounts:
-          both scenarios have a Fido line, so the redemption bonus affects the two totals equally and
-          cancels out of the difference.
+          both scenarios have a Fido line, so the 2% rate applies on both sides and cancels out of
+          the difference.
         </p>
       </div>
     </Card>

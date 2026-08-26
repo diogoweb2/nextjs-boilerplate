@@ -795,7 +795,7 @@ export function demoCashflowPlan(): CashflowPlan {
 
   // Both cards are paid from Tangerine on the 11th, plus a $400 pending cushion.
   const tangerine: ScheduledEvent[] = [
-    ev({ key: 'income:tangerine|Salary', account: 'tangerine', kind: 'income', label: 'Salary', dayOfMonth: 26, amount: 5200, cadenceMonths: 1, nextDue: `${ANCHOR_YM}-26` }),
+    ev({ key: 'income:tangerine|Salary', account: 'tangerine', kind: 'income', label: 'Salary', dayOfMonth: 26, amount: 2400, cadenceMonths: 1, cadenceDays: 14, nextDue: `${ANCHOR_YM}-26` }),
     ev({ key: 'bill:901', account: 'tangerine', kind: 'bill', label: 'Koodo', dayOfMonth: 12, amount: 75, cadenceMonths: 1, nextDue: '2026-07-12' }),
     ev({ key: 'bill:902', account: 'tangerine', kind: 'bill', label: 'Distributel', dayOfMonth: 5, amount: 60, cadenceMonths: 1, nextDue: '2026-07-05' }),
     ev({ key: 'cc:master', account: 'tangerine', kind: 'cc', label: 'Mastercard payment', dayOfMonth: 11, amount: master, cadenceMonths: 1, nextDue: '2026-07-11' }),
@@ -803,7 +803,7 @@ export function demoCashflowPlan(): CashflowPlan {
     ev({ key: 'cc:pending:tangerine', account: 'tangerine', kind: 'cc', label: 'Pending card charges (not imported)', dayOfMonth: 11, amount: 400, cadenceMonths: 1, nextDue: '2026-07-11' }),
   ]
   const scotia: ScheduledEvent[] = [
-    ev({ key: 'income:scotia|Salary', account: 'scotia', kind: 'income', label: 'Salary', dayOfMonth: 28, amount: 4100, cadenceMonths: 1, nextDue: `${ANCHOR_YM}-28` }),
+    ev({ key: 'income:scotia|Salary', account: 'scotia', kind: 'income', label: 'Salary', dayOfMonth: 28, amount: 1900, cadenceMonths: 1, cadenceDays: 14, nextDue: `${ANCHOR_YM}-28` }),
     ev({ key: 'bill:903', account: 'scotia', kind: 'bill', label: 'Mortgage', dayOfMonth: 15, amount: 2400, cadenceMonths: 1, nextDue: '2026-07-15' }),
     ev({ key: 'bill:904', account: 'scotia', kind: 'bill', label: 'Toronto Hydro', dayOfMonth: 8, amount: 180, cadenceMonths: 1, nextDue: '2026-07-08' }),
     ev({ key: 'bill:905', account: 'scotia', kind: 'bill', label: 'Toronto Water', dayOfMonth: 18, amount: 240, cadenceMonths: 3, nextDue: '2026-07-18' }),

@@ -4,11 +4,7 @@
 // household a "qualifying customer", which lifts the card's rate on EVERYTHING
 // (1.5% → 2%), not just on the phone bill.
 
-import {
-  redemptionBonusValue,
-  ROGERS_ANNUAL_CAP,
-  ROGERS_DOMESTIC_BASE_RATE,
-} from '@/app/lib/amex-cobalt-core'
+import { ROGERS_ANNUAL_CAP, ROGERS_DOMESTIC_BASE_RATE } from '@/app/lib/amex-cobalt-core'
 
 export const DEFAULT_KOODO_TWO_LINE_TOTAL = 45.2
 
@@ -24,7 +20,9 @@ export type FidoScenario = {
   annualDelta: number
   /** Cheaper/dearer phone bills alone, ignoring all cash back. */
   planCostDelta: number
-  /** Extra cash back per month from the whole-card rate lift + redemption bonus. */
+  /** Extra cash back per month from the whole-card rate lift. Since Rogers
+   *  dropped the redemption bonus this is the *only* cash-back effect of the
+   *  switch — the Fido bill itself just earns the same rate as anything else. */
   cashbackDelta: number
   verdict: 'switch' | 'close' | 'stay'
 }
@@ -40,10 +38,10 @@ export type FidoSwitchInput = {
   /** Quoted price of **one** Fido line. */
   fidoQuotedPrice: number
   /**
-   * Move both lines to Fido, leaving Koodo entirely. Beyond the obvious plan
-   * cost, this doubles the redeemable Rogers-family bill, so the redemption
-   * bonus can be worth up to twice as much (subject to its own `bill / 1.5`
-   * ceiling — see `redemptionBonusValue`).
+   * Move both lines to Fido, leaving Koodo entirely. Now purely a plan-cost
+   * question: one qualifying line already buys the whole 2% lift, so the second
+   * line adds no cash-back upside of its own. (It used to double the redeemable
+   * Rogers-family bill; that bonus no longer exists.)
    */
   switchBothLines?: boolean
   /** Card-wide rate today, with no qualifying service (1.5%). */
@@ -61,23 +59,18 @@ export type FidoSwitchInput = {
    * Rogers-card spend rather than 0.
    */
   otherRogersSpend: number
-  /** Apply the 1.5x redemption bonus on cash back put toward the Fido bill. */
-  redeemTowardBill: boolean
 }
 
 /**
  * Monthly cash back earned across the phone bills + other Rogers spend at a
- * given card-wide rate. `qualifyingBill` is the Rogers-family bill available
- * to redeem against (0 today — Koodo is not a Rogers brand, so the redemption
- * bonus is itself something switching unlocks).
+ * given card-wide rate. The Fido bill has no special redemption value any more,
+ * so it enters here as ordinary spend and nothing else.
  */
 function monthlyCashback(
   monthlySpend: number,
   rate: number,
   postCapRate: number,
   annualCap: number,
-  qualifyingBill: number,
-  redeem: boolean,
 ): number {
   // The cap is annual, so annualize, split at the cap, then come back to
   // monthly. Above the cap the elevated rate simply stops applying, which is
@@ -85,17 +78,10 @@ function monthlyCashback(
   const annualSpend = monthlySpend * 12
   const under = Math.min(annualSpend, annualCap)
   const over = Math.max(0, annualSpend - annualCap)
-  const earned = (under * rate + over * postCapRate) / 12
-  // The 1.5x bonus only applies to cash back actually redeemed against a
-  // qualifying bill, so it is capped by both what you earned and what you owe —
-  // the latter divided by 1.5, since the bill caps the *credit*, not the
-  // redemption. See `redemptionBonusValue`.
-  const bonus = redeem ? redemptionBonusValue(earned, qualifyingBill) : 0
-  return earned + bonus
+  return (under * rate + over * postCapRate) / 12
 }
 
-/** How many lines end up on Fido, and therefore how big the redeemable
- *  Rogers-family bill is. */
+/** How many lines end up on Fido. Only the plan cost turns on this now. */
 export function fidoLineCount(input: Pick<FidoSwitchInput, 'switchBothLines'>): 1 | 2 {
   return input.switchBothLines ? 2 : 1
 }
@@ -105,16 +91,13 @@ export function fidoLineCount(input: Pick<FidoSwitchInput, 'switchBothLines'>): 
  *  on that spend is exactly what the switch changes). */
 function netMonthlyCost(input: FidoSwitchInput, fidoPrice: number): number {
   const lines = fidoLineCount(input)
-  // Both lines moved → no Koodo line left to pay for, and two Fido bills to
-  // redeem against.
+  // Both lines moved → no Koodo line left to pay for.
   const phone = lines === 2 ? fidoPrice * 2 : input.remainingKoodoLinePrice + fidoPrice
   const cashback = monthlyCashback(
     phone + input.otherRogersSpend,
     input.switchedRate,
     input.postCapRate ?? ROGERS_DOMESTIC_BASE_RATE,
     input.annualCap ?? ROGERS_ANNUAL_CAP,
-    fidoPrice * lines,
-    input.redeemTowardBill,
   )
   return phone - cashback
 }
@@ -123,15 +106,12 @@ export function computeFidoSwitch(input: FidoSwitchInput): FidoScenario {
   const postCapRate = input.postCapRate ?? ROGERS_DOMESTIC_BASE_RATE
   const annualCap = input.annualCap ?? ROGERS_ANNUAL_CAP
 
-  // Today: two Koodo lines, card-wide base rate, and no Rogers-family bill to
-  // redeem against.
+  // Today: two Koodo lines, card-wide base rate.
   const todayCashback = monthlyCashback(
     input.currentTwoLineTotal + input.otherRogersSpend,
     input.currentRate,
     postCapRate,
     annualCap,
-    0,
-    false,
   )
   const todayNetCost = input.currentTwoLineTotal - todayCashback
 
@@ -146,11 +126,9 @@ export function computeFidoSwitch(input: FidoSwitchInput): FidoScenario {
     input.switchedRate,
     postCapRate,
     annualCap,
-    input.fidoQuotedPrice * lines,
-    input.redeemTowardBill,
   )
 
-  // Break-even solved numerically: the redemption-bonus cap makes net cost a
+  // Break-even solved numerically: the annual cap makes net cost a
   // piecewise-linear function of the Fido price, so bisection is both simpler
   // and more honest than a closed form that quietly ignores the cap. Net cost
   // rises monotonically with the Fido price, so this always converges.

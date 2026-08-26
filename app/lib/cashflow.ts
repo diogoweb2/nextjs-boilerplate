@@ -36,8 +36,17 @@ export type ScheduledEvent = {
   dayOfMonth: number
   /** Positive magnitude; the projection signs it by `kind`. */
   amount: number
-  /** 1 = monthly, 3 = quarterly, 12 = annual (income/cc are always monthly). */
+  /** 1 = monthly, 3 = quarterly, 12 = annual (cc is always monthly). */
   cadenceMonths: number
+  /**
+   * Set when the event repeats on a **day** cadence instead of a day-of-month one
+   * (7 = weekly, 14 = biweekly). Biweekly pay drifts across the month — modelling
+   * it as "the 13th, monthly" both mis-dates the next pay and drops a cheque from
+   * the window — so these step forward from `nextDue` by this many days and
+   * `dayOfMonth`/`cadenceMonths` are ignored. `amount` is then ONE cheque, not the
+   * month's total.
+   */
+  cadenceDays?: number
   /** First occurrence on/after `today`, ISO date — drives the projection walk. */
   nextDue: string
 }
@@ -47,6 +56,9 @@ export type EventOverride = {
   key: string
   account?: Account
   dayOfMonth?: number
+  /** For day-cadence events (biweekly pay): the owner-corrected NEXT date it
+   *  lands, ISO. Later occurrences step from it by `cadenceDays`. */
+  anchorDate?: string
   amount?: number
   /** false = ignore this event entirely. */
   enabled?: boolean
@@ -146,6 +158,18 @@ function nextDueDate(today: string, dayOfMonth: number, cadenceMonths: number, l
   return dateInMonth(todayYm, dayOfMonth)
 }
 
+/**
+ * The occurrence on/after `today` for a day-cadence event, stepping from `anchor`
+ * in either direction (the anchor may be the last pay OR an owner-set future one).
+ */
+function nextDayCadenceDue(anchor: string, cadenceDays: number, today: string): string {
+  let d = anchor
+  let guard = 0
+  while (d < today && guard++ < 400) d = isoAddDays(d, cadenceDays)
+  while (isoAddDays(d, -cadenceDays) >= today && guard++ < 400) d = isoAddDays(d, -cadenceDays)
+  return d
+}
+
 /** Median month-gap between consecutive occurrence months → a cadence in months. */
 function inferCadenceMonths(occMonths: string[]): number {
   if (occMonths.length < 2) return 1
@@ -160,6 +184,36 @@ function inferCadenceMonths(occMonths: string[]): number {
 }
 
 // ---------- inference ----------
+
+/** Weekly/biweekly gaps; beyond this a deposit is monthly-ish (child benefit,
+ *  interest) and the day-of-month model is the right one. */
+const PAY_MIN_GAP = 6
+const PAY_MAX_GAP = 16
+/** Fewer paydays than this and the "cadence" is noise. */
+const PAY_MIN_COUNT = 4
+/** Biweekly pay DRIFTS across the month; semi-monthly (the 15th + the last day)
+ *  has the same ~15-day gap but sticks to the same two dates every month. Only a
+ *  drifting date needs the day-cadence model, so require several distinct ones. */
+const PAY_MIN_DISTINCT_DAYS = 4
+
+/**
+ * Infer a sub-monthly pay cadence from actual deposit dates (one entry per
+ * payday, already merged by day). Returns null when the deposits are monthly,
+ * semi-monthly-on-fixed-days, or too irregular to schedule by day.
+ */
+function payCadence(dates: string[]): { cadenceDays: number } | null {
+  if (dates.length < PAY_MIN_COUNT) return null
+  const gaps: number[] = []
+  for (let i = 1; i < dates.length; i++) gaps.push(Math.round((Date.parse(dates[i]) - Date.parse(dates[i - 1])) / 86400000))
+  const cadenceDays = median(gaps)
+  if (cadenceDays < PAY_MIN_GAP || cadenceDays > PAY_MAX_GAP) return null
+  // A steady cadence: most gaps sit on the median (a holiday shifts pay a day or
+  // two). A mixed bag of gaps means it isn't a schedule we can project by day.
+  const steady = gaps.filter((g) => Math.abs(g - cadenceDays) <= 3).length
+  if (steady / gaps.length < 0.7) return null
+  if (new Set(dates.map(dayOf)).size < PAY_MIN_DISTINCT_DAYS) return null
+  return { cadenceDays }
+}
 
 type Occurrence = { date: string; amount: number; source: string }
 
@@ -218,8 +272,10 @@ export function inferSchedule(
   const events: ScheduledEvent[] = []
 
   // --- Income (split by the bank account it lands in) ---
-  type IncomeAgg = { amounts: Map<string, number>; days: number[] }
-  const incomeBy = new Map<string, IncomeAgg>() // key = `${account}|${label}`
+  // Deposits are aggregated PER DAY first (a split direct deposit posts twice on
+  // one day = one payday), then a cadence is inferred: biweekly/weekly pay gets a
+  // day-cadence event, everything else stays monthly on its median day.
+  const incomeBy = new Map<string, Map<string, number>>() // key = `${account}|${label}` → date → $
   for (const t of recent) {
     if (t.flow !== 'income' || t.amount >= 0) continue
     if (kindByName.get(t.categoryName) !== 'income') continue // skip reimbursements
@@ -227,25 +283,48 @@ export function inferSchedule(
     if (t.source !== 'tangerine' && t.source !== 'scotia') continue
     const label = t.categoryName === 'Salary' ? 'Salary' : t.categoryName
     const key = `${t.source}|${label}`
-    let agg = incomeBy.get(key)
-    if (!agg) incomeBy.set(key, (agg = { amounts: new Map(), days: [] }))
-    agg.amounts.set(monthKey(t.txnDate), (agg.amounts.get(monthKey(t.txnDate)) ?? 0) + -t.amount)
-    agg.days.push(dayOf(t.txnDate))
+    let byDate = incomeBy.get(key)
+    if (!byDate) incomeBy.set(key, (byDate = new Map()))
+    byDate.set(t.txnDate, (byDate.get(t.txnDate) ?? 0) + -t.amount)
   }
-  for (const [key, agg] of incomeBy) {
-    if (agg.amounts.size < 2) continue // need a repeating signal
+  for (const [key, byDate] of incomeBy) {
+    const dates = [...byDate.keys()].sort()
+    const amounts = new Map<string, number>() // month → total
+    for (const d of dates) amounts.set(monthKey(d), (amounts.get(monthKey(d)) ?? 0) + byDate.get(d)!)
+    if (amounts.size < 2) continue // need a repeating signal
     // Drop an income stream that stopped (e.g. an old salary after a job change).
-    const lastIncomeMonth = [...agg.amounts.keys()].sort().pop()!
+    const lastIncomeMonth = [...amounts.keys()].sort().pop()!
     if (monthDiffYm(lastIncomeMonth, monthKey(today)) > 2) continue
     const [account, label] = key.split('|') as [Account, string]
-    const dayOfMonth = Math.round(median(agg.days)) || 1
+    const pay = payCadence(dates)
+    if (pay) {
+      // Biweekly/weekly: one cheque, every `pay.cadenceDays` from the last one.
+      const recentCheques = dates.slice(-6).map((d) => byDate.get(d)!)
+      const nextDue = nextDayCadenceDue(dates[dates.length - 1], pay.cadenceDays, today)
+      events.push({
+        // Cadence is in the key on purpose: `amount` here is ONE cheque, while the
+        // monthly branch's is a month's total. A saved override from the other
+        // shape would be off by ~2×, so it must not carry over silently.
+        key: `income:${pay.cadenceDays}d:${key}`,
+        account,
+        kind: 'income',
+        label,
+        dayOfMonth: dayOf(nextDue),
+        amount: round2(median(recentCheques)),
+        cadenceMonths: 1,
+        cadenceDays: pay.cadenceDays,
+        nextDue,
+      })
+      continue
+    }
+    const dayOfMonth = Math.round(median(dates.map(dayOf))) || 1
     events.push({
       key: `income:${key}`,
       account,
       kind: 'income',
       label,
       dayOfMonth,
-      amount: round2(recentMonthlyAverage(agg.amounts)),
+      amount: round2(recentMonthlyAverage(amounts)),
       cadenceMonths: 1,
       nextDue: nextDueDate(today, dayOfMonth, 1, null),
     })
@@ -348,8 +427,15 @@ export function applyOverrides(events: ScheduledEvent[], overrides: EventOverrid
     }
     if (o.enabled === false) continue
     const account = o.account ?? e.account
-    const dayOfMonth = o.dayOfMonth ?? e.dayOfMonth
     const amount = o.amount ?? e.amount
+    if (e.cadenceDays) {
+      // Day-cadence (biweekly pay): the owner corrects the DATE it next lands, not
+      // a day-of-month, and later occurrences step from there.
+      const nextDue = nextDayCadenceDue(o.anchorDate ?? e.nextDue, e.cadenceDays, today)
+      out.push({ ...e, account, amount, dayOfMonth: dayOf(nextDue), nextDue })
+      continue
+    }
+    const dayOfMonth = o.dayOfMonth ?? e.dayOfMonth
     const lastMonth = e.cadenceMonths > 1 ? monthKey(e.nextDue) : null
     out.push({
       ...e,
@@ -380,6 +466,8 @@ export type ProjectionResult = {
   troughDate: string
   /** First income date for this account in the window (context), null if none. */
   nextPayday: string | null
+  /** Distinct paydays inside the window — biweekly pay usually gives 3. */
+  paydaysInWindow: number
   /** What lands on the trough date, for the one-line reason. */
   troughCause: string | null
   /** max(0, trough − buffer): cash safe to move to investment today. */
@@ -392,6 +480,15 @@ export type ProjectionResult = {
 function occurrencesInWindow(e: ScheduledEvent, today: string, horizonEnd: string): string[] {
   if (e.kind === 'cc') return e.nextDue >= today && e.nextDue <= horizonEnd ? [e.nextDue] : []
   const out: string[] = []
+  if (e.cadenceDays) {
+    let d = e.nextDue
+    let guard = 0
+    while (d <= horizonEnd && guard++ < 60) {
+      if (d >= today) out.push(d)
+      d = isoAddDays(d, e.cadenceDays)
+    }
+    return out
+  }
   let ym = monthKey(e.nextDue)
   let guard = 0
   while (guard++ < 24) {
@@ -439,11 +536,19 @@ export function projectAccount(input: ProjectionInput): ProjectionResult {
     }
   }
 
-  const nextPayday =
-    accEvents
-      .filter((e) => e.kind === 'income')
-      .flatMap((e) => occurrencesInWindow(e, today, horizonEnd))
-      .sort()[0] ?? null
+  const payDates = accEvents
+    .filter((e) => e.kind === 'income')
+    .flatMap((e) => occurrencesInWindow(e, today, horizonEnd))
+    .sort()
+  const nextPayday = payDates[0] ?? null
 
-  return { trough, troughDate, nextPayday, troughCause, safeToMove: Math.max(0, round2(trough - buffer)), timeline }
+  return {
+    trough,
+    troughDate,
+    nextPayday,
+    paydaysInWindow: new Set(payDates).size,
+    troughCause,
+    safeToMove: Math.max(0, round2(trough - buffer)),
+    timeline,
+  }
 }

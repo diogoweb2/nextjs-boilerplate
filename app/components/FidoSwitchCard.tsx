@@ -34,7 +34,6 @@ const VERDICT_META = {
  * error next to 0.5pp of a real month's spending.
  */
 export function FidoSwitchCard({
-  redeemTowardBill,
   spendOnRogersCard,
   spendOnAllCards,
   monthsOfData,
@@ -45,7 +44,6 @@ export function FidoSwitchCard({
   switchBothLines,
   setSwitchBothLines,
 }: {
-  redeemTowardBill: boolean
   /** Real avg monthly non-phone domestic spend already on the Rogers card. */
   spendOnRogersCard: number
   /** Same, across all cards — what would reach Rogers if Cobalt were cancelled. */
@@ -60,11 +58,9 @@ export function FidoSwitchCard({
    *  so the Fido/Koodo line prices stay in one place — §26's "extra line cost"
    *  is literally the difference between the two prices typed in below. */
   twoCards: { byPerson: RogersSpendByPerson; matrix: SpendMatrixView; selfName: string; partnerName: string }
-  /** Owned by the parent: the §24 redemption bonus is capped by this same
-   *  hypothetical bill, so it can't live in this component's local state. */
+  /** Owned by the parent so §25, §26 and §27 all price the same quoted plan. */
   fidoQuotedPrice: number
   setFidoQuotedPrice: (n: number) => void
-  /** Also lifted: moving both lines doubles the bill §24's bonus is capped by. */
   switchBothLines: boolean
   setSwitchBothLines: (b: boolean) => void
 }) {
@@ -86,17 +82,9 @@ export function FidoSwitchCard({
         currentRate: ROGERS_DOMESTIC_BASE_RATE,
         switchedRate: ROGERS_DOMESTIC_BONUS_RATE,
         otherRogersSpend,
-        redeemTowardBill,
         switchBothLines,
       }),
-    [
-      currentTwoLineTotal,
-      remainingKoodoLinePrice,
-      fidoQuotedPrice,
-      otherRogersSpend,
-      redeemTowardBill,
-      switchBothLines,
-    ],
+    [currentTwoLineTotal, remainingKoodoLinePrice, fidoQuotedPrice, otherRogersSpend, switchBothLines],
   )
 
   // Phone spend after the switch — one Fido line plus whatever Koodo is left,
@@ -108,15 +96,13 @@ export function FidoSwitchCard({
   // §26 lives here rather than in its own card so this one calculation stays in
   // step with the plan prices typed in above. Once *both* lines are already on
   // Fido, a second account needs no extra line — it just splits the two bills
-  // it already has, so the extra cost is zero and the redemption gain vanishes.
+  // it already has, so the extra cost is zero.
   const twoCardCmp = useMemo(
     () =>
-      compareOneVsTwoCards(twoCards.byPerson, rogersRates({ qualifying: true, redeemTowardBill }), {
-        oneCardQualifyingBill: switchBothLines ? fidoQuotedPrice * 2 : fidoQuotedPrice,
-        twoCardQualifyingBillEach: fidoQuotedPrice,
+      compareOneVsTwoCards(twoCards.byPerson, rogersRates({ qualifying: true }), {
         extraPlanCostMonthly: switchBothLines ? 0 : fidoQuotedPrice - remainingKoodoLinePrice,
       }),
-    [twoCards.byPerson, redeemTowardBill, fidoQuotedPrice, remainingKoodoLinePrice, switchBothLines],
+    [twoCards.byPerson, fidoQuotedPrice, remainingKoodoLinePrice, switchBothLines],
   )
 
   // §27 lives here for the same reason §26 does: it is the same switch priced
@@ -132,7 +118,6 @@ export function FidoSwitchCard({
         switchBothLines,
         currentRate: ROGERS_DOMESTIC_BASE_RATE,
         switchedRate: ROGERS_DOMESTIC_BONUS_RATE,
-        redeemTowardBill,
         spendOnRogersCard,
         spendOnAllCards,
         cobaltCancelAnnualDelta,
@@ -142,7 +127,6 @@ export function FidoSwitchCard({
       remainingKoodoLinePrice,
       fidoQuotedPrice,
       switchBothLines,
-      redeemTowardBill,
       spendOnRogersCard,
       spendOnAllCards,
       cobaltCancelAnnualDelta,
@@ -179,8 +163,8 @@ export function FidoSwitchCard({
         {switchBothLines ? (
           <>
             Both lines leave Koodo, so there is no re-quote to worry about — just two Fido lines at
-            the quoted price. That also doubles the Rogers-family bill you can redeem cash back
-            against, which is worth real money on top of the rate lift.
+            the quoted price. One line is already enough to hold the 2% rate, so this is purely a
+            plan-price question: the second line adds cost, not cash back.
           </>
         ) : (
           <>
@@ -202,8 +186,8 @@ export function FidoSwitchCard({
         <span>
           Move <strong>both</strong> lines to Fido, not just one
           <span className="block text-xs text-[var(--muted)]">
-            Leaves Koodo entirely. Two bills to redeem against instead of one — but you pay the Fido
-            price twice, so the break-even below is what <em>each</em> line may cost.
+            Leaves Koodo entirely. You pay the Fido price twice, so the break-even below is what{' '}
+            <em>each</em> line may cost.
           </span>
         </span>
       </label>

@@ -184,9 +184,10 @@ export function computeCobaltAnalysis(
  * Buckets the same trailing-12-month spend into domestic / foreign totals —
  * independent of the cash-back rate assumptions, so the client can re-price
  * with `cashbackFromSpend` on every slider tick. `familySpend` (Rogers/Fido
- * bills) is a **subset** of `domesticSpend`, tracked separately only to cap
- * the redemption bonus — it still earns the same flat domestic rate as
- * everything else (the card's "2%" is whole-card, not merchant-specific).
+ * bills) is a **subset** of `domesticSpend`, reported separately for
+ * information only — it earns the same flat domestic rate as everything else
+ * (the card's "2%" is whole-card, not merchant-specific), and since Rogers
+ * dropped the redemption bonus nothing prices off it any more.
  * `countryById` only has real values for Master-format card rows (Amex/bank
  * rows carry no merchant country code and are treated as domestic — see
  * `isForeignCountry`).

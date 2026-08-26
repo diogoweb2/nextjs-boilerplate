@@ -7,7 +7,6 @@ import {
   ROGERS_DOMESTIC_BONUS_RATE,
   ROGERS_FOREIGN_GROSS_RATE,
   ROGERS_FOREIGN_NET_RATE,
-  ROGERS_REDEMPTION_MULTIPLIER,
   type RogersAnalysis,
 } from '@/app/lib/amex-cobalt-core'
 
@@ -127,9 +126,8 @@ export function RogersOverviewCard({ rogers, annualFee = 0 }: { rogers: RogersAn
             of annual spend, then everything earns {pct(ROGERS_DOMESTIC_BASE_RATE)}
           </li>
           <li>
-            Cash back counted at face value — the{' '}
-            <span className="font-medium text-[var(--foreground)]">{ROGERS_REDEMPTION_MULTIPLIER}x</span>{' '}
-            bonus for redeeming against a Rogers/Fido bill is <em>not</em> applied (you&apos;re on Koodo)
+            Cash back counted at face value — Rogers no longer pays any bonus for redeeming against a
+            Rogers/Fido/Shaw bill, so how you redeem it makes no difference
           </li>
           <li>
             No annual fee — counts only purchases posted to this card

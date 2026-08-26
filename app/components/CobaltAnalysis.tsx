@@ -9,7 +9,6 @@ import {
   ROGERS_DOMESTIC_BASE_RATE,
   ROGERS_DOMESTIC_BONUS_RATE,
   ROGERS_FOREIGN_NET_RATE,
-  ROGERS_REDEMPTION_BONUS,
   ROGERS_ANNUAL_CAP,
   ROGERS_FOREIGN_NET_RATE_POST_CAP,
   valueFromPoints,
@@ -69,16 +68,10 @@ export function CobaltAnalysis({
 }) {
   const [cpp, setCpp] = useState(DEFAULT_CENTS_PER_POINT)
   const [hasQualifyingService, setHasQualifyingService] = useState(false)
-  const [redeemTowardBill, setRedeemTowardBill] = useState(false)
-  // Owned here, not in FidoSwitchCard, because two sibling cards need it: §25
-  // prices the switch with it, and the redemption bonus below is capped by it.
-  // The bill you'd redeem against is the Fido plan being quoted — it is not in
-  // the ledger, so nothing can infer it.
+  // Owned here, not in FidoSwitchCard, because §25 and its two sibling scenario
+  // cards (§26, §27) all price off the same quoted plan.
   const [fidoQuotedPrice, setFidoQuotedPrice] = useState(30)
   const [switchBothLines, setSwitchBothLines] = useState(false)
-  // Two Fido lines means two bills to redeem against, so the §24 bonus cap
-  // doubles with the §25 scenario.
-  const qualifyingBillMonthly = switchBothLines ? fidoQuotedPrice * 2 : fidoQuotedPrice
 
   const analysis = useMemo(() => valueFromPoints(points, cpp, COBALT_FEE_MONTHLY), [points, cpp])
   const onCard = useMemo(
@@ -86,46 +79,24 @@ export function CobaltAnalysis({
     [pointsOnCard, cpp],
   )
   const rogers = useMemo(
-    () =>
-      cashbackFromSpend(
-        rogersSpend,
-        rogersRates({
-          qualifying: hasQualifyingService,
-          redeemTowardBill,
-          redemptionCapMonthly: qualifyingBillMonthly,
-        }),
-      ),
-    [rogersSpend, hasQualifyingService, redeemTowardBill, qualifyingBillMonthly],
+    () => cashbackFromSpend(rogersSpend, rogersRates({ qualifying: hasQualifyingService })),
+    [rogersSpend, hasQualifyingService],
   )
   const showdown = useMemo(() => compareCards(analysis, rogers), [analysis, rogers])
   // Rogers priced at the *base* (no-qualifying-service) rate. The Fido card
   // computes the qualifying-rate lift itself from its own spend input, so the
   // "cancel Cobalt" delta it receives must exclude that lift — otherwise the
   // same 0.5pp would be counted on both sides of its combined total.
-  // `redemptionCapMonthly: 0` for the same reason: that scenario is "cancel
-  // Cobalt but stay on Koodo", and a Koodo bill is not redeemable.
   const rogersAtBaseRate = useMemo(
-    () =>
-      cashbackFromSpend(
-        rogersSpend,
-        rogersRates({ qualifying: false, redeemTowardBill, redemptionCapMonthly: 0 }),
-      ),
-    [rogersSpend, redeemTowardBill],
+    () => cashbackFromSpend(rogersSpend, rogersRates({ qualifying: false })),
+    [rogersSpend],
   )
 
   // The Mastercard as it is actually used, priced at the same rates as the
   // comparison below so the toggles there move both consistently.
   const rogersCard = useMemo(
-    () =>
-      cashbackFromSpend(
-        rogersCardSpend,
-        rogersRates({
-          qualifying: hasQualifyingService,
-          redeemTowardBill,
-          redemptionCapMonthly: qualifyingBillMonthly,
-        }),
-      ),
-    [rogersCardSpend, hasQualifyingService, redeemTowardBill, qualifyingBillMonthly],
+    () => cashbackFromSpend(rogersCardSpend, rogersRates({ qualifying: hasQualifyingService })),
+    [rogersCardSpend, hasQualifyingService],
   )
 
   if (points.monthsOfData === 0) {
@@ -140,8 +111,8 @@ export function CobaltAnalysis({
   const rogersMonths = Math.max(1, rogersCardSpend.monthsOfData)
   const annualize = (v: number) => (v / rogersMonths) * 12
   const rogersDomesticRate = hasQualifyingService ? ROGERS_DOMESTIC_BONUS_RATE : ROGERS_DOMESTIC_BASE_RATE
-  // Bands are shown at the headline rates; the cap and the redemption bonus are
-  // whole-card effects, so they live in the totals rather than in a band.
+  // Bands are shown at the headline rates; the cap is a whole-card effect, so it
+  // lives in the totals rather than in a band.
   const rogersCardBands = [
     {
       label: `Canadian purchases (${(rogersDomesticRate * 100).toFixed(1)}%)`,
@@ -265,44 +236,12 @@ export function CobaltAnalysis({
               whole-card rate upgrade, not a bonus limited to the qualifying bill itself.
             </span>
           </label>
-          <label className="flex items-start gap-2">
-            <input
-              type="checkbox"
-              checked={redeemTowardBill}
-              onChange={(e) => setRedeemTowardBill(e.target.checked)}
-              className="mt-0.5 h-4 w-4 accent-[var(--accent)]"
-            />
-            <span>
-              Redeem cash back toward the Fido bill — a{' '}
-              <strong>+{(ROGERS_REDEMPTION_BONUS * 100).toFixed(0)}%</strong> redemption bonus (vs. a plain
-              statement credit), capped at what you actually owe on that bill.
-              <span className="mt-0.5 block text-xs text-[var(--muted)]">
-                Capped at the <strong>{formatCurrency(qualifyingBillMonthly)}/mo</strong> Fido bill you
-                quoted below ({switchBothLines ? 'two lines' : 'one line'}) — that hypothetical plan
-                is the only Rogers-family bill in play, and it isn&apos;t in your statements, so it
-                has to come from the calculator. A bill of B is worth at most B/3 a year, since
-                redeeming $1 buys $1.50 of bill.
-                {redeemTowardBill && (
-                  <>
-                    {' '}
-                    Worth{' '}
-                    <strong className="text-[var(--positive)]">
-                      {formatCurrency(rogers.annualizedRedemptionBonus)}/yr
-                    </strong>
-                    .
-                  </>
-                )}
-                {rogersSpend.familySpend > 0 && (
-                  <>
-                    {' '}
-                    Your ledger also shows {formatCurrency(rogersSpend.familySpend)} of existing
-                    Rogers-family spend, which is <em>not</em> counted here — say the word if those
-                    bills should raise the cap too.
-                  </>
-                )}
-              </span>
-            </span>
-          </label>
+          <div className="rounded-lg bg-[var(--surface-2)] p-3 text-xs text-[var(--muted)]">
+            <strong className="text-[var(--foreground)]">No redemption bonus.</strong> Rogers used to
+            pay 1.5x when cash back was applied to a Rogers/Fido/Shaw/Comwave bill. That is gone —
+            cash back is now worth face value however you redeem it, so the qualifying-service rate
+            lift above is the only thing being a Rogers customer buys you.
+          </div>
 
           <div className="rounded-lg bg-[var(--surface-2)] p-3 text-xs text-[var(--muted)]">
             <strong className="text-[var(--foreground)]">Annual cap:</strong> the elevated rates only
@@ -494,11 +433,7 @@ export function CobaltAnalysis({
               back on {formatCurrency(rogers.domesticSpend)}/yr domestic spend
               {hasQualifyingService ? ' (qualifying-service rate)' : ''}, {(ROGERS_FOREIGN_NET_RATE * 100).toFixed(1)}%
               net on {formatCurrency(rogers.foreignSpend)}/yr foreign-currency spend (3% back minus Canada&apos;s
-              2.5% FX fee)
-              {redeemTowardBill
-                ? `, plus ${formatCurrency(rogers.annualizedRedemptionBonus)}/yr from the ${(ROGERS_REDEMPTION_BONUS * 100).toFixed(0)}% bonus on cash back redeemed against the ${formatCurrency(qualifyingBillMonthly)}/mo Fido bill`
-                : ''}
-              . No monthly fee.
+              2.5% FX fee). No monthly fee.
             </div>
           </div>
           <div className="rounded-lg bg-[var(--surface-2)] p-3">
@@ -547,7 +482,6 @@ export function CobaltAnalysis({
           so that card always prices the post-switch side at the 2% rate,
           independent of the "today's state" checkbox above. */}
       <FidoSwitchCard
-        redeemTowardBill={redeemTowardBill}
         spendOnRogersCard={switchBasis.onRogersCard}
         spendOnAllCards={switchBasis.onAllCards}
         monthsOfData={switchBasis.monthsOfData}

@@ -195,9 +195,13 @@ export function valueFromPoints(
 // Per the card's actual terms (not a merchant-category bonus, corrected after
 // the owner spotted the mismodel): cash back is a **whole-card rate**, 1.5% on
 // eligible purchases normally or 2% on ALL of them once you hold ≥1 qualifying
-// Rogers/Fido/Shaw/Comwave service — plus a separate 1.5x REDEMPTION bonus
-// (not an earn bonus) when accumulated cash back is applied toward one of
-// those bills specifically.
+// Rogers/Fido/Shaw/Comwave service.
+//
+// **Rule change (2026-08):** Rogers dropped the redemption bonus — cash back put
+// toward a Rogers/Fido/Shaw/Comwave bill is now worth exactly its face value,
+// the same as a plain statement credit. Only the qualifying-service rate lift
+// survives. Every "redeem toward the bill" knob was removed rather than zeroed,
+// so nothing can silently re-enable a mechanic the card no longer has.
 
 /** Flat cash back on domestic (CAD) purchases with no qualifying service, and
  *  the rate everything reverts to once the annual cap is hit. */
@@ -227,31 +231,6 @@ export const ROGERS_FOREIGN_NET_RATE_POST_CAP = ROGERS_DOMESTIC_BASE_RATE - FX_F
  * Reset Date." So both the 2% domestic and 3% foreign offers stop at this line.
  */
 export const ROGERS_ANNUAL_CAP = 61_000
-/** Extra value (on top of 1x) when cash back is redeemed toward a qualifying
- *  Rogers/Fido/Shaw/Comwave bill instead of a plain statement credit. Applies at
- *  redemption, so it is not subject to the annual spend cap. */
-export const ROGERS_REDEMPTION_BONUS = 0.5
-/** What $1 of redeemed cash back is worth against a qualifying bill: $1.50. */
-export const ROGERS_REDEMPTION_MULTIPLIER = 1 + ROGERS_REDEMPTION_BONUS
-
-/**
- * Extra value from redeeming cash back against a qualifying bill, over a plain
- * statement credit.
- *
- * **The bill caps the credit, not the redemption.** Owner's worked example:
- * $20,000 of spend earns $400, and that $400 "completely wipes out a $600
- * Rogers bill" — because $400 redeemed buys $600 of bill. So the most you can
- * redeem against a bill of B is `B / 1.5`, not B: past that there is no bill
- * left to apply it to and the remainder falls back to a 1x statement credit.
- *
- * Consequence worth remembering: the bonus on a bill of B can never exceed
- * **B / 3** (`B/1.5 × 0.5`). A $600/yr Fido bill is worth at most $200/yr,
- * which is exactly the owner's example read the other way round.
- */
-export function redemptionBonusValue(earned: number, qualifyingBill: number): number {
-  const maxRedeemable = Math.max(0, qualifyingBill) / ROGERS_REDEMPTION_MULTIPLIER
-  return Math.min(Math.max(0, earned), maxRedeemable) * ROGERS_REDEMPTION_BONUS
-}
 
 export const ROGERS_FAMILY_KEYWORDS = ['rogers', 'fido', 'shaw', 'comwave']
 const ROGERS_FAMILY_RE = wordMatcher(ROGERS_FAMILY_KEYWORDS)
@@ -277,8 +256,9 @@ export function isPhoneBillMerchant(merchantName: string): boolean {
 }
 
 /** `familySpend` is a subset of `domesticSpend` (it still earns the flat
- *  domestic rate) — tracked separately only to cap the redemption bonus, which
- *  can't exceed what's actually owed on those bills. */
+ *  domestic rate). Informational only since the redemption bonus was dropped —
+ *  it tells you how much Rogers-family billing already runs through the card,
+ *  which is what makes the household a qualifying customer in the first place. */
 export type RogersSpendMonth = { ym: string; domesticSpend: number; foreignSpend: number; familySpend: number }
 
 /** Raw spend buckets only — independent of the cash-back rate assumptions, so
@@ -302,32 +282,15 @@ export type RogersRates = {
   foreignPostCap: number
   /** Spend past which the elevated rates stop, for the observed window. */
   annualCap: number
-  /** Apply the 1.5x redemption bonus, capped by `redemptionCapMonthly`. */
-  redeemTowardBill: boolean
-  /**
-   * Monthly qualifying bill the redemption bonus is capped at. You can only
-   * redeem against a bill you actually have, and the bill in question is
-   * **hypothetical** — it's the Fido plan being priced, which by definition
-   * isn't in the ledger yet (the household is on Koodo). So the caller passes
-   * the quoted price in rather than letting the model infer it.
-   *
-   * `null` falls back to each month's ledger-derived `familySpend`
-   * (`isRogersFamilyMerchant`), which is only right when no scenario is being
-   * modelled at all — i.e. the dashboard's default showdown.
-   */
-  redemptionCapMonthly: number | null
 }
 
 /** Assembles the rate fields from the few decisions that actually vary, so
  *  callers never hand-roll (and never forget the post-cap pair). */
 export function rogersRates(opts: {
-  /** Holding ≥1 Rogers/Fido/Shaw/Comwave service lifts domestic 1.5% → 2%. */
+  /** Holding ≥1 Rogers/Fido/Shaw/Comwave service lifts domestic 1.5% → 2%.
+   *  This is now the card's *only* qualifying-customer perk. */
   qualifying: boolean
-  redeemTowardBill?: boolean
   annualCap?: number
-  /** See `RogersRates.redemptionCapMonthly`. Pass 0 to model a scenario with no
-   *  qualifying bill to redeem against. */
-  redemptionCapMonthly?: number
 }): RogersRates {
   return {
     domestic: opts.qualifying ? ROGERS_DOMESTIC_BONUS_RATE : ROGERS_DOMESTIC_BASE_RATE,
@@ -335,8 +298,6 @@ export function rogersRates(opts: {
     domesticPostCap: ROGERS_DOMESTIC_BASE_RATE,
     foreignPostCap: ROGERS_FOREIGN_NET_RATE_POST_CAP,
     annualCap: opts.annualCap ?? ROGERS_ANNUAL_CAP,
-    redeemTowardBill: opts.redeemTowardBill ?? false,
-    redemptionCapMonthly: opts.redemptionCapMonthly ?? null,
   }
 }
 
@@ -357,13 +318,6 @@ export type RogersAnalysis = {
   hitsAnnualCap: boolean
   /** Annualized $ lost to the cap vs. an uncapped world. 0 when under it. */
   capCostAnnual: number
-  /** Annualized value of the 1.5x redemption bonus alone, so the UI can show
-   *  what ticking that box is actually worth (it is 0 with no bill to redeem
-   *  against, which is easy to miss otherwise). */
-  annualizedRedemptionBonus: number
-  /** The monthly bill the bonus was capped by — the quoted Fido price when a
-   *  scenario supplied one, else the ledger's own Rogers-family spend. */
-  redemptionCapMonthly: number
 }
 
 /**
@@ -381,11 +335,10 @@ export function cashbackFromSpend(data: RogersSpendData, rates: RogersRates = DE
   const windowCap = data.monthsOfData > 0 ? (rates.annualCap * data.monthsOfData) / 12 : rates.annualCap
 
   let cumulative = 0
-  // Both tracked pre-redemption-bonus, so the cap's cost is a like-for-like
-  // comparison (the bonus is a redemption mechanic, unaffected by the cap).
+  // Tracked as a pair so `capCostAnnual` is a like-for-like comparison: the
+  // same spend priced with and without the cap biting.
   let earnedCapped = 0
   let earnedUncapped = 0
-  let bonusTotal = 0
 
   const monthly: RogersMonthPoint[] = data.monthly.map((m) => {
     const monthSpend = m.domesticSpend + m.foreignSpend
@@ -396,18 +349,11 @@ export function cashbackFromSpend(data: RogersSpendData, rates: RogersRates = DE
     const forRate = underShare * rates.foreign + (1 - underShare) * rates.foreignPostCap
 
     const earned = m.domesticSpend * domRate + m.foreignSpend * forRate
-    // The bill is the scenario's quoted plan price when there is one — a Fido
-    // plan being priced is not in the ledger, so `familySpend` would silently
-    // cap it at 0. See `redemptionBonusValue` for why the bill is divided by
-    // 1.5 before it caps anything.
-    const qualifyingBill = rates.redemptionCapMonthly ?? m.familySpend
-    const bonus = rates.redeemTowardBill ? redemptionBonusValue(earned, qualifyingBill) : 0
-    bonusTotal += bonus
 
     earnedCapped += earned
     earnedUncapped += m.domesticSpend * rates.domestic + m.foreignSpend * rates.foreign
     cumulative += monthSpend
-    return { ...m, cashback: earned + bonus }
+    return { ...m, cashback: earned }
   })
 
   const cashbackInWindow = monthly.reduce((sum, m) => sum + m.cashback, 0)
@@ -426,10 +372,6 @@ export function cashbackFromSpend(data: RogersSpendData, rates: RogersRates = DE
     annualizedSpend,
     hitsAnnualCap: cumulative > windowCap,
     capCostAnnual,
-    annualizedRedemptionBonus: bonusTotal * scale,
-    redemptionCapMonthly:
-      rates.redemptionCapMonthly ??
-      (data.monthsOfData > 0 ? data.familySpend / data.monthsOfData : 0),
   }
 }
 
@@ -475,12 +417,13 @@ export type TwoCardComparison = {
   self: RogersAnalysis
   partner: RogersAnalysis
   twoCardCashback: number
-  /** Annual cash back gained by adding the second account. Never negative. */
+  /** Annual cash back gained by adding the second account. Never negative.
+   *  Since the redemption bonus was dropped this is *entirely* cap headroom —
+   *  `capGainAnnual` is kept as its own field only because the UI labels it. */
   cashbackGain: number
-  /** The slice of `cashbackGain` that comes from cap headroom alone. */
+  /** The slice of `cashbackGain` that comes from cap headroom. Equal to
+   *  `cashbackGain`: cap headroom is now the only thing a 2nd account buys. */
   capGainAnnual: number
-  /** The slice that comes from the second account's own redemption bonus. */
-  redemptionGainAnnual: number
   /** Gross annual cost of the extra qualifying service the second account
    *  needs — the sticker difference, before the card pays anything back. */
   extraPlanCostAnnual: number
@@ -502,57 +445,32 @@ export type TwoCardComparison = {
  * Rogers/Fido/Shaw/Comwave service, so a second card means a second Fido line
  * replacing a cheaper Koodo one (per the owner: switching *both* Koodo lines).
  *
- * Two things a second account earns, both of which the first version missed:
- *  1. **Cap headroom** — a second $61k band. Below one cap this is exactly zero,
- *     since the rate is whole-card and identical on both accounts.
- *  2. **Its own redemption bonus** — each account redeems against its own Fido
- *     bill, so two accounts get two capped bonuses instead of one. At a typical
- *     bill this is worth more than the cap effect.
+ * **Cap headroom is the only thing a second account earns** — a second $61k
+ * band. Below one cap this is exactly zero, since the rate is whole-card and
+ * identical on both accounts. (It used to also earn a second redemption bonus,
+ * which was usually the larger half; Rogers dropped that mechanic in Aug 2026,
+ * so a second account is now worth nothing at all until the household spends
+ * past $61k/yr.)
  */
 export function compareOneVsTwoCards(
   byPerson: RogersSpendByPerson,
   rates: RogersRates,
   opts: {
-    /**
-     * Monthly Fido bill the **single shared account** can redeem against — the
-     * total of every line, since they all bill to that one card.
-     */
-    oneCardQualifyingBill: number
-    /**
-     * Monthly Fido bill **each** account can redeem against when there are two.
-     * Splitting the same lines across two accounts is what lets the household
-     * collect two capped bonuses instead of one — but only while each bonus
-     * stays under its own `bill / 1.5` ceiling, so the gain shrinks to nothing
-     * once every line has already moved.
-     */
-    twoCardQualifyingBillEach: number
     /** Sticker cost per month of any *extra* line the second account needs.
      *  Zero when both lines have already moved to Fido. */
     extraPlanCostMonthly: number
   },
 ): TwoCardComparison {
-  const oneCard = cashbackFromSpend(byPerson.combined, {
-    ...rates,
-    redemptionCapMonthly: opts.oneCardQualifyingBill,
-  })
-  const twoCardRates: RogersRates = {
-    ...rates,
-    redemptionCapMonthly: opts.twoCardQualifyingBillEach,
-  }
-  const self = cashbackFromSpend(byPerson.self, twoCardRates)
-  const partner = cashbackFromSpend(byPerson.partner, twoCardRates)
+  const oneCard = cashbackFromSpend(byPerson.combined, rates)
+  const self = cashbackFromSpend(byPerson.self, rates)
+  const partner = cashbackFromSpend(byPerson.partner, rates)
 
   const twoCardCashback = self.annualizedCashback + partner.annualizedCashback
   // Floored at 0: splitting spend across two accounts can never *lose* cash
-  // back (same rates, strictly more headroom, one more redeemable bill), so a
-  // negative here would be a rounding artefact of the pro-rated window.
+  // back (same rates, strictly more cap headroom), so a negative here would be
+  // a rounding artefact of the pro-rated window.
   const cashbackGain = Math.max(0, twoCardCashback - oneCard.annualizedCashback)
-  const redemptionGainAnnual = Math.max(
-    0,
-    self.annualizedRedemptionBonus + partner.annualizedRedemptionBonus -
-      oneCard.annualizedRedemptionBonus,
-  )
-  const capGainAnnual = Math.max(0, cashbackGain - redemptionGainAnnual)
+  const capGainAnnual = cashbackGain
 
   const cap = rates.annualCap
   const spendRescuedFromCap =
@@ -584,7 +502,6 @@ export function compareOneVsTwoCards(
     twoCardCashback,
     cashbackGain,
     capGainAnnual,
-    redemptionGainAnnual,
     extraPlanCostAnnual,
     netExtraPlanCostAnnual,
     netGainAnnual,
