@@ -18,7 +18,7 @@ import {
 import { requireAuth } from '@/app/lib/auth-guard'
 import { parseStatement, type ImportSource, type ParsedRow } from '@/app/lib/csv'
 import { normalizeKey, prettify, masterCategoryFor } from '@/app/lib/normalize'
-import { reconcileNetZeroGoals } from '@/app/actions/goals'
+import { reconcileNetZeroGoals, suggestedMortgageExtra } from '@/app/actions/goals'
 import { runAutoFillForAllProjects } from '@/app/actions/projects'
 import { maybeTriggerDigest } from '@/app/lib/digest'
 import { applyPlannedSplits } from '@/app/lib/planned-splits'
@@ -371,6 +371,15 @@ export async function reconcileBelairSplit(): Promise<void> {
 const MORTGAGE_EXTRA_OUTLIER_FACTOR = 2
 
 /**
+ * How far a top-up may sit from the card's "Extra needed" figure and still count
+ * as "the owner paid what we asked". Wide enough to absorb the drift between the
+ * moment the card was read and the moment the payment posts (the balance keeps
+ * accruing interest and the regular payments keep landing), narrow enough that a
+ * lump sum can never pass for the monthly ask.
+ */
+const MORTGAGE_SUGGESTION_TOLERANCE = 0.05
+
+/**
  * The freshly-imported extra mortgage prepayments that are too big to trust as
  * routine — worth a review before they silently count as principal.
  *
@@ -380,6 +389,12 @@ const MORTGAGE_EXTRA_OUTLIER_FACTOR = 2
  * the normal month — $1,100, $493.30, anything in that band — auto-classified and
  * silent, and catches the $4,000 / $7,000 lumps that might have been an
  * investment move instead. With no history yet, every extra gets reviewed.
+ *
+ * One override on top of that: a top-up matching the amount the Mortgage Freedom
+ * card asked for that month (within MORTGAGE_SUGGESTION_TOLERANCE) is never
+ * reviewed, whatever the history says. The owner paying exactly what the app
+ * suggested is the app's own instruction coming back — there is nothing to
+ * confirm, including on the very first import, when there is no median yet.
  */
 async function outsizedMortgageExtras(insertedIds: number[]): Promise<{ id: number; amount: string }[]> {
   const all = await db
@@ -404,8 +419,21 @@ async function outsizedMortgageExtras(insertedIds: number[]): Promise<{ id: numb
     .sort((a, b) => a - b)
   const median = priorAmounts.length ? priorAmounts[Math.floor(priorAmounts.length / 2)] : 0
 
+  // The ask, computed as of *before* this import — otherwise the top-up we are
+  // about to judge would have already shrunk the recommendation it should match.
+  const suggested = await suggestedMortgageExtra(insertedIds)
+  const asSuggested = (amount: number) =>
+    suggested !== null &&
+    suggested > 0 &&
+    Math.abs(amount - suggested) <= suggested * MORTGAGE_SUGGESTION_TOLERANCE
+
   return extras
-    .filter((t) => fresh.has(t.id) && (median === 0 || Math.abs(Number(t.amount)) > median * MORTGAGE_EXTRA_OUTLIER_FACTOR))
+    .filter((t) => {
+      if (!fresh.has(t.id)) return false
+      const amount = Math.abs(Number(t.amount))
+      if (asSuggested(amount)) return false
+      return median === 0 || amount > median * MORTGAGE_EXTRA_OUTLIER_FACTOR
+    })
     .map((t) => ({ id: t.id, amount: t.amount }))
 }
 

@@ -219,6 +219,38 @@ export async function loadMortgageProjection(): Promise<MortgageProjection | nul
   })
 }
 
+/**
+ * The extra mortgage prepayment the app is currently *asking* for — the same
+ * "Extra needed" figure the Mortgage Freedom card shows — computed as if the
+ * transactions in `excludeTxnIds` had not been imported yet (so a top-up that
+ * was just imported doesn't lower the very number it was meant to match).
+ * Returns null when there is no balance snapshot to project from.
+ *
+ * The import path uses this to recognise a top-up the owner made *because* the
+ * card asked for it, and let it through without a review. See BUSINESS_RULES §10.
+ */
+export async function suggestedMortgageExtra(excludeTxnIds: number[] = []): Promise<number | null> {
+  const [goal] = await db.select().from(goals).where(eq(goals.kind, 'mortgage')).limit(1)
+  if (!goal) return null
+  const entries = await db.select().from(goalEntries).where(eq(goalEntries.goalId, goal.id))
+  const snaps = entries
+    .filter((e) => e.kind === 'balance')
+    .map((e) => ({ ym: e.occurredAt.slice(0, 7), balance: Number(e.amount) }))
+    .sort((a, b) => (a.ym < b.ym ? -1 : 1))
+  if (snaps.length === 0) return null
+  const exclude = new Set(excludeTxnIds)
+  const flows = (await loadAllFlows()).filter((t) => !exclude.has(t.id))
+  const asOfYm = anchorMonth(flows.filter((t) => t.flow === 'expense')) ?? todayIso().slice(0, 7)
+  return projectMortgage({
+    birthDate: OWNER_BIRTHDATE,
+    payoffAge: PAYOFF_AGE,
+    annualRate: goal.annualRate === null ? DEFAULT_RATE : Number(goal.annualRate),
+    snapshots: snaps,
+    payments: mortgagePayments(flows),
+    asOfYm,
+  }).recommendedExtra
+}
+
 export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: string; nowYm: string; suggestNetZero: boolean; monthStats: { thisMonth: number; lastMonth: number } }> {
   if (await isDemoSession()) {
     const { demoGoalsData } = await import('@/app/lib/demo-data')

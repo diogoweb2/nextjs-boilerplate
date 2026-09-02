@@ -94,7 +94,8 @@ by description + sub-description + sign. Highlights (owner-confirmed):
   (the monthly extra mortgage payment is deliberately variable): sub `Mb-Transfer` → **Home /
   Mortgage** (extra principal, any amount); **blank** sub → **Investment (iTrade)**;
   `Mb-Credit Card/Loc Pay` → CC Payment. Either side can be reclassified per-transaction, and
-  an unusually large `Mb-Transfer` is queued for review (§ review queues).
+  an unusually large `Mb-Transfer` is queued for review, unless it matches the suggested extra
+  (§ review queues).
 - **Investment** (incl. Scotia iTrade) is an **expense** in category `Investment` (so the
   income−spend gap reflects it; trivially re-bucketed later).
 
@@ -767,7 +768,11 @@ amount rule remembers a category and a note, not which goal the money went to, s
   learned: the goal most often tagged on a prior transfer of the same rounded amount.
   Extra mortgage top-ups (`Mb-Transfer`) auto-classify to Home / Mortgage with **no** prompt
   **unless** the amount is outsized — more than **2×** the median of the last **6** extras
-  (`outsizedMortgageExtras`), or there is no history yet. Those get a review pre-set to
+  (`outsizedMortgageExtras`), or there is no history yet. A top-up **matching the card's
+  "Extra needed" figure** (within **5%**, `MORTGAGE_SUGGESTION_TOLERANCE`, measured against
+  `suggestedMortgageExtra` computed as of *before* the import) is **never** reviewed, whatever
+  the history says — paying exactly what the app asked for needs no confirmation. Other outsized
+  top-ups get a review pre-set to
   "Extra mortgage"; choosing "Count as expense" / "Don't count" moves the transaction **off**
   the Mortgage payee to `Investment (iTrade)` so the payoff projection stops counting it.
 - **Outbound withdrawals** (`createWithdrawalReviews`, `direction='out'`): every newly-inserted
