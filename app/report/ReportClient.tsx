@@ -316,7 +316,12 @@ function GradeBreakdown({ grade }: { grade: Grade }) {
                 const barW = `${pct}%`
                 return (
                   <tr key={key}>
-                    <td className="py-1 pr-3 text-[var(--ink-dim)] whitespace-nowrap">{SIGNAL_LABELS[key]}</td>
+                    <td className="py-1 pr-3 text-[var(--ink-dim)] whitespace-nowrap">
+                      {SIGNAL_LABELS[key]}
+                      {key === 'net' && grade.netNote && (
+                        <div className="text-[10px] normal-case opacity-70">{grade.netNote}</div>
+                      )}
+                    </td>
                     <td className="py-1 pr-2 w-full">
                       <div className="h-1.5 rounded-full bg-white/10">
                         <div

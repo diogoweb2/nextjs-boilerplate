@@ -880,6 +880,24 @@ over").
   per-goal breakdown drop by the amount returned (the monthly figure sums signed contributions, so
   withdrawals in the same calendar month cancel the matching inflow).
 
+### Goals hero — any month, itemized
+The "invested in <month>" hero (`GoalsMonthHero`) defaults to the **current calendar month**,
+rendered from `loadGoalsData`'s `monthStats`/`contributedThisMonth` with no extra query. Stepping
+to another month (arrows, month input, "This month") calls `loadGoalMonth(ym)`, which recomputes
+the same figure on the same basis — signed `contribution` entries on `savings`/`mortgage` goals
+keyed by `occurredAt`, plus extra mortgage principal keyed by txn month (§10) — for that month, its
+previous month (the "vs" delta), and a per-goal split. "See contributions" lists every row behind
+the figure: date, goal, note (the raw description for extra-principal transactions), signed amount.
+Withdrawals appear as negatives, so the list always sums to the headline figure.
+
+**Net-Zero counts too.** Net-Zero has no `goal_entries` — the surplus prompt carves the savings
+slices and Net-Zero takes the *remainder*, so its funding for a month is exactly that month's net
+after those carves (`netOverRange(flows, ym, ym)`). The hero adds that figure to the month total
+and lists it as one row ("Month net after goal allocations"), in both `loadGoalsData`'s current
+month and `loadGoalMonth`'s picked month, so the breakdown accounts for every dollar. A negative
+month shows negative: it pushed Net-Zero further into the red. No double counting — the carved
+contributions are synthetic expenses that already reduced the month's net.
+
 ### Notifications (immediate, per goal)
 When a goal with `notify` on changes value (`addContribution`, `spendFromGoal`, `adjustValue`,
 `updateMortgageBalance`, or a `resolveTransferReview` allocation), an immediate Web Push fires via
@@ -1551,6 +1569,11 @@ dashboard/budget.
 ### Grade rubric (`gradeMonth`, effort-weighted, all knobs are named consts)
 Five 0–1 signals × weights, summed to 0–100 → letter (`A+ ≥95 … D ≥38, F <38`):
 - **Net improvement MoM** (30) — `net − prevNet` scaled by `NET_SWING_SCALE` ($1500 = full mark).
+  Both sides are first levelled for pay cadence: `paydayContext()` (§Income) values the surplus
+  cheque of a 3-cheque month and that amount is removed from that month's net **for this signal
+  only** — otherwise a biweekly calendar quirk reads as effort. The headline net, the "in the
+  black" signal and every other figure stay as-posted. When levelling applied, `grade.netNote`
+  says which month had the extra cheque and the breakdown table shows it.
 - **Net-$0 pulled earlier** (25) — days the crossing moved (or 1.0 if in the black), `ZERO_SHIFT_SCALE`
   (30 days = full mark).
 - **Money moved to goals** (20) — 0.2 none / 0.7 some / 0.9 ≥ last / 1.0 more than last.

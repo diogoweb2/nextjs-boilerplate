@@ -84,7 +84,7 @@ export type YearReport = {
   shareLine: string
 }
 
-export type YearGrade = Omit<Grade, 'breakdown'> & {
+export type YearGrade = Omit<Grade, 'breakdown' | 'netNote'> & {
   breakdown: { black: number; yoy: number; goals: number; discretionary: number; consistency: number }
 }
 

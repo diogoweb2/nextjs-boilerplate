@@ -219,10 +219,10 @@ export async function loadMortgageProjection(): Promise<MortgageProjection | nul
   })
 }
 
-export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: string; suggestNetZero: boolean; monthStats: { thisMonth: number; lastMonth: number } }> {
+export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: string; nowYm: string; suggestNetZero: boolean; monthStats: { thisMonth: number; lastMonth: number } }> {
   if (await isDemoSession()) {
     const { demoGoalsData } = await import('@/app/lib/demo-data')
-    return demoGoalsData()
+    return { ...demoGoalsData(), nowYm: todayIso().slice(0, 7) }
   }
   await ensureMortgageGoal()
   await reconcileNetZeroGoals()
@@ -367,6 +367,18 @@ export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: stri
     lastMonth += extraPrev
   }
 
+  // Net-Zero is funded by the month's *remainder* — no goal_entries of its own
+  // (the surplus prompt carves savings first; what's left keeps cutting the
+  // year's deficit). Count it like any other destination so the hero accounts
+  // for every dollar, and so the current month matches loadGoalMonth.
+  const netZeroGoal = goalRows.find((g) => g.kind === 'netzero' && !g.archived)
+  if (netZeroGoal) {
+    const nzThis = netOverRange(flows, nowYm, nowYm)
+    thisMonth += nzThis
+    if (Math.abs(nzThis) >= 0.005) thisMonthByGoal.set(netZeroGoal.id, nzThis)
+    lastMonth += netOverRange(flows, prevYm, prevYm)
+  }
+
   // Borrow ledger: how much each goal is owed back (lender) / still owes (borrower).
   const transferRows = goalIds.length
     ? await db
@@ -418,7 +430,7 @@ export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: stri
     owesTo: owesToByGoal.get(v.id) ?? [],
   }))
 
-  return { goals: viewsWithMonth, asOfYm, suggestNetZero, monthStats: { thisMonth: Math.round(thisMonth * 100) / 100, lastMonth: Math.round(lastMonth * 100) / 100 } }
+  return { goals: viewsWithMonth, asOfYm, nowYm, suggestNetZero, monthStats: { thisMonth: Math.round(thisMonth * 100) / 100, lastMonth: Math.round(lastMonth * 100) / 100 } }
 }
 
 function netZeroStartYear(g: Goal): number {
@@ -1839,4 +1851,152 @@ export async function spendFromGiftCard(input: {
   await notifyGoalChange(goal, before, before - amount)
   revalidateGoals()
   revalidatePath('/transactions')
+}
+
+/** One line of "what was contributed" in a given month. */
+export type MonthContributionRow = {
+  key: string
+  goalId: number
+  goalName: string
+  goalEmoji: string
+  goalColor: string
+  occurredAt: string
+  amount: number
+  note: string
+  /** 'entry' = a goal ledger contribution; 'mortgage-extra' = extra principal;
+   *  'netzero' = the month's net remainder that reduces the year deficit. */
+  source: 'entry' | 'mortgage-extra' | 'netzero'
+}
+
+export type GoalMonthDetail = {
+  ym: string
+  total: number
+  prevTotal: number
+  perGoal: { goalId: number; name: string; emoji: string; amount: number }[]
+  rows: MonthContributionRow[]
+}
+
+/**
+ * The "invested in <month>" hero, for ANY month — the same basis as
+ * loadGoalsData's monthStats (contribution entries on savings/mortgage goals,
+ * keyed by `occurredAt`, plus extra mortgage principal keyed by txn month), but
+ * anchored on the month the owner picked and itemized down to each entry.
+ * Withdrawals (negative contributions) show as negatives so the total nets out.
+ */
+export async function loadGoalMonth(ym: string): Promise<GoalMonthDetail> {
+  await requireAuth()
+  const empty: GoalMonthDetail = { ym, total: 0, prevTotal: 0, perGoal: [], rows: [] }
+  if (await isDemoSession()) return empty
+
+  const goalRows = await db.select().from(goals).orderBy(asc(goals.sortOrder), asc(goals.createdAt))
+  const byId = new Map(goalRows.map((g) => [g.id, g]))
+  const fundable = new Set(goalRows.filter((g) => g.kind === 'savings' || g.kind === 'mortgage').map((g) => g.id))
+  const nzGoal = goalRows.find((g) => g.kind === 'netzero' && !g.archived) ?? null
+  if (fundable.size === 0 && !nzGoal) return empty
+
+  const prevYm = prevMonth(ym)
+  const entries = fundable.size
+    ? await db
+        .select()
+        .from(goalEntries)
+        .where(inArray(goalEntries.goalId, [...fundable]))
+        .orderBy(asc(goalEntries.occurredAt), asc(goalEntries.id))
+    : []
+
+  const rows: MonthContributionRow[] = []
+  let total = 0
+  let prevTotal = 0
+  for (const e of entries) {
+    if (e.kind !== 'contribution') continue
+    const eYm = e.occurredAt.slice(0, 7)
+    const amount = Number(e.amount)
+    if (eYm === prevYm) prevTotal += amount
+    if (eYm !== ym) continue
+    total += amount
+    const g = byId.get(e.goalId)!
+    rows.push({
+      key: `e${e.id}`,
+      goalId: e.goalId,
+      goalName: g.name,
+      goalEmoji: g.emoji,
+      goalColor: g.color,
+      occurredAt: e.occurredAt,
+      amount,
+      note: e.note ?? '',
+      source: 'entry',
+    })
+  }
+
+  // Extra mortgage principal counts as investing toward Mortgage Freedom (see
+  // loadGoalsData) — itemize the actual transactions rather than the month total.
+  const mortgageGoal = goalRows.find((g) => g.kind === 'mortgage')
+  const flows = mortgageGoal || nzGoal ? await loadAllFlows() : []
+  if (mortgageGoal) {
+    for (const t of flows) {
+      if (!isExtraMortgagePayment(t)) continue
+      const tYm = t.txnDate.slice(0, 7)
+      if (tYm === prevYm) prevTotal += t.amount
+      if (tYm !== ym) continue
+      total += t.amount
+      rows.push({
+        key: `m${t.id}`,
+        goalId: mortgageGoal.id,
+        goalName: mortgageGoal.name,
+        goalEmoji: mortgageGoal.emoji,
+        goalColor: mortgageGoal.color,
+        occurredAt: t.txnDate,
+        amount: t.amount,
+        note: t.rawDescription,
+        source: 'mortgage-extra',
+      })
+    }
+  }
+
+  // Net-Zero is funded by the *remainder*: whatever a month nets after the
+  // savings carves is exactly what shrinks the year's deficit, so it never has
+  // goal_entries of its own (see the surplus prompt). Surface it as one row so
+  // the month's breakdown accounts for every dollar. A negative month shows
+  // negative — it pushed Net-Zero further into the red.
+  if (nzGoal) {
+    const nzAmount = netOverRange(flows, ym, ym)
+    prevTotal += netOverRange(flows, prevYm, prevYm)
+    total += nzAmount
+    if (Math.abs(nzAmount) >= 0.005) {
+      rows.push({
+        key: 'nz',
+        goalId: nzGoal.id,
+        goalName: nzGoal.name,
+        goalEmoji: nzGoal.emoji,
+        goalColor: nzGoal.color,
+        occurredAt: lastDayOfMonth(ym),
+        amount: nzAmount,
+        note: 'Month net after goal allocations — cuts the year deficit',
+        source: 'netzero',
+      })
+    }
+  }
+
+  rows.sort((a, b) => (a.occurredAt === b.occurredAt ? b.amount - a.amount : a.occurredAt < b.occurredAt ? 1 : -1))
+
+  const perGoalMap = new Map<number, number>()
+  for (const r of rows) perGoalMap.set(r.goalId, (perGoalMap.get(r.goalId) ?? 0) + r.amount)
+  const perGoal = [...perGoalMap.entries()]
+    .map(([goalId, amount]) => ({
+      goalId,
+      name: byId.get(goalId)!.name,
+      emoji: byId.get(goalId)!.emoji,
+      amount: round2(amount),
+    }))
+    .sort((a, b) => b.amount - a.amount)
+
+  return { ym, total: round2(total), prevTotal: round2(prevTotal), perGoal, rows }
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100
+}
+
+function lastDayOfMonth(ym: string): string {
+  const [y, m] = ym.split('-').map(Number)
+  return `${ym}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`
 }

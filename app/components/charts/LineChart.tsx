@@ -11,12 +11,16 @@ export function LineChart({
   series,
   height = 200,
   area = true,
+  labelLast = false,
 }: {
   labels: string[]
   series: LineSeries[]
   height?: number
   /** Fill the area under the first series. Disable for multi-line reports. */
   area?: boolean
+  /** Label each line's final point. Use when the y-scale is anchored to a big
+   *  target (goal charts), so small monthly steps stay readable as numbers. */
+  labelLast?: boolean
 }) {
   const width = 640
   const padX = 36
@@ -87,8 +91,9 @@ export function LineChart({
                   <circle cx={cx} cy={cy} r={2.8} fill={s.color}>
                     <title>{`${s.name ? `${s.name} — ` : ''}${formatMonth(labels[i])}: ${formatCurrencyCompact(v)}`}</title>
                   </circle>
-                  {/* Per-point value labels only when a single line (else clutter). */}
-                  {series.length === 1 && (
+                  {/* Per-point value labels only when a single line (else clutter);
+                      `labelLast` adds just the end-of-line value on multi-line charts. */}
+                  {(series.length === 1 || (labelLast && i === s.values.length - 1)) && (
                     <text
                       x={cx}
                       y={labelY}

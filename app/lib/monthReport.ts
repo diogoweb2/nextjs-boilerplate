@@ -26,6 +26,7 @@ import {
 import { projectNetZeroDate, FIXED_CATEGORIES } from '@/app/lib/budget'
 import { formatCurrency, formatMonth, formatPercentDelta } from '@/app/lib/format'
 import { quoteForMonth, type Quote } from '@/app/lib/reportQuotes'
+import { paydayContext } from '@/app/lib/income'
 import { isDemoSession } from '@/app/lib/demo'
 import { loadNetWorth } from '@/app/actions/networth'
 
@@ -62,6 +63,11 @@ export type Grade = {
   score: number
   /** Per-signal 0–1 sub-scores, for transparency / tuning. */
   breakdown: { net: number; trajectory: number; goals: number; discretionary: number; black: number }
+  /**
+   * Set when the MoM net signal was levelled for pay cadence — a 3-cheque month
+   * on either side would otherwise fake a win (or a loss) the household never made.
+   */
+  netNote: string | null
 }
 
 export type MonthReport = {
@@ -224,6 +230,11 @@ function netPositiveStreak(flows: EnrichedTxn[], endYm: string): number {
 function gradeMonth(args: {
   net: number
   prevNet: number
+  /** Surplus paycheque(s) beyond the usual cadence, this month and last. */
+  extraCheque: number
+  prevExtraCheque: number
+  monthLabel: string
+  prevMonthLabel: string
   netZeroReached: boolean
   netZeroShiftDays: number | null
   netZeroReachable: boolean
@@ -233,8 +244,19 @@ function gradeMonth(args: {
   curDisc: number
   prevDisc: number
 }): Grade {
-  const improvement = args.net - args.prevNet
+  // Biweekly pay gives a few months a 3rd cheque. Comparing as-posted nets across
+  // such a boundary grades the calendar, not the effort — so level both sides by
+  // their surplus cheque for THIS signal only (the headline net stays as-posted).
+  const improvement =
+    args.net - args.extraCheque - (args.prevNet - args.prevExtraCheque)
   const sNet = clamp01(0.5 + improvement / (2 * NET_SWING_SCALE))
+  let netNote: string | null = null
+  if (args.extraCheque > 0 && args.prevExtraCheque <= 0)
+    netNote = `levelled — ${args.monthLabel} had an extra paycheque`
+  else if (args.prevExtraCheque > 0 && args.extraCheque <= 0)
+    netNote = `levelled — ${args.prevMonthLabel} had an extra paycheque`
+  else if (args.extraCheque > 0 && args.prevExtraCheque > 0)
+    netNote = 'levelled — both months had an extra paycheque'
 
   let sTraj: number
   if (args.netZeroReached) sTraj = 1
@@ -266,6 +288,7 @@ function gradeMonth(args: {
     letter: letterFor(rounded),
     score: rounded,
     breakdown: { net: sNet, trajectory: sTraj, goals: sGoals, discretionary: sDisc, black: sBlack },
+    netNote,
   }
 }
 
@@ -339,9 +362,16 @@ export async function buildMonthReport(targetYm?: string | null): Promise<Report
       ? `On pace for net $0 by ${formatMonth(proj.crossingDate.slice(0, 7))}`
       : 'No pace to net $0 yet — a positive month starts the climb'
 
+  // Pay cadence for both sides, so a 3-cheque month doesn't skew the MoM signal.
+  const payCtx = paydayContext(flows, month)
+  const payCtxPrev = paydayContext(flows, prevMonth)
   const grade = gradeMonth({
     net,
     prevNet,
+    extraCheque: payCtx?.extraCheque ?? 0,
+    prevExtraCheque: payCtxPrev?.extraCheque ?? 0,
+    monthLabel: formatMonth(month),
+    prevMonthLabel: formatMonth(prevMonth),
     netZeroReached: proj.reached,
     netZeroShiftDays,
     netZeroReachable: reachable,

@@ -4,7 +4,7 @@ import { loadGoalsData, loadSpendCategories, loadGoalSpendLog } from '@/app/acti
 export const dynamic = 'force-dynamic'
 
 export default async function AccountsGoalsPage() {
-  const [{ goals, asOfYm, suggestNetZero, monthStats }, spendCategories, spendLog] = await Promise.all([
+  const [{ goals, asOfYm, nowYm, suggestNetZero, monthStats }, spendCategories, spendLog] = await Promise.all([
     loadGoalsData(),
     loadSpendCategories(),
     loadGoalSpendLog(),
@@ -13,6 +13,7 @@ export default async function AccountsGoalsPage() {
     <GoalsManager
       goals={goals}
       asOfYm={asOfYm}
+      nowYm={nowYm}
       suggestNetZero={suggestNetZero}
       monthStats={monthStats}
       spendCategories={spendCategories}
