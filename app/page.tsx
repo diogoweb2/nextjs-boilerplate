@@ -95,7 +95,7 @@ export default async function Home({
       .limit(1)
       .then((rows) => rows[0] ?? null)
 
-  // Last daily notification actually pushed (dailyDigestPushes only gets a row
+  // Last digest notification actually pushed (dailyDigestPushes only gets a row
   // when a push goes out, so this is a true "last notified" timestamp).
   const lastDigestPushQuery = () =>
     db
@@ -287,7 +287,7 @@ export default async function Home({
           {
             id: 'digest-fail',
             severity: 'error',
-            title: 'Daily digest failed',
+            title: 'Digest run failed',
             lines: [
               `Last attempt ${formatSyncAge(lastDigestRun.lastRunAt.toISOString())} ago failed.`,
               ...(lastDigestRun.error ? [lastDigestRun.error] : []),

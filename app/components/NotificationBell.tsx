@@ -15,7 +15,7 @@ type SyncEntry = { label: string; lastSync: string | null; failed?: boolean }
  * panel acknowledges the current problem set — persisted in the DB
  * (notification_seen), so acknowledging on one device clears the badge
  * everywhere — and the badge only reappears when the set changes. The panel
- * footer keeps the per-source last-sync ages and the last daily notification
+ * footer keeps the per-source last-sync ages and the last digest notification
  * time for reference.
  */
 function DigestRetry() {
@@ -139,7 +139,7 @@ export function NotificationBell({
                   {label}: {lastSync ? `${formatSyncAge(lastSync)} ago` : 'never'}
                 </span>
               ))}
-              <span title={lastNotified ? `Last daily notification: ${new Date(lastNotified).toLocaleString()}` : 'No daily notification sent yet'}>
+              <span title={lastNotified ? `Last digest notification: ${new Date(lastNotified).toLocaleString()}` : 'No digest notification sent yet'}>
                 Notified: {lastNotified ? `${formatSyncAge(lastNotified)} ago` : 'never'}
               </span>
             </p>

@@ -111,11 +111,11 @@ export function PushToggle() {
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-medium">Daily digest notifications</p>
+          <p className="text-sm font-medium">Budget digest notifications</p>
           <p className="text-xs text-[var(--muted)]">
             {on
-              ? 'On for this device — you’ll get the daily summary even with the site closed.'
-              : 'Get the daily summary pushed to this device (works with the site closed).'}
+              ? 'On for this device — you’ll get the Wed & Sun summary even with the site closed.'
+              : 'Get the Wed & Sun summary pushed to this device (works with the site closed).'}
           </p>
         </div>
         <button

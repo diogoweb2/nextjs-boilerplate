@@ -41,6 +41,40 @@ import { computePaceAlerts, type PaceAlert as CategoryPaceAlert } from '@/app/li
 import { completedReportMonth, completedYearReportYear } from '@/app/lib/reportSchedule'
 
 const DAY_MS = 24 * 60 * 60 * 1000
+/** Longest window we'll ever summarize, so a long push gap can't drag in a month of charges. */
+const MAX_WINDOW_MS = 8 * DAY_MS
+
+/**
+ * Which days the digest push is allowed to go out, as UTC weekday numbers
+ * (0 = Sunday). Twice a week — Wednesday and Sunday — because a daily nudge
+ * stopped being read. The job itself still runs every day (event-triggered by
+ * the syncs, plus the launchd fallback) and still records to `digest_runs`, so
+ * failures surface on the dashboard on any day; only the *push* is gated.
+ * Month/Year recaps ignore this gate — they're one-shot and rare.
+ */
+export const DIGEST_PUSH_WEEKDAYS = [0, 3]
+
+/** True when `now` falls on a digest push day. UTC, to match the dedup key's UTC date. */
+export function isDigestPushDay(now: number = Date.now()): boolean {
+  return DIGEST_PUSH_WEEKDAYS.includes(new Date(now).getUTCDay())
+}
+
+/**
+ * Start of the "new charges" window: the last digest push, so a Wednesday push
+ * reports everything imported since Sunday's instead of only the last 24h.
+ * Clamped to at least a day (a same-day retry still shows the day's charges)
+ * and at most {@link MAX_WINDOW_MS}, so a long silence — push unconfigured, a
+ * holiday of failed syncs — degrades to a sane window instead of a mega-digest.
+ */
+export async function digestWindowStart(now: number = Date.now()): Promise<Date> {
+  const [last] = await db
+    .select({ sentAt: dailyDigestPushes.sentAt })
+    .from(dailyDigestPushes)
+    .orderBy(desc(dailyDigestPushes.sentAt))
+    .limit(1)
+  const sinceMs = last?.sentAt ? last.sentAt.getTime() : now - DAY_MS
+  return new Date(Math.min(Math.max(sinceMs, now - MAX_WINDOW_MS), now - DAY_MS))
+}
 
 export type DigestSync = { source: string; label: string; lastSync: string | null; stale: boolean }
 export type DigestCharge = { merchant: string; amount: number; date: string }
@@ -91,17 +125,20 @@ function round2(n: number): number {
 export type SpendExclusion = { merchantIds: Set<number>; fixedCats: Set<string> }
 
 /**
- * New charges since the last digest: the ~24h of freshly-imported expense rows
- * (by `createdAt`, not transaction date) that the daily notification reports as
- * "$X new". Unavoidable spend (`exclude`) is dropped so this matches the
- * discretionary curve. Shared so the dashboard lists the exact same charges,
+ * New charges since the last digest: the freshly-imported expense rows (by
+ * `createdAt`, not transaction date) that the notification reports as "$X new".
+ * The window runs from the last push that actually went out (see
+ * {@link digestWindowStart}) — with a twice-weekly push that's ~3-4 days, not a
+ * day — unless the caller passes an explicit `since`. Unavoidable spend
+ * (`exclude`) is dropped so this matches the discretionary curve. Shared so the dashboard lists the exact same charges,
  * sorted largest-first.
  */
 export async function recentCharges(
   now: number = Date.now(),
-  exclude?: SpendExclusion
+  exclude?: SpendExclusion,
+  since?: Date
 ): Promise<DigestCharge[]> {
-  const since = new Date(now - DAY_MS)
+  since ??= await digestWindowStart(now)
   const recent = await db
     .select({
       amount: transactions.amount,
@@ -145,8 +182,12 @@ export function summarizeSpend(charges: DigestCharge[]): DigestSpend {
 }
 
 /** The digest's "$X new" summary — same window/exclusion as {@link recentCharges}. */
-export async function recentSpend(now: number = Date.now(), exclude?: SpendExclusion): Promise<DigestSpend> {
-  return summarizeSpend(await recentCharges(now, exclude))
+export async function recentSpend(
+  now: number = Date.now(),
+  exclude?: SpendExclusion,
+  since?: Date
+): Promise<DigestSpend> {
+  return summarizeSpend(await recentCharges(now, exclude, since))
 }
 
 export async function buildDigest(now: number = Date.now(), failedSources: string[] = []): Promise<Digest> {
@@ -182,9 +223,11 @@ export async function buildDigest(now: number = Date.now(), failedSources: strin
     })
   )
 
-  // 2. New discretionary charges since the last digest (~24h of freshly-imported
-  //    expense rows), excluding the unavoidable spend the curve also ignores.
-  const newSpend = await recentSpend(now, unavoidableMerchantIds(allFlows, rules, FIXED_CATEGORIES))
+  // 2. New discretionary charges since the last push that went out (see
+  //    digestWindowStart), excluding the unavoidable spend the curve also ignores.
+  //    Resolved once and threaded through so both charge queries share a window.
+  const since = await digestWindowStart(now)
+  const newSpend = await recentSpend(now, unavoidableMerchantIds(allFlows, rules, FIXED_CATEGORIES), since)
 
   // 3. Month pace — discretionary burn-down on the current (anchor) month.
   const expenses = allFlows.filter((t: EnrichedTxn) => t.flow === 'expense')
@@ -236,11 +279,11 @@ export async function buildDigest(now: number = Date.now(), failedSources: strin
   const insights = buildInsights(expenses, 1, false, anchor, await loadAlertDismissals())
   const newMerchants = insights.newMerchants.map((m) => m.name)
   // 4b. Price-creep watchdog (§18): only alerts whose changed charge was
-  // imported in the last ~24h, so the push fires once per price change — the
+  // imported in this digest's window, so the push fires once per price change — the
   // dashboard card keeps showing it until the next charge confirms the price.
   // Note: the unfiltered charge list — subscriptions with projection rules are
   // "unavoidable" and would be excluded by the newSpend exclusion above.
-  const freshMerchants = new Set((await recentCharges(now)).map((c) => c.merchant))
+  const freshMerchants = new Set((await recentCharges(now, undefined, since)).map((c) => c.merchant))
   const priceAlerts = insights.priceAlerts.filter((a) => freshMerchants.has(a.name))
 
   const outlier = insights.outliers[0]
@@ -467,8 +510,15 @@ export async function runDailyDigestJob(
       .limit(1)
     const previousRunFailed = lastRun?.status === 'fail'
 
+    // Twice-weekly gate (Wed/Sun): the daily nudge stopped getting read. The job
+    // still runs and records daily — only the push waits for the next digest day,
+    // and the window widening above means that push covers everything since the
+    // last one. A failed previous run doesn't override this: the dashboard
+    // Retry button is an explicit ask, so it pushes on any day.
+    const pushDay = isDigestPushDay(now) || previousRunFailed
+
     let push: PushResult
-    if (!allSyncsOk || (!hasNewData && !previousRunFailed) || !pushConfigured()) {
+    if (!pushDay || !allSyncsOk || (!hasNewData && !previousRunFailed) || !pushConfigured()) {
       push = { sent: 0, failed: 0, skipped: true }
     } else {
       // Daily dedup: claim today's UTC date slot; if already claimed, skip.
