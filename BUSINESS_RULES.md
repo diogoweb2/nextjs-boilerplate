@@ -181,6 +181,30 @@ All actions live in `app/actions/merchants.ts`:
 - **Teach a substring** (`addContainsRule`): adds a `contains` rule AND retroactively repoints
   existing matching transactions.
 
+### AI merchant-name cleanup (`scripts/merchant-names.ts`, `app/actions/merchant-names-ai.ts`)
+Bank labels are shouty and truncated (`MECP ARROWHEAD PPARK`). A model proposes human
+names; **the owner accepts each one**, and accepting just calls the ordinary rename — so
+the whole learning layer above applies unchanged: the `exact_key` rule still maps the
+statement key to that merchant **row**, and the displayed name is `merchants.name`, so
+**every past and future import shows the new name with no rule edit**.
+
+Three entry points, same contract (propose → confirm → `merchants.name` only; categories,
+flags, rules and transactions are never touched):
+- **Batch, in-app** — Merchants page, "Clean up new merchant names". Reviews only merchants
+  created **after the last batch run**, checkbox-per-proposal, `Apply N`. Uses OpenRouter.
+- **One merchant** — the ✨ button beside a name on the Merchants page and in the Activity
+  row editor. Shows a chip with the suggestion + `Use`. A one-off; it does **not** move the
+  watermark.
+- **Batch, CLI** — `npm run merchants:names` (dry run → `.scratch/merchant-renames.md`, edit
+  it, then `npm run merchants:names -- --apply`). Uses the Claude CLI subscription with
+  WebSearch, so unfamiliar acronyms get looked up. `--days=N` limits by merchant age.
+
+The **watermark** is the newest `merchant_name_runs.ran_at`; both batch flows write a row
+when they apply, so they never re-review each other's work. Applying stamps the run even if
+every proposal was rejected — "I looked at these" is the point. Skipped on apply: any
+merchant whose current name no longer matches what the report proposed to replace (CLI), and
+any hallucinated/unknown id (both).
+
 ### Amount rules — "Remember" (`merchant_amount_rules`)
 A finer-grained learning layer for merchants whose meaning depends on the **exact amount**
 (e.g. `E-Transfer Out` $111.87 = the trailer rental). Clicking **Remember** on a transaction

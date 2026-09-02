@@ -11,6 +11,7 @@ import {
 } from '@/app/actions/merchants'
 import { formatCurrency } from '@/app/lib/format'
 import { LineChart } from '@/app/components/charts/LineChart'
+import { SuggestNameButton, SuggestNewNamesPanel } from '@/app/components/MerchantNameAi'
 
 export type MerchantRow = {
   id: number
@@ -27,9 +28,12 @@ export type CategoryOption = { id: number; name: string; color: string }
 export function MerchantsManager({
   merchants,
   categories,
+  ai,
 }: {
   merchants: MerchantRow[]
   categories: CategoryOption[]
+  /** null when OPENROUTER_API_KEY isn't set — the AI name tools stay hidden. */
+  ai: { newCount: number; since: string | null } | null
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -80,6 +84,8 @@ export function MerchantsManager({
 
   return (
     <div className={pending ? 'opacity-70 transition-opacity' : ''}>
+      {ai && <SuggestNewNamesPanel newCount={ai.newCount} since={ai.since} />}
+
       <div className="mb-3 flex items-center gap-2">
         <input
           value={query}
@@ -137,6 +143,7 @@ export function MerchantsManager({
             categories={categories}
             selected={selected.has(m.id)}
             onToggleSelect={() => toggleSelect(m.id)}
+            aiNames={!!ai}
             onRename={(name) => run(() => renameMerchant(m.id, name))}
             onCategory={(cid) => run(() => setMerchantCategory(m.id, cid))}
             onFlags={(flags) => run(() => setMerchantFlags(m.id, flags))}
@@ -154,6 +161,7 @@ function MerchantRowView({
   m,
   categories,
   selected,
+  aiNames,
   onToggleSelect,
   onRename,
   onCategory,
@@ -162,6 +170,7 @@ function MerchantRowView({
   m: MerchantRow
   categories: CategoryOption[]
   selected: boolean
+  aiNames: boolean
   onToggleSelect: () => void
   onRename: (name: string) => void
   onCategory: (categoryId: number | null) => void
@@ -204,6 +213,7 @@ function MerchantRowView({
             onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
             className="min-w-0 flex-1 rounded-md bg-transparent px-1 py-0.5 text-sm font-medium outline-none hover:bg-[var(--surface-2)] focus:bg-[var(--surface-2)]"
           />
+          {aiNames && <SuggestNameButton merchantId={m.id} currentName={m.name} />}
         </div>
 
         <div className="flex items-center justify-between gap-2 sm:justify-end">

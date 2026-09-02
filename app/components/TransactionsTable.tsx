@@ -31,6 +31,7 @@ import {
 } from '@/app/actions/goals'
 import { formatCurrency, formatLongDate } from '@/app/lib/format'
 import type { CategoryOption } from '@/app/components/MerchantsManager'
+import { SuggestNameButton } from '@/app/components/MerchantNameAi'
 
 /**
  * Row label. Goal moves all share one payee ("Goal Funding" / "Goal Withdrawal")
@@ -84,9 +85,12 @@ export function TransactionsTable({
   giftCardLoadsByTxn = {},
   goalFilterOptions = [],
   activeGoalFilter = null,
+  aiNames = false,
 }: {
   transactions: TxnRow[]
   categories: CategoryOption[]
+  /** OPENROUTER_API_KEY is set, so the row editor may offer an AI name suggestion. */
+  aiNames?: boolean
   initialCategoryFilter?: string
   initialQuery?: string
   projects?: ProjectPickerItem[]
@@ -285,6 +289,7 @@ export function TransactionsTable({
             t={t}
             categories={categories}
             inlineCategory={uncategorizedOnly}
+            aiNames={aiNames}
             selectMode={selectMode}
             selected={selected.has(t.id)}
             onToggleSelect={() => toggleSelect(t.id)}
@@ -451,6 +456,7 @@ function TxnRowView({
   t,
   categories,
   inlineCategory,
+  aiNames,
   selectMode,
   selected,
   onToggleSelect,
@@ -475,6 +481,7 @@ function TxnRowView({
   t: TxnRow
   categories: CategoryOption[]
   inlineCategory: boolean
+  aiNames: boolean
   selectMode: boolean
   selected: boolean
   onToggleSelect: () => void
@@ -650,6 +657,9 @@ function TxnRowView({
 
       {expanded && (
         <div className="animate-in flex flex-wrap items-center gap-2 pl-4">
+          {/* Renames the MERCHANT, not this row — so every past and future charge
+              from it gets the cleaner name (BUSINESS_RULES §3). */}
+          {aiNames && <SuggestNameButton merchantId={t.merchantId} currentName={t.merchantName} />}
           {!inlineCategory && (
             <select
               value={t.categoryId ?? ''}

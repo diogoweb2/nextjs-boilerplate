@@ -883,6 +883,21 @@ export const retirementSettings = pgTable('retirement_settings', {
 })
 
 /**
+ * One row per AI merchant-name review (the batch flow only — a single-merchant
+ * suggestion is a one-off and never moves the watermark). The newest `ran_at` is
+ * the watermark: the next batch only looks at merchants created after it, so a
+ * monthly click reviews only what the last imports brought in.
+ */
+export const merchantNameRuns = pgTable('merchant_name_runs', {
+  id: serial('id').primaryKey(),
+  ranAt: timestamp('ran_at').defaultNow().notNull(),
+  // 'cli' = scripts/merchant-names.ts (claude -p), 'app' = the Merchants page button (OpenRouter).
+  source: text('source', { enum: ['cli', 'app'] }).notNull().default('app'),
+  reviewed: integer('reviewed').notNull().default(0),
+  renamed: integer('renamed').notNull().default(0),
+})
+
+/**
  * Per-merchant, per-amount auto-fill rules. When a future import produces a
  * transaction with the same merchant and exact amount, it automatically inherits
  * the saved category and note — useful for recurring fixed-amount payments like

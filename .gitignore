@@ -50,3 +50,6 @@ sync/itrade.accounts.json
 *.tsbuildinfo
 next-env.d.ts
 RETIREMENT_PLAN.md
+
+# Local scratch: merchant-rename dry runs and other throwaway output (repo is public)
+/.scratch/

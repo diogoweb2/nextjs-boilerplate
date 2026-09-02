@@ -247,6 +247,7 @@ export default async function TransactionsPage({
         <TransactionsTable
           transactions={txns}
           categories={catRows.map((c) => ({ id: c.id, name: c.name, color: c.color }))}
+          aiNames={!!process.env.OPENROUTER_API_KEY?.trim()}
           projects={projectItems}
           membershipsByTxn={memberships}
           goalOptions={goalOptions}

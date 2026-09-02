@@ -4,6 +4,7 @@ import { merchants, categories, transactions } from '@/db/schema'
 import { Card, EmptyHint } from '@/app/components/AppShell'
 import { MerchantsManager, type MerchantRow } from '@/app/components/MerchantsManager'
 import { isDemoSession } from '@/app/lib/demo'
+import { newMerchantCount } from '@/app/actions/merchant-names-ai'
 
 export const dynamic = 'force-dynamic'
 
@@ -43,6 +44,12 @@ export default async function ManageMerchantsPage() {
     monthCounts.map((r) => [r.merchantId, Number(r.monthCount)])
   )
 
+  // AI name cleanup is offered only with a key configured, and never in demo mode.
+  const aiNames =
+    process.env.OPENROUTER_API_KEY?.trim() && !(await isDemoSession())
+      ? await newMerchantCount()
+      : null
+
   const rows: MerchantRow[] = merchantRows
     .map((m) => {
       const agg = totalsMap.get(m.id)
@@ -73,6 +80,7 @@ export default async function ManageMerchantsPage() {
         <MerchantsManager
           merchants={rows}
           categories={catRows.map((c) => ({ id: c.id, name: c.name, color: c.color }))}
+          ai={aiNames ? { newCount: aiNames.count, since: aiNames.since } : null}
         />
       )}
     </>
