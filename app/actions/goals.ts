@@ -557,6 +557,8 @@ export type PendingReview = {
   goals: { id: number; name: string; emoji: string }[]
   /** Registered accounts (TFSA/RESP) an outbound transfer can be tagged to. */
   registeredAccounts: { id: number; name: string; kind: string; ownerName: string }[]
+  /** Expense categories offered when the owner says "this was a real expense". */
+  categories: { id: number; name: string }[]
 }
 
 /** Pending transfer reviews for the dashboard prompt (+ savings-goal options). */
@@ -590,6 +592,12 @@ export async function loadPendingReviews(): Promise<PendingReview[]> {
 
   const accountOpts = await loadRegisteredAccountOptions()
 
+  const categoryOpts = await db
+    .select({ id: categories.id, name: categories.name })
+    .from(categories)
+    .where(eq(categories.kind, 'expense'))
+    .orderBy(asc(categories.name))
+
   return rows.map((r) => ({
     id: r.id,
     transactionId: r.transactionId,
@@ -601,6 +609,7 @@ export async function loadPendingReviews(): Promise<PendingReview[]> {
     suggestedGoalId: r.suggestedGoalId,
     goals: goalOpts,
     registeredAccounts: accountOpts,
+    categories: categoryOpts,
   }))
 }
 
@@ -1482,6 +1491,11 @@ async function allocateToGoals(
  *  - 'neutral'  → re-flag as a transfer (better-interest move; leaves analytics);
  *                 still tag the allocations so the goal value grows.
  *  - 'mortgage' → not a goal: recategorize to Home / Mortgage (extra principal).
+ *  - 'real-expense' → it wasn't an investment move at all (most withdrawal
+ *                 reviews: an e-transfer to a person, a cash withdrawal). Keeps
+ *                 the merchant, keeps flow 'expense', and just files it under
+ *                 the category the owner picked, plus an optional free-text note
+ *                 ("pizza at a friend's house"). No goal allocations.
  *
  * Inbound ('in' — money returning from investments):
  *  - 'goal'     → keep it income (category Goal Spend) so it offsets the real
@@ -1493,8 +1507,12 @@ async function allocateToGoals(
  */
 export async function resolveTransferReview(input: {
   reviewId: number
-  treatment: 'expense' | 'neutral' | 'mortgage' | 'goal' | 'income' | 'ignore' | 'transfer' | 'dismiss'
+  treatment: 'expense' | 'real-expense' | 'neutral' | 'mortgage' | 'goal' | 'income' | 'ignore' | 'transfer' | 'dismiss'
   allocations?: ReviewAllocation[]
+  /** Required for 'real-expense': the expense category to file the row under. */
+  categoryId?: number | null
+  /** 'real-expense' only: free-text reminder of what the money was for. */
+  note?: string | null
   /** Outbound only: tag this transfer as a contribution to a TFSA/RESP account so
    *  its contribution room / grant recalculates. A pure overlay — does not change
    *  the transaction's flow or category. */
@@ -1545,6 +1563,21 @@ export async function resolveTransferReview(input: {
   }
 
   // Outbound.
+  // Not an investment move at all — an ordinary expense the bank labelled
+  // ambiguously (E-Transfer Out, Bank Withdrawal, Cheque Withdrawal). Keep the
+  // merchant and the 'expense' flow, only file it under the right category.
+  if (input.treatment === 'real-expense') {
+    if (input.categoryId && Number.isInteger(input.categoryId)) {
+      await db
+        .update(transactions)
+        .set({ flow: 'expense', categoryId: input.categoryId, note: input.note?.trim() || null })
+        .where(eq(transactions.id, txn.id))
+    }
+    await resolve('resolved')
+    revalidateGoals()
+    return
+  }
+
   if (input.treatment === 'mortgage') {
     const homeId = await categoryIdByName('Home')
     const merchantId = await merchantIdByName('Mortgage', 'Home')

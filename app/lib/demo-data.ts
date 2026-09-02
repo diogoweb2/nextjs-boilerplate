@@ -907,6 +907,10 @@ export function demoPendingReviews(): PendingReview[] {
         { id: 1, name: 'My TFSA', kind: 'tfsa', ownerName: 'Me' },
         { id: 2, name: 'Kids RESP', kind: 'resp', ownerName: 'Me' },
       ],
+      categories: demoCategoryRows()
+        .filter((c) => c.kind === 'expense')
+        .map((c) => ({ id: c.id, name: c.name }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
     },
   ]
 }

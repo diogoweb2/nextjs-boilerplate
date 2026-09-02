@@ -5,10 +5,20 @@ import { useRouter } from 'next/navigation'
 import { formatCurrency, formatLongDate } from '@/app/lib/format'
 import { resolveTransferReview, type PendingReview, type ReviewAllocation } from '@/app/actions/goals'
 
-type Treatment = 'expense' | 'neutral' | 'mortgage' | 'goal' | 'income' | 'ignore' | 'transfer' | 'dismiss'
+type Treatment =
+  | 'expense'
+  | 'real-expense'
+  | 'neutral'
+  | 'mortgage'
+  | 'goal'
+  | 'income'
+  | 'ignore'
+  | 'transfer'
+  | 'dismiss'
 
 const OUTBOUND_TREATMENTS: { value: Treatment; label: string; hint: string }[] = [
   { value: 'expense', label: 'Count as expense', hint: 'Investment spend (default)' },
+  { value: 'real-expense', label: 'Real expense', hint: 'pick a category' },
   { value: 'transfer', label: 'Internal transfer', hint: 'moved between my accounts' },
   { value: 'neutral', label: "Don't count", hint: 'just a better-interest move' },
   { value: 'mortgage', label: 'Extra mortgage', hint: 'pay down the house' },
@@ -74,8 +84,13 @@ function ReviewRow({ review }: { review: PendingReview }) {
     defaultAllocations(inbound ? 'goal' : preclassifiedMortgage ? 'mortgage' : 'expense')
   )
   const [registeredAccountId, setRegisteredAccountId] = useState<number>(0)
+  const [categoryId, setCategoryId] = useState<number>(0)
+  const [note, setNote] = useState('')
 
   const allocatable = inbound ? treatment === 'goal' : treatment === 'expense' || treatment === 'neutral'
+  // "Real expense" = not an investment move at all (an e-transfer to a person, a
+  // cash withdrawal). Keeps the merchant; only asks which category it belongs to.
+  const categorizable = !inbound && treatment === 'real-expense'
   // Outbound money going to investments can be tagged to a TFSA/RESP so its room
   // recalculates. Offered for the two "money still went to investments" options.
   const taggable = !inbound && (treatment === 'expense' || treatment === 'neutral') && review.registeredAccounts.length > 0
@@ -95,6 +110,8 @@ function ReviewRow({ review }: { review: PendingReview }) {
         treatment,
         allocations: allocatable ? allocations.filter((a) => a.amount > 0 && a.goalId !== 0) : [],
         registeredAccountId: taggable && registeredAccountId !== 0 ? registeredAccountId : null,
+        categoryId: categorizable && categoryId !== 0 ? categoryId : null,
+        note: categorizable ? note : null,
       })
       router.refresh()
     })
@@ -190,6 +207,32 @@ function ReviewRow({ review }: { review: PendingReview }) {
           </div>
         ))}
 
+      {/* Category (real expense) — the row keeps its merchant and expense flow */}
+      {categorizable && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg bg-[var(--surface)] px-2.5 py-2">
+          <span className="text-xs text-[var(--muted)]">Category</span>
+          <select
+            value={categoryId}
+            onChange={(e) => setCategoryId(Number(e.target.value))}
+            className={`${SELECT_CLASS} min-w-0 flex-1`}
+          >
+            <option value={0}>— pick a category —</option>
+            {review.categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <input
+            type="text"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="What was it for? (optional)"
+            className="min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+          />
+        </div>
+      )}
+
       {/* Registered account (TFSA/RESP) — recalculates contribution room/grant */}
       {taggable && (
         <div className="mb-3 flex items-center gap-2 rounded-lg bg-[var(--surface)] px-2.5 py-2">
@@ -212,7 +255,7 @@ function ReviewRow({ review }: { review: PendingReview }) {
       <div className="flex justify-end">
         <button
           type="button"
-          disabled={pending || (allocatable && remainder < -0.005)}
+          disabled={pending || (allocatable && remainder < -0.005) || (categorizable && categoryId === 0)}
           onClick={confirm}
           className="rounded-lg bg-[var(--accent)] px-3.5 py-1.5 text-sm font-medium text-[var(--accent-fg)] disabled:opacity-40"
         >

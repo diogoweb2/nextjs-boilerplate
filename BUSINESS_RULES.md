@@ -775,7 +775,10 @@ amount rule remembers a category and a note, not which goal the money went to, s
   **Bank Withdrawal**, **Cheque Withdrawal**) — also gets a `pending` review. This is the **debit leg of
   an internal Tangerine↔Scotia transfer**, which the classifier otherwise leaves as a spurious
   `Other`/wants expense (polluting spend analytics *and* the runway burn). Recognized expenses (Koodo,
-  Highway 407, …) never use these labels, so they aren't queued.
+  Highway 407, …) never use these labels, so they aren't queued. When the outflow was in fact ordinary
+  spending (an e-transfer to a person, cash for a kid's activity), **Real expense** below files it under
+  the right category instead — "Count as expense" is for investment moves and would wrongly rewrite the
+  row to the `Investment` category on the `Investment (iTrade)` payee.
 - **Inbound** (`createInboundReviews`, `direction='in'`): every newly-inserted **unknown deposit** (the
   `Other Deposit` fallback merchant — recognized income like salary/benefits/insurance is already
   classified and never lands here) gets a `pending` review. These are the ambiguous credits — e.g. money
@@ -788,7 +791,10 @@ Both are idempotent (`transactionId` is unique).
 Pending reviews render a prominent `--warning` card at the **top** of the dashboard until resolved.
 Treatments depend on `direction` (`resolveTransferReview`):
 - **Outbound** (money to investments): **Count as expense** (default — keep `flow=expense`, category
-  `Investment`) · **Internal transfer** (moved between the owner's own accounts → `flow=transfer`,
+  `Investment`) · **Real expense** (it wasn't an investment move at all — an e-transfer to a person, a
+  cash withdrawal: keeps the merchant and `flow=expense`, and files the row under the **category the
+  owner picks** from the expense list, with an optional free-text **note** ("pizza at a friend's house")
+  saved to `transactions.note`; no goal allocation, Confirm stays disabled until a category is chosen) · **Internal transfer** (moved between the owner's own accounts → `flow=transfer`,
   category `Transfer`) · **Don't count** (better-interest move → `flow=transfer`, category `Transfer`;
   leaves analytics) · **Extra mortgage** (not a goal → recategorize to Home / `Mortgage`) · **Leave
   as-is** (dismiss). The two counting options allocate the amount across one or more savings goals,
