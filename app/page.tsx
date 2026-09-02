@@ -320,13 +320,24 @@ export default async function Home({
   // Dashboard always shows a single month; default to the current (anchor) month.
   const exactMonth = month ?? anchor
 
+  // Server-only key: the banner just needs to know whether to offer the button.
+  const aiSuggestAvailable = !!process.env.OPENROUTER_API_KEY?.trim()
+
   const otherTxns = all.filter(
     (t) =>
       (t.categoryName === 'Other' || t.categoryName === 'Uncategorized') &&
       !t.categorizeDismissed &&
       exactMonth &&
       t.txnDate.slice(0, 7) === exactMonth
-  ).map((t) => ({ id: t.id, merchantName: t.merchantName, amount: t.amount, txnDate: t.txnDate, category: t.categoryName }))
+  ).map((t) => ({
+    id: t.id,
+    merchantId: t.merchantId,
+    merchantName: t.merchantName,
+    amount: t.amount,
+    txnDate: t.txnDate,
+    category: t.categoryName,
+    categoryId: t.categoryName === 'Uncategorized' ? null : t.categoryId,
+  }))
   const ov = buildOverview(all, 1, excludeSpecial, exactMonth, categoryCredits(allFlows))
 
   const insights = buildInsights(all, 1, excludeSpecial, exactMonth, await loadAlertDismissals())
@@ -572,7 +583,14 @@ export default async function Home({
 
       {otherTxns.length > 0 && (
         <div className="mb-5">
-          <OtherCategoryBanner transactions={otherTxns} month={exactMonth} />
+          <OtherCategoryBanner
+            transactions={otherTxns}
+            month={exactMonth}
+            categories={[...catRows]
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((c) => ({ id: c.id, name: c.name, color: c.color }))}
+            aiAvailable={aiSuggestAvailable}
+          />
         </div>
       )}
 

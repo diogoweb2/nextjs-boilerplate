@@ -162,6 +162,14 @@ function colIndex(header: string[], name: string): number {
   return header.findIndex((c) => c.trim().toLowerCase() === name.toLowerCase())
 }
 
+/**
+ * Rogers/Mastercard cashback redemption rows ("CashBack / Remises"): a statement
+ * credit that reduces what's owed. Not a card payment, and not a purchase refund.
+ */
+function isCashbackDescription(raw: string): boolean {
+  return /cash\s?back|remises/i.test(raw)
+}
+
 function parseMaster(rows: string[][]): ParsedRow[] {
   const header = rows[0]
   const idx = {
@@ -196,7 +204,13 @@ function parseMaster(rows: string[][]): ParsedRow[] {
       // reduce what's owed, not payments.
       isPayment:
         isPaymentDescription(merchant) ||
-        (amount < 0 && !(r[idx.category] ?? '').trim() && !/cash\s?back|remises/i.test(merchant)),
+        (amount < 0 && !(r[idx.category] ?? '').trim() && !isCashbackDescription(merchant)),
+      // Cashback is money EARNED, not a refund of a purchase: book it as income
+      // so it lands in the net once, under its own income category, instead of
+      // hiding as a negative expense. (Amount is already negative = money in.)
+      ...(isCashbackDescription(merchant) && amount < 0
+        ? { flow: 'income' as const, suggestedCategory: 'Other Income' }
+        : {}),
     })
   }
   return out

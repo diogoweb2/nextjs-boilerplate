@@ -175,14 +175,19 @@ function netSpendOver(all: EnrichedTxn[], months: Set<string>, catName: string):
   }
   return total
 }
-/** Sum positive expense spend over given months for an optional category. */
+/**
+ * Sum expense spend over given months for an optional category, NET OF REFUNDS:
+ * a returned purchase carries a negative amount, so summing signed amounts
+ * cancels it against the original charge. Dropping negatives here (as this used
+ * to) left every refund invisible to the net — money back that the trajectory
+ * never credited. Card payments are already excluded upstream (`isPayment`).
+ */
 function spendOver(all: EnrichedTxn[], months: Set<string>, catName?: string): number {
   return sum(
     all
       .filter(
         (t) =>
           t.flow === 'expense' &&
-          t.amount > 0 &&
           months.has(monthKey(t.txnDate)) &&
           (catName === undefined || t.categoryName === catName)
       )
@@ -342,14 +347,15 @@ export function computeNetTrajectory(all: EnrichedTxn[], targetNet: number): Net
   if (!anchor) return empty
   const year = anchor.slice(0, 4)
 
-  // Per-day net delta (income stored negative → −amount is the inflow; positive
-  // expenses subtract). Mirrors incomeOver/spendOver so the total ties to ytdNet.
+  // Per-day net delta (income stored negative → −amount is the inflow; expenses
+  // subtract, and a refund's negative amount therefore adds back). Mirrors
+  // incomeOver/spendOver so the total ties to ytdNet.
   const dayDelta = new Map<string, number>()
   for (const t of all) {
     if (t.txnDate.slice(0, 4) !== year) continue
     let delta = 0
     if (t.flow === 'income') delta = -t.amount
-    else if (t.flow === 'expense' && t.amount > 0) delta = -t.amount
+    else if (t.flow === 'expense') delta = -t.amount
     else continue
     dayDelta.set(t.txnDate, (dayDelta.get(t.txnDate) ?? 0) + delta)
   }

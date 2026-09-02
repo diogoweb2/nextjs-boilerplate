@@ -292,14 +292,14 @@ export async function buildYearReport(targetYear?: string | null): Promise<YearR
   const yearMonths = months.filter((m) => m.slice(0, 4) === year).sort()
   const lastDataMonth = yearMonths[yearMonths.length - 1]
 
-  // Income / spend totals (netOverRange semantics: income negated, positive
-  // expenses incl. mortgage; refunds/payments/transfers excluded).
+  // Income / spend totals (netOverRange semantics: income negated, expenses net
+  // of refunds, incl. mortgage; payments/transfers excluded).
   let totalIncome = 0
   let totalSpend = 0
   for (const t of flows) {
     if (t.txnDate.slice(0, 4) !== year) continue
     if (t.flow === 'income') totalIncome += -t.amount
-    else if (t.flow === 'expense' && t.amount > 0) totalSpend += t.amount
+    else if (t.flow === 'expense') totalSpend += t.amount
   }
   totalIncome = round2(totalIncome)
   totalSpend = round2(totalSpend)
@@ -314,7 +314,7 @@ export async function buildYearReport(targetYear?: string | null): Promise<YearR
     for (const t of flows) {
       if (t.txnDate.slice(0, 4) !== prevYear) continue
       if (t.flow === 'income') pi += -t.amount
-      else if (t.flow === 'expense' && t.amount > 0) ps += t.amount
+      else if (t.flow === 'expense') ps += t.amount
     }
     prevIncome = round2(pi)
     prevSpend = round2(ps)

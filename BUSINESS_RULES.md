@@ -110,7 +110,13 @@ expense. Cutoffs (`CARD_TRACKED_SINCE`): **Amex `2024-12-01`**, **Rogers Masterc
   negative row with no category) are flagged `is_payment = true` and **excluded from all
   spend analytics**. They remain visible on the Activity page (toggle "Hide payments").
 - **Refunds** (other negative amounts, e.g. an Amazon return) are kept and **net against**
-  spending in totals/categories.
+  spending in totals/categories — **and in `ytdNet` / the net trajectory**. Every net figure
+  sums *signed* `expense` amounts; nothing filters on `amount > 0`. (Until 2026-09 the net
+  definitions dropped negatives, so a refund was money back the trajectory never credited.)
+- **Cashback redemptions** ("CashBack / Remises" on the Master/Rogers export) are **income**,
+  not a refund and not a payment: `parseMaster` books them `flow = 'income'` under **Other
+  Income**. They are money *earned*, so they belong on the income side of the net rather than
+  netted against an unrelated purchase.
 
 ### Dedup (`external_id`, unique)
 - Master: `master:<Reference Number>`.
@@ -238,6 +244,30 @@ idempotent and re-applies automatically each year while the policy stays the sam
   such teaching shortcut; it stays a pure per-transaction flag.
 - Deleting a category sets referencing merchants/transactions to `null` (Uncategorized).
 
+### Dashboard categorize banner (`OtherCategoryBanner`, `app/page.tsx`)
+Transactions of the shown month that are `Other`/`Uncategorized` and not dismissed are listed
+on the dashboard with an **inline category dropdown**, so triage never needs the Activity page.
+Picking a category and pressing **Save** runs the same `setTxnCategory` merchant-teaching path
+as everywhere else (so every past/future charge from that merchant follows, except the
+ambiguous bank labels). The row hides immediately and disappears for good on revalidation.
+**Dismiss** is unchanged: it silences the prompt without categorizing.
+
+#### AI suggestions — the one LLM call in this app (`app/lib/openrouter.ts`, `app/actions/categorize-ai.ts`)
+**Suggest categories** sends only the visible rows (merchant label, amount, date), the app's
+category list, and up to 6 already-taught merchant names per category — this household's own
+habits ground the guess — to a cheap model over OpenRouter (default
+`google/gemini-2.5-flash-lite`, override with `OPENROUTER_MODEL`). It returns
+`{txnId, categoryId, reason}` per row.
+- **Suggestions never write.** They pre-select the dropdown (accent border + ✨ reason) and
+  nothing more; the owner still presses Save per row, or **Save N** for every pre-selected row.
+  Changing a dropdown by hand clears that row's suggestion marker.
+- Any category id the model invents, any unknown/duplicate txn id, is **dropped**, so a
+  hallucination can never appear as a choice — only existing categories are offered.
+- The key is server-only (`OPENROUTER_API_KEY`, gitignored `.env.local`); the button is hidden
+  when it isn't set, and a failed call shows the reason inline and changes nothing.
+- Everything else in the app stays deterministic — no LLM in ingest, categorization rules,
+  analytics or insights.
+
 ### Manual split (`splitTransaction` / `unsplitTransaction`, `app/actions/transactions.ts`)
 One real charge sometimes spans categories — e.g. a Walmart grocery run that also
 includes $50 of kids' clothes. From the Activity row editor (Split), the user peels
@@ -300,6 +330,8 @@ as a per-row badge plus a person filter.
 
 Payments are always excluded. Aggregations are computed in JS over the loaded rows.
 - **Gross spend** = Σ positive amounts. **Refunds** = Σ negative (non-payment). **Net** = gross+refunds.
+  `netOverRange` (the shared `ytdNet` definition) uses the same **net**, so Overview and the
+  dashboard trajectory can no longer disagree by the size of a refund.
 - **Count / Avg** are over purchases (amount > 0).
 - **Category credits** (`categoryCredits`): income filed under an **expense-kind** category — a
   reimbursement (e.g. dental insurance under Dental) or a **goal-spend "applied to" a category**
@@ -386,7 +418,8 @@ goal override, unique on `category_id`).
 - **Averages use complete months only** (the partial anchor month is excluded), so a half-finished
   month never drags an average down. `currentMonthActual` is the anchor month's spend so far.
 - **completedBaseline** = net (income − spend) over the year's **completed** months (before anchor).
-  Spend = Σ positive `expense` amounts (matches the Income page; refunds/payments already excluded).
+  Spend = Σ signed `expense` amounts, i.e. **net of refunds** (matches the Income page; payments
+  and transfers are already excluded upstream).
 - **ytdNet** = net over **all** year months incl. the partial anchor month — the familiar headline
   that matches the Income page (e.g. −$8,979.39 for Jan–Jun 2026).
 - **Monthly cap `B`** = `I + (completedBaseline − targetNet) / R`. Using the *completed* baseline
@@ -862,7 +895,7 @@ A persistent, **multi-year** tracker for "get the year's net back to zero", dist
 `/budget` planner (which is forward-looking and resets each year with no memory of shortfalls).
 Its **value = cumulative net (income − spend) from its start year through the anchor month**, using
 the same definition as the Income/Budget `ytdNet` (`netOverRange` in `app/actions/goals.ts`:
-income-flow summed, positive expenses summed, refunds/payments/transfers excluded). Negative = still
+income-flow summed, expenses summed net of refunds, payments/transfers excluded). Negative = still
 in the red. Because it's cumulative, the **Dec 31 → Jan 1 rollover is automatic** — a year-end
 deficit simply carries into next year's running total (the card shows "this year net" + "carried
 over").

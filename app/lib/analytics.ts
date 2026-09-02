@@ -188,8 +188,10 @@ export function anchorMonth(txns: EnrichedTxn[]): string | null {
 /**
  * Net (income − spend) over the inclusive [startYm, endYm] month range, matching
  * the Income / Budget `ytdNet` definition: income flow summed (stored negative,
- * so negated), positive expenses summed (mortgage included), refunds / payments /
- * transfers excluded. Shared by Goals (net-zero) and the monthly report.
+ * so negated), expenses summed NET OF REFUNDS (mortgage included; a return you
+ * were credited for is money back, so it must not be counted as spent). Card
+ * payments and transfers are excluded. Shared by Goals (net-zero) and the
+ * monthly report.
  */
 export function netOverRange(txns: EnrichedTxn[], startYm: string, endYm: string): number {
   let income = 0
@@ -198,7 +200,7 @@ export function netOverRange(txns: EnrichedTxn[], startYm: string, endYm: string
     const ym = t.txnDate.slice(0, 7)
     if (ym < startYm || ym > endYm) continue
     if (t.flow === 'income') income += -t.amount
-    else if (t.flow === 'expense' && t.amount > 0) spend += t.amount
+    else if (t.flow === 'expense') spend += t.amount
   }
   return Math.round((income - spend) * 100) / 100
 }
