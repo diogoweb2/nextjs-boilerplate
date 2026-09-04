@@ -254,7 +254,7 @@ launchctl start com.budget.sync.tangerine   # optional: trigger once now to test
 
 Logs: `~/Library/Application Support/budget-sync/logs/tangerine.log`.
 
-## Digest notification (Wed & Sun, 11:15am, Web Push)
+## Digest notification (Mon & Thu, 11:15am, Web Push)
 
 After the day's syncs, a separate launchd job triggers a **Web Push** notification with a
 budget summary — delivered to your **phone (Android) and any subscribed browser**, even
@@ -266,7 +266,7 @@ What it shows (all computed in `app/lib/digest.ts`, reusing the dashboard analyt
 - **Sync health** per card — `Amex ✓ · Master ⚠️ 4d`. Reads each source's last import
   freshness, so a stale/failed sync surfaces even if its runner never fired.
 - **New spend** — total + count of charges imported since the last push went out (~3-4 days
-  with the Wed/Sun schedule; see `digestWindowStart`), plus the biggest.
+  with the Mon/Thu schedule; see `digestWindowStart`), plus the biggest.
 - **Month pace** — discretionary month-to-date vs budget, with a straight-line month-end
   projection flagged `⚠️ over` when it exceeds the cap.
 - **New / unusual** — first-seen merchants and a larger-than-usual charge.

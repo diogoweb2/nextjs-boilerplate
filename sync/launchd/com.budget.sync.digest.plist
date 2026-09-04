@@ -10,7 +10,7 @@
     <string>/Users/diogolopes/dev/budget/nextjs-boilerplate/sync/digest.sh</string>
   </array>
 
-  <!-- Fire at 11:15 on Sunday (0) and Wednesday (3) — the two digest push days
+  <!-- Fire at 11:15 on Monday (1) and Thursday (4) — the two digest push days
        (DIGEST_PUSH_WEEKDAYS in app/lib/digest.ts), ~15 min after the Rogers
        (11:00) and Amex (11:01) syncs so the day's imports are in before we
        summarize. The digest reads each source's last-import freshness, so even
@@ -23,12 +23,12 @@
   <key>StartCalendarInterval</key>
   <array>
     <dict>
-      <key>Weekday</key><integer>0</integer>
+      <key>Weekday</key><integer>1</integer>
       <key>Hour</key><integer>11</integer>
       <key>Minute</key><integer>15</integer>
     </dict>
     <dict>
-      <key>Weekday</key><integer>3</integer>
+      <key>Weekday</key><integer>4</integer>
       <key>Hour</key><integer>11</integer>
       <key>Minute</key><integer>15</integer>
     </dict>

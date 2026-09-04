@@ -1765,15 +1765,15 @@ button that calls `retryDailyDigest`, re-running the exact same
 `runDailyDigestJob` path (no ingest token needed — the button is already behind the session cookie).
 The banner clears once a run succeeds (`revalidatePath('/')`).
 
-**Twice-weekly push gate (Wed + Sun):** the daily nudge stopped getting read, so the digest push
-now goes out only on **Sunday and Wednesday** — `DIGEST_PUSH_WEEKDAYS = [0, 3]` / `isDigestPushDay()`
+**Twice-weekly push gate (Mon + Thu):** the daily nudge stopped getting read, so the digest push
+now goes out only on **Monday and Thursday** — `DIGEST_PUSH_WEEKDAYS = [1, 4]` / `isDigestPushDay()`
 in `app/lib/digest.ts`, evaluated on the **UTC** weekday so it matches the `daily_digest_pushes`
 UTC-date dedup key (the job runs ~11:15 Toronto, so UTC and local date agree). Only the *push* is
 gated: the job still runs every day (event-triggered by the syncs) and still appends to `digest_runs`,
 so a failure surfaces on the dashboard bell the day it happens, not up to three days later. A run
 whose *previous* `digest_runs` row is `fail` bypasses the gate — that keeps the **Retry** button (and
 recovery after an outage) working on any day. Month and Year recaps ignore the gate entirely: they're
-one-shot, per-`ym` deduped, and shouldn't wait for a Wednesday.
+one-shot, per-`ym` deduped, and shouldn't wait for a Thursday.
 
 **Widened "$X new" window:** because a push now covers 3–4 days, `recentCharges` no longer looks back
 a fixed 24h. `digestWindowStart()` reads the most recent `daily_digest_pushes.sentAt` — i.e. the last
@@ -1790,7 +1790,7 @@ send a push: the failed run it's reacting to *is* the previous row. (`allSyncsOk
 are **not** bypassed — a missing required sync or missing VAPID keys still skips.)
 
 **Which syncs gate the push:** there are two gates with different strictness.
-`runDailyDigestJob` (the Wed/Sun 11:15 fallback and manual Retry) pushes once the **digest-required** sources —
+`runDailyDigestJob` (the Mon/Thu 11:15 fallback and manual Retry) pushes once the **digest-required** sources —
 **Master** and **Amex** — are 'ok'-today (`DIGEST_REQUIRED_SOURCES` in `app/lib/sync.ts`, the
 `requiredForDigest` subset of `SYNC_SOURCES`); a Scotia/Tangerine runner that dies without ever
 reporting can't silence the day's notification. The *event-triggered* path (`maybeTriggerDigest`) is
@@ -1802,8 +1802,8 @@ different one. Waiting for the last runner makes the pushed numbers match the si
 `requiredForDigest` flag to change which sources can block the push outright.
 
 ### Event-triggered digest — don't wait for 11:15 (`maybeTriggerDigest`)
-The launchd job (11:15, Sun + Wed only) is a fallback now, not the only trigger. It runs on the push
-days; the event trigger below runs every day and is what a Wed/Sun push normally comes from. `maybeTriggerDigest` (`app/lib/digest.ts`)
+The launchd job (11:15, Mon + Thu only) is a fallback now, not the only trigger. It runs on the push
+days; the event trigger below runs every day and is what a Mon/Thu push normally comes from. `maybeTriggerDigest` (`app/lib/digest.ts`)
 is called from `next/server`'s `after()` — so it runs post-response and never adds latency — from the two
 places a source can turn 'ok' in `sync_runs`:
 

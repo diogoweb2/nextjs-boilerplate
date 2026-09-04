@@ -114,8 +114,8 @@ export function PushToggle() {
           <p className="text-sm font-medium">Budget digest notifications</p>
           <p className="text-xs text-[var(--muted)]">
             {on
-              ? 'On for this device — you’ll get the Wed & Sun summary even with the site closed.'
-              : 'Get the Wed & Sun summary pushed to this device (works with the site closed).'}
+              ? 'On for this device — you’ll get the Mon & Thu summary even with the site closed.'
+              : 'Get the Mon & Thu summary pushed to this device (works with the site closed).'}
           </p>
         </div>
         <button

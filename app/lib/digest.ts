@@ -46,13 +46,13 @@ const MAX_WINDOW_MS = 8 * DAY_MS
 
 /**
  * Which days the digest push is allowed to go out, as UTC weekday numbers
- * (0 = Sunday). Twice a week — Wednesday and Sunday — because a daily nudge
+ * (0 = Sunday). Twice a week — Monday and Thursday — because a daily nudge
  * stopped being read. The job itself still runs every day (event-triggered by
  * the syncs, plus the launchd fallback) and still records to `digest_runs`, so
  * failures surface on the dashboard on any day; only the *push* is gated.
  * Month/Year recaps ignore this gate — they're one-shot and rare.
  */
-export const DIGEST_PUSH_WEEKDAYS = [0, 3]
+export const DIGEST_PUSH_WEEKDAYS = [1, 4]
 
 /** True when `now` falls on a digest push day. UTC, to match the dedup key's UTC date. */
 export function isDigestPushDay(now: number = Date.now()): boolean {
@@ -60,8 +60,8 @@ export function isDigestPushDay(now: number = Date.now()): boolean {
 }
 
 /**
- * Start of the "new charges" window: the last digest push, so a Wednesday push
- * reports everything imported since Sunday's instead of only the last 24h.
+ * Start of the "new charges" window: the last digest push, so a Thursday push
+ * reports everything imported since Monday's instead of only the last 24h.
  * Clamped to at least a day (a same-day retry still shows the day's charges)
  * and at most {@link MAX_WINDOW_MS}, so a long silence — push unconfigured, a
  * holiday of failed syncs — degrades to a sane window instead of a mega-digest.
@@ -510,7 +510,7 @@ export async function runDailyDigestJob(
       .limit(1)
     const previousRunFailed = lastRun?.status === 'fail'
 
-    // Twice-weekly gate (Wed/Sun): the daily nudge stopped getting read. The job
+    // Twice-weekly gate (Mon/Thu): the daily nudge stopped getting read. The job
     // still runs and records daily — only the push waits for the next digest day,
     // and the window widening above means that push covers everything since the
     // last one. A failed previous run doesn't override this: the dashboard
