@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.budget.camping</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/diogolopes/dev/budget/nextjs-boilerplate/sync/camping.sh</string>
+  </array>
+
+  <!-- Fires DAILY at 11:40, after the card syncs (11:00/11:01) and the digest
+       (11:15), so the month's new statements are already ingested. The script
+       itself is the monthly gate: it exits straight away once it has succeeded
+       in the current calendar month, and a failed run leaves no stamp, so the
+       next day's fire retries — every day until it works. That is why this is a
+       daily schedule for a monthly job.
+       Mac OFF at 11:40 → skipped, picked up the next day; ASLEEP → runs on wake. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>11</integer>
+    <key>Minute</key><integer>40</integer>
+  </dict>
+
+  <!-- Don't run on load/login, only on the schedule. -->
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/diogolopes/Library/Application Support/budget-sync/logs/camping.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/diogolopes/Library/Application Support/budget-sync/logs/camping.log</string>
+</dict>
+</plist>

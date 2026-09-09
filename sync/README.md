@@ -327,6 +327,45 @@ banner so a broken pipeline still surfaces.
 Adding a new source: add one line to `SYNC_SOURCES` in `app/lib/sync.ts` and the digest (and
 the dashboard badge) pick it up automatically.
 
+## Monthly camping refresh
+
+`sync/camping.ts` keeps the yearly **`Camping <year>`** project up to date — the one that
+answers "what does the camping setup (truck + trailer + storage) cost me a year?". See
+BUSINESS_RULES.md §15 for what counts as a fee / gas / storage row and why.
+
+Each run: read the trips logged in the RV app (Firestore project `rv-groceries`, authed with
+this Mac's own `gcloud` token — no key in the repo), create the project if the year turned
+over, widen its dates to cover the trips, add the season's fees, per-trip gas and trailer
+storage, then let `claude -p` (Opus, high effort, WebSearch on) look over what the rules did
+*not* claim so a campground we've never paid before still lands in the total.
+
+```bash
+npx dotenv -e .env.local -- tsx sync/camping.ts             # dry run (prints what it would add)
+npx dotenv -e .env.local -- tsx sync/camping.ts --no-ai     # rules only, no claude call
+npx dotenv -e .env.local -- tsx sync/camping.ts --apply     # write
+npx dotenv -e .env.local -- tsx sync/camping.ts --year=2027 --apply
+```
+
+Nothing is ever removed or duplicated, and a row you delete in the app is tombstoned — the job
+will not put it back. If a trip isn't in the RV app, its fees are still found but its gas
+isn't (gas is scoped to trip windows); log the trip and re-run.
+
+### Schedule it
+
+```bash
+cp sync/launchd/com.budget.camping.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.budget.camping.plist
+launchctl start com.budget.camping   # optional: trigger once now to test
+```
+
+The agent fires **daily at 11:40**, but `sync/camping.sh` is the monthly gate: it exits
+immediately once it has succeeded in the current calendar month, and a failed run writes no
+stamp — so the next day's fire retries, every day, until it works. State:
+`~/Library/Application Support/budget-sync/status/camping-last-success` (a `YYYY-MM` stamp) and
+`…/status/camping` (`ok` / `fail`). Logs: `~/Library/Application Support/budget-sync/logs/camping.log`.
+Delete the stamp to force a run today. Requires a live `gcloud auth login` for the Firestore
+read; if that lapses the run fails, fires a macOS banner, and retries daily until you re-auth.
+
 ## Failure reporting (dashboard banner)
 
 Every run reports its outcome to the deployed app via `POST /api/sync-status` (token-authed,

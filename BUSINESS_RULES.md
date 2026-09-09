@@ -1388,6 +1388,39 @@ many-to-many join, unique on `(project, transaction)`, cascade on either delete)
   tombstone rather than deleting the row — otherwise the next auto-fill / suggestion pass would put
   it straight back. Adding it again flips the tombstone back to a member.
 
+### Camping projects (`Camping <year>`) — the one automated project
+
+A yearly project answering "what does the camping setup (truck + trailer + storage) cost?".
+Rules live in `sync/lib/camping.ts`; two entry points share them so they can't drift:
+`scripts/camping-projects.ts` (the 2025/2026 backfill, trips reconstructed by hand from
+statements) and `sync/camping.ts` (the monthly refresh). Exactly three things go in:
+
+- **Fees** — campground / Ontario Parks charges, counted in the **season they are for**, not
+  when paid (bookings run months ahead: a December Ontario Parks charge is next summer's).
+  Season window for year `Y` = `[Y-1-11-01, Y-10-31]`. A **$100 floor** drops the small
+  on-site taps (firewood, ice) at a park whose booking is already counted; every Ontario
+  Parks reservation-system row counts, including `$8.50` fees and refunds.
+- **Gas** — fills of **$20+** from the **day before a trip starts through its last day** (the
+  tank out and the tank home), scoped to the `Cars` category so a phone shop can't match.
+- **Storage** — the `$111.87`/month Interac e-transfer for the trailer, on a cash basis.
+
+On-trip food, firewood and fun are deliberately **out** — the project measures the setup, not
+the holiday.
+
+**Monthly job** (`sync/camping.sh` + `sync/launchd/com.budget.camping.plist`): reads the trips
+the owner logged in the RV app (Firestore project `rv-groceries`, authed with the Mac's own
+`gcloud` token — no service-account key in the repo), creates `Camping <year>` if the year
+turned over, widens the project's date window to cover the trips, and adds the season's fees /
+gas / storage. It then asks **`claude -p` (Opus, high effort, WebSearch allowed)** to classify
+the transactions the rules did *not* claim, so a campground never paid before still lands in
+the total. That sweep is **best-effort**: if it fails the deterministic picks are still written.
+Only ids that were actually offered are accepted back, so a hallucinated row can't reach the DB.
+The LaunchAgent fires **daily**; the wrapper is the monthly gate (a stamp file holding the
+`YYYY-MM` of the last success) — so a failed run simply retries the next day until it works.
+Everything is additive: membership inserts use `ON CONFLICT DO NOTHING`, so a row the owner
+removed (a `dismissed` tombstone) never comes back. Trips **not** logged in the RV app still
+get their fees, but not their gas — gas is scoped to trip windows.
+
 ### Dashboard reminder
 
 A dated project surfaces on the **Overview** (`app/page.tsx`, `ProjectReminderBanner`) while its
