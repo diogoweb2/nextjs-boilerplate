@@ -1,6 +1,6 @@
 'use server'
 
-import { and, eq, inArray, isNull, notInArray, or, sql } from 'drizzle-orm'
+import { and, desc, eq, ilike, inArray, isNull, notInArray, or, sql } from 'drizzle-orm'
 import { put, del } from '@vercel/blob'
 import { revalidatePath } from 'next/cache'
 import { db } from '@/db'
@@ -66,6 +66,9 @@ export type ProjectDetail = {
 }
 
 export type ProjectPickerItem = { id: number; name: string; emoji: string }
+
+/** A search hit for the project page's "Add a transaction" box. */
+export type ProjectSearchHit = ProjectTxn & { inProject: boolean }
 
 export type DashboardProject = {
   id: number
@@ -412,6 +415,73 @@ export async function loadProjectCandidates(id: number): Promise<ProjectTxn[]> {
     .orderBy(transactions.txnDate)
 
   return enrich(rows, catMap)
+}
+
+/**
+ * Free-text search over the last two years of transactions, for the project
+ * page's "Add a transaction" box. Two years because a booking is often paid a
+ * whole season ahead — the December Ontario Parks charge belongs to next
+ * summer's camping project — so the project's own date window is useless here.
+ *
+ * Matches merchant name, raw statement line or note; a numeric query ("251.56",
+ * "$112") also matches by absolute amount, same as global search. Card payments
+ * are excluded (never a project expense). Rows already in the project come back
+ * flagged rather than hidden, so the owner can see the ones they already added.
+ */
+const SEARCH_YEARS = 2
+const SEARCH_LIMIT = 25
+
+export async function searchProjectTransactions(
+  projectId: number,
+  query: string
+): Promise<ProjectSearchHit[]> {
+  if (await isDemoSession()) return []
+  const q = query.trim().slice(0, 80)
+  if (q.length < 2) return []
+
+  const from = new Date()
+  from.setFullYear(from.getFullYear() - SEARCH_YEARS)
+  const fromIso = from.toISOString().slice(0, 10)
+
+  const pattern = `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`
+  const asAmount = Number(q.replace(/[$,\s]/g, ''))
+  const amount = Number.isFinite(asAmount) && asAmount !== 0 ? Math.abs(asAmount) : null
+
+  const [catMap, rows, members] = await Promise.all([
+    categoryMap(),
+    db
+      .select(MEMBER_COLUMNS)
+      .from(transactions)
+      .innerJoin(merchants, eq(merchants.id, transactions.merchantId))
+      .where(
+        and(
+          sql`${transactions.txnDate} >= ${fromIso}`,
+          eq(transactions.isPayment, false),
+          or(
+            ilike(merchants.name, pattern),
+            ilike(transactions.rawDescription, pattern),
+            ilike(transactions.note, pattern),
+            ...(amount != null
+              ? [sql`abs(${transactions.amount}) = ${amount.toFixed(2)}::numeric`]
+              : [])
+          )
+        )
+      )
+      .orderBy(desc(transactions.txnDate))
+      .limit(SEARCH_LIMIT),
+    db
+      .select({ id: projectTransactions.transactionId })
+      .from(projectTransactions)
+      .where(
+        and(
+          eq(projectTransactions.projectId, projectId),
+          eq(projectTransactions.dismissed, false)
+        )
+      ),
+  ])
+
+  const memberIds = new Set(members.map((m) => m.id))
+  return enrich(rows, catMap).map((t) => ({ ...t, inProject: memberIds.has(t.id) }))
 }
 
 export async function loadProjectsForPicker(): Promise<ProjectPickerItem[]> {

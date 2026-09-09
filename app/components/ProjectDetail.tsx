@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState, useTransition } from 'react'
+import { useEffect, useRef, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -11,9 +11,11 @@ import {
   dismissCandidates,
   approveAutoFillReview,
   runProjectAutoFill,
+  searchProjectTransactions,
   setProjectCover,
   removeProjectCover,
   type ProjectDetail,
+  type ProjectSearchHit,
   type ProjectTxn,
 } from '@/app/actions/projects'
 import { type AutoFill } from '@/db/schema'
@@ -308,6 +310,13 @@ export function ProjectDetailView({
         </Card>
       )}
 
+      {/* Find any transaction from the last 2 years and add it (bookings are often
+          paid a season ahead, so the project's own date window won't find them). */}
+      <AddTransactionSearch
+        projectId={detail.id}
+        onAdd={(id) => run(() => addTransactionsToProject(detail.id, [id]))}
+      />
+
       {/* Members */}
       <Card title={`Transactions (${detail.members.length})`}>
         {detail.members.length === 0 ? (
@@ -332,6 +341,97 @@ export function ProjectDetailView({
         )}
       </Card>
     </div>
+  )
+}
+
+/**
+ * "Add a transaction" — live search over the last two years, so a campground
+ * booked in December can be dropped into next summer's project. Debounced;
+ * a stale response from an earlier keystroke is discarded (seq guard).
+ */
+function AddTransactionSearch({
+  projectId,
+  onAdd,
+}: {
+  projectId: number
+  onAdd: (txnId: number) => void
+}) {
+  const [query, setQuery] = useState('')
+  const [hits, setHits] = useState<ProjectSearchHit[]>([])
+  const [searching, setSearching] = useState(false)
+  const [added, setAdded] = useState<number[]>([])
+  const seq = useRef(0)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Cancel a pending search if the page navigates away mid-keystroke.
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
+
+  const onQuery = (value: string) => {
+    setQuery(value)
+    if (timer.current) clearTimeout(timer.current)
+    const q = value.trim()
+    if (q.length < 2) {
+      setHits([])
+      setSearching(false)
+      return
+    }
+    setSearching(true)
+    const mine = ++seq.current
+    timer.current = setTimeout(async () => {
+      const rows = await searchProjectTransactions(projectId, q)
+      if (seq.current !== mine) return // a newer keystroke owns the results now
+      setHits(rows)
+      setSearching(false)
+    }, 250)
+  }
+
+  const add = (id: number) => {
+    setAdded((prev) => (prev.includes(id) ? prev : [...prev, id]))
+    onAdd(id)
+  }
+
+  const typed = query.trim().length >= 2
+
+  return (
+    <Card title="Add a transaction">
+      <input
+        value={query}
+        onChange={(e) => onQuery(e.target.value)}
+        placeholder="Search merchant, description or amount…"
+        className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
+      />
+      <p className="mt-2 text-xs text-[var(--muted)]">
+        Searches every transaction from the last 2 years — bookings paid a season
+        ahead show up here even though they sit outside the project&apos;s dates.
+      </p>
+      {typed && (
+        <div className="mt-3">
+          {searching && hits.length === 0 ? (
+            <p className="py-4 text-center text-sm text-[var(--muted)]">Searching…</p>
+          ) : hits.length === 0 ? (
+            <p className="py-4 text-center text-sm text-[var(--muted)]">
+              Nothing matches “{query.trim()}” in the last 2 years.
+            </p>
+          ) : (
+            <div className="card divide-y divide-[var(--border)] overflow-hidden">
+              {hits.map((t) => {
+                const inProject = t.inProject || added.includes(t.id)
+                return (
+                  <MemberRow
+                    key={t.id}
+                    t={t}
+                    actionLabel={inProject ? '✓ Added' : '+ Add'}
+                    onAction={() => {
+                      if (!inProject) add(t.id)
+                    }}
+                  />
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
   )
 }
 

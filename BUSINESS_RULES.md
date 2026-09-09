@@ -1366,6 +1366,14 @@ many-to-many join, unique on `(project, transaction)`, cascade on either delete)
   a sticky bar → pick an existing project (or type a new name) → `addTransactionsToProject`. Rows
   already in a project show a small project badge. (`loadProjectsForPicker` +
   `loadProjectMemberships` feed this.)
+- **"Add a transaction" search** (`searchProjectTransactions`, the box above the member
+  list on the detail page) — live, debounced free-text search over **the last 2 years** of
+  transactions, matching merchant name / raw statement line / note, or **absolute amount**
+  for a numeric query ("251.56", "$112"). Two years rather than the project's own date
+  window because bookings are routinely paid a season ahead (a December Ontario Parks
+  charge belongs to the *next* summer's camping project). Card payments are excluded; rows
+  already in the project come back flagged "✓ Added" instead of being hidden. Adding from
+  here is the same `addTransactionsToProject`, so it also un-dismisses a tombstoned row.
 - **"Suggested — review"** (`loadProjectCandidates`): transactions inside the project's
   `[start,end]` window whose `country` is **unknown** (Amex/bank rows carry no country code, so we
   can't prove they were foreign), excluding payments and any txn that already has a membership row
