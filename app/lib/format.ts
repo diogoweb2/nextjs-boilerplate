@@ -70,6 +70,24 @@ export function formatLongDate(iso: string): string {
   return `${MONTHS[m - 1]} ${d}, ${y}`
 }
 
+/**
+ * "2026-06-09" -> "today" / "yesterday" / "8 days ago" / "3 months ago".
+ * Compares calendar days (both sides pinned to UTC midnight) so a time zone
+ * offset can't turn this morning into "yesterday". `now` is injectable for tests.
+ */
+export function formatAgo(iso: string, now: Date = new Date()): string {
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number)
+  if (!y || !m || !d) return iso
+  const then = Date.UTC(y, m - 1, d)
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
+  const days = Math.round((today - then) / 86_400_000)
+  if (days <= 0) return 'today'
+  if (days === 1) return 'yesterday'
+  if (days < 60) return `${days} days ago`
+  const months = Math.round(days / 30)
+  return `${months} months ago`
+}
+
 /** "2026-06" -> "Jun 2026". */
 export function formatMonth(ym: string): string {
   const [y, m] = ym.split('-').map(Number)

@@ -132,6 +132,20 @@ function mortgagePayments(flows: Awaited<ReturnType<typeof loadAllFlows>>): Paym
     .sort((a, b) => (a.ym < b.ym ? -1 : 1))
 }
 
+/**
+ * Individual voluntary prepayments (date + amount), ascending. `mortgagePayments`
+ * collapses these into monthly totals; the card also wants the exact date of the
+ * last one ("did I already prepay this month?"), which a monthly total loses.
+ */
+function mortgageExtras(
+  flows: Awaited<ReturnType<typeof loadAllFlows>>,
+): { date: string; amount: number }[] {
+  return flows
+    .filter((t) => t.merchantName === 'Mortgage' && t.flow === 'expense' && isExtraMortgagePayment(t))
+    .map((t) => ({ date: t.txnDate.slice(0, 10), amount: t.amount }))
+    .sort((a, b) => (a.date < b.date ? -1 : 1))
+}
+
 /** Auto-create the mortgage goal on first access, seeded from env (privacy). */
 async function ensureMortgageGoal(): Promise<void> {
   const [existing] = await db.select().from(goals).where(eq(goals.kind, 'mortgage')).limit(1)
@@ -215,6 +229,7 @@ export async function loadMortgageProjection(): Promise<MortgageProjection | nul
     annualRate: goal.annualRate === null ? DEFAULT_RATE : Number(goal.annualRate),
     snapshots: snaps,
     payments: mortgagePayments(flows),
+    extras: mortgageExtras(flows),
     asOfYm,
   })
 }
@@ -247,6 +262,7 @@ export async function suggestedMortgageExtra(excludeTxnIds: number[] = []): Prom
     annualRate: goal.annualRate === null ? DEFAULT_RATE : Number(goal.annualRate),
     snapshots: snaps,
     payments: mortgagePayments(flows),
+    extras: mortgageExtras(flows),
     asOfYm,
   }).recommendedExtra
 }
@@ -287,6 +303,7 @@ export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: stri
   // net-zero card lags a month behind the dashboard until the first expense posts.
   const asOfYm = anchorMonth(flows) ?? todayIso().slice(0, 7)
   const payments = mortgagePayments(flows)
+  const extras = mortgageExtras(flows)
 
   const views: GoalView[] = goalRows.map((g) => {
     const list = entriesByGoal.get(g.id) ?? []
@@ -302,6 +319,7 @@ export async function loadGoalsData(): Promise<{ goals: GoalView[]; asOfYm: stri
               annualRate: g.annualRate === null ? DEFAULT_RATE : Number(g.annualRate),
               snapshots: snaps,
               payments,
+              extras,
               asOfYm,
             })
           : null

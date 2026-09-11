@@ -886,7 +886,12 @@ is just the prepayment required *on top of the regular payment* (`requiredMonthl
 not the total — so the owner sees exactly what to set their extra payment to. The card also shows
 **"Extra this month"** — `projectMortgage.extraThisMonth`, the *actual* extra paid in the anchor
 month (not the completed-months average), so a fresh prepayment is visible before the month
-completes. Because extra principal is money the owner deliberately moves toward this goal, it also
+completes. Below the stats it shows the **last prepayment** — `projectMortgage.lastExtra`, the date
+and amount of the most recent extra top-up (amounts on the same day summed), tinted green with
+"Prepaid this month" once one lands in the anchor month and amber ("Nothing extra yet this month")
+until then — so the owner can tell at a glance whether they already paid, without opening
+transactions. `lastExtra` comes from `mortgageExtras` (individual txn dates), the day-level sibling
+of the month-level `mortgagePayments`. Because extra principal is money the owner deliberately moves toward this goal, it also
 counts as a **contribution to Mortgage Freedom in the Goals hero** ("invested this/last month" and
 the per-goal breakdown, `loadGoalsData`): the hero reads the same `mortgagePayments` split, keyed by
 txn month. It only drives that motivational display — the projected balance already reflects the

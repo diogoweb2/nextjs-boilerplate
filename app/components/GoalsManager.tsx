@@ -5,8 +5,8 @@ import { useRouter } from 'next/navigation'
 import { Card, EmptyHint } from '@/app/components/AppShell'
 import { GoalsMonthHero } from '@/app/components/GoalsMonthHero'
 import { LineChart } from '@/app/components/charts/LineChart'
-import { formatCurrency, formatCurrencyCompact, formatMonth } from '@/app/lib/format'
-import { parseScotiaMortgageBalance } from '@/app/lib/mortgage'
+import { formatAgo, formatCurrency, formatCurrencyCompact, formatLongDate, formatMonth } from '@/app/lib/format'
+import { parseScotiaMortgageBalance, type MortgageProjection } from '@/app/lib/mortgage'
 import {
   createGoal,
   createNetZeroGoal,
@@ -383,7 +383,7 @@ function GoalCard({
         </button>
       </div>
 
-      {isMortgage ? <MortgageBody goal={goal} /> : isNetZero ? <NetZeroBody goal={goal} /> : <SavingsBody goal={goal} />}
+      {isMortgage ? <MortgageBody goal={goal} asOfYm={asOfYm} /> : isNetZero ? <NetZeroBody goal={goal} /> : <SavingsBody goal={goal} />}
 
       {/* Action buttons */}
       <div className="flex flex-wrap items-center gap-2">
@@ -617,7 +617,7 @@ function SavingsBody({ goal }: { goal: GoalView }) {
   )
 }
 
-function MortgageBody({ goal }: { goal: GoalView }) {
+function MortgageBody({ goal, asOfYm }: { goal: GoalView; asOfYm: string }) {
   const m = goal.mortgage
   if (!m) {
     return <p className="text-sm text-[var(--muted)]">{goal.milestone}</p>
@@ -656,7 +656,36 @@ function MortgageBody({ goal }: { goal: GoalView }) {
         {m.extraThisMonth > 0 && <Stat label="Extra this month">{formatCurrency(m.extraThisMonth)}</Stat>}
         <Stat label="Projected payoff">{m.projectedPayoffYm ? formatMonth(m.projectedPayoffYm) : '—'}</Stat>
       </dl>
+      <LastPrepayment last={m.lastExtra} asOfYm={asOfYm} />
     </div>
+  )
+}
+
+/**
+ * "Did I already prepay this month?" — the one thing that is easy to forget and
+ * impossible to read off the averaged stats. Shows the date + amount of the most
+ * recent voluntary top-up, tinted green once one has landed in the current
+ * (anchor) month and amber while none has.
+ */
+function LastPrepayment({ last, asOfYm }: { last: MortgageProjection['lastExtra']; asOfYm: string }) {
+  if (!last) {
+    return (
+      <p className="rounded-lg bg-[var(--muted)]/10 px-2.5 py-1.5 text-xs text-[var(--muted)]">
+        No extra prepayment recorded yet.
+      </p>
+    )
+  }
+  const thisMonth = last.date.slice(0, 7) === asOfYm
+  return (
+    <p
+      className={`rounded-lg px-2.5 py-1.5 text-xs ${
+        thisMonth ? 'bg-[var(--positive)]/10 text-[var(--positive)]' : 'bg-[var(--warning)]/10 text-[var(--warning)]'
+      }`}
+    >
+      {thisMonth ? '✓ Prepaid this month' : '⏳ Nothing extra yet this month'} — last prepayment{' '}
+      <strong className="tabular-nums">{formatCurrency(last.amount)}</strong> on {formatLongDate(last.date)}{' '}
+      <span suppressHydrationWarning>({formatAgo(last.date)})</span>
+    </p>
   )
 }
 

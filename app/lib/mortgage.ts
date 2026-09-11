@@ -187,6 +187,10 @@ export type MortgageProjection = {
   /** The extra prepayment made in the in-progress anchor month (actual, not
    *  averaged) — so a fresh prepayment is visible before the month completes. */
   extraThisMonth: number
+  /** The most recent voluntary prepayment: its date and the amount paid that day
+   *  (summed if several landed together). Null until one is imported. Answers
+   *  "did I already top up this month?" without digging through transactions. */
+  lastExtra: { date: string; amount: number } | null
   /** Total recent outflow = regularPayment + extraPayment. */
   recentPayment: number
   /** Total monthly outflow needed to hit $0 by the deadline. */
@@ -207,6 +211,9 @@ export type MortgageInput = {
   annualRate: number
   snapshots: Snapshot[] // ascending by ym, ≥ 1
   payments: Payment[]
+  /** Individual voluntary prepayments (ISO date + amount). Only used to report
+   *  the most recent one — the projection itself runs off the monthly `payments`. */
+  extras?: { date: string; amount: number }[]
   asOfYm: string
 }
 
@@ -217,7 +224,7 @@ export type MortgageInput = {
  * line from today's balance to $0 at the deadline.
  */
 export function projectMortgage(input: MortgageInput): MortgageProjection {
-  const { birthDate, payoffAge, annualRate, snapshots, payments, asOfYm } = input
+  const { birthDate, payoffAge, annualRate, snapshots, payments, extras = [], asOfYm } = input
   const r = annualRate / 12
   const payByYm = new Map(payments.map((p) => [p.ym, p.regular + p.extra]))
   const targetYm = payoffMonth(birthDate, payoffAge)
@@ -244,6 +251,15 @@ export function projectMortgage(input: MortgageInput): MortgageProjection {
   const extraPayment = avg((p) => p.extra)
   const recentPayment = regularPayment + extraPayment
   const extraThisMonth = payments.find((p) => p.ym === asOfYm)?.extra ?? 0
+  // Latest prepayment date, with everything paid that day summed — two top-ups
+  // on the same day are one "last time I prepaid".
+  const lastExtraDate = extras.reduce<string | null>((best, e) => (best === null || e.date > best ? e.date : best), null)
+  const lastExtra = lastExtraDate
+    ? {
+        date: lastExtraDate,
+        amount: extras.filter((e) => e.date === lastExtraDate).reduce((s, e) => s + e.amount, 0),
+      }
+    : null
   const monthsToTarget = Math.max(0, monthsBetween(asOfYm, targetYm))
   const need = requiredMonthly(currentBalance, annualRate, monthsToTarget)
   // The extra payment that, on top of the regular payment, clears it on time;
@@ -311,6 +327,7 @@ export function projectMortgage(input: MortgageInput): MortgageProjection {
     regularPayment,
     extraPayment,
     extraThisMonth,
+    lastExtra,
     recentPayment,
     requiredMonthly: need,
     recommendedExtra,
