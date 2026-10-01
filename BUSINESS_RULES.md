@@ -215,6 +215,11 @@ A remembered merchant+amount is treated as **already decided**: matched transact
 **excluded from all transfer-review queues** (§10 import hook), and clicking Remember also
 **dismisses any pending reviews** on existing transactions with the same merchant+amount.
 
+**Catch-all labels never auto-categorize.** `E-Transfer Out`, `Bank Withdrawal`, `Cheque Withdrawal`
+(`app/lib/ambiguous-merchants.ts`) are pinned to the `Other` merchant category (on every import and
+on any merchant-category edit). Only a manual per-transaction edit or a remembered amount rule
+(e.g. the $111.87 trailer parking) gives one a different category.
+
 ### Seeds (`app/lib/seed-data.ts`, applied by `db/seed.ts`)
 - `CATEGORY_SEED`: starter categories with colors.
 - `BRAND_SEED`: well-known merchants + `contains` patterns (Amazon, Costco/Costco Gas,

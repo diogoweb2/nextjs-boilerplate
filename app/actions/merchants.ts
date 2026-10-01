@@ -6,6 +6,7 @@ import { db } from '@/db'
 import { merchants, merchantRules, transactions } from '@/db/schema'
 import { requireAuth } from '@/app/lib/auth-guard'
 import { normalizeKey } from '@/app/lib/normalize'
+import { pinAmbiguousMerchantsToOther } from '@/app/lib/ambiguous-merchants'
 
 function revalidateAll() {
   revalidatePath('/')
@@ -28,6 +29,7 @@ export async function setMerchantCategory(
 ): Promise<void> {
   await requireAuth()
   await db.update(merchants).set({ categoryId }).where(eq(merchants.id, id))
+  await pinAmbiguousMerchantsToOther()
   revalidateAll()
 }
 

@@ -6,6 +6,7 @@ import { and, eq, ilike, inArray } from 'drizzle-orm'
 import { db } from '@/db'
 import { transactions, merchants, categories, merchantAmountRules, transferReviews } from '@/db/schema'
 import { requireAuth } from '@/app/lib/auth-guard'
+import { AMBIGUOUS_MERCHANTS } from '@/app/lib/ambiguous-merchants'
 
 function revalidateAll() {
   revalidatePath('/')
@@ -20,7 +21,6 @@ function revalidateAll() {
 
 // Catch-all bank labels that are never the same purchase twice — teaching them
 // at the merchant level would wrongly recategorize every unrelated transfer.
-const AMBIGUOUS_MERCHANTS = ['E-Transfer Out', 'Bank Withdrawal', 'Cheque Withdrawal']
 
 /**
  * Set a category by teaching it at the merchant level, then clearing all

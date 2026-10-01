@@ -21,6 +21,7 @@ import { normalizeKey, prettify, masterCategoryFor } from '@/app/lib/normalize'
 import { reconcileNetZeroGoals, suggestedMortgageExtra } from '@/app/actions/goals'
 import { runAutoFillForAllProjects } from '@/app/actions/projects'
 import { maybeTriggerDigest } from '@/app/lib/digest'
+import { AMBIGUOUS_MERCHANTS, pinAmbiguousMerchantsToOther } from '@/app/lib/ambiguous-merchants'
 import { applyPlannedSplits } from '@/app/lib/planned-splits'
 import { isExtraMortgagePayment } from '@/app/lib/mortgage'
 
@@ -256,6 +257,7 @@ export async function ingestStatement(
   // Apply merchant+amount rules first: auto-fill category and note on matching new
   // txns. A remembered merchant+amount is already explained, so matched txns are
   // excluded from the withdrawal/deposit prompts below.
+  await pinAmbiguousMerchantsToOther()
   const remembered = await applyAmountRules(inserted.map((r) => r.id))
   const unexplained = inserted.map((r) => r.id).filter((id) => !remembered.has(id))
 
@@ -501,7 +503,7 @@ async function createTransferReviews(insertedIds: number[]): Promise<void> {
  * (or any move we couldn't name). A recognized expense (Koodo, Highway 407, …)
  * never uses these, so it won't be queued.
  */
-const AMBIGUOUS_OUTBOUND_MERCHANTS = ['E-Transfer Out', 'Bank Withdrawal', 'Cheque Withdrawal']
+const AMBIGUOUS_OUTBOUND_MERCHANTS = AMBIGUOUS_MERCHANTS
 
 /**
  * Queue an outbound review for every freshly-imported *unidentified* bank
