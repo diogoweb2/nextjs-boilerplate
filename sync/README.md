@@ -366,6 +366,15 @@ stamp — so the next day's fire retries, every day, until it works. State:
 Delete the stamp to force a run today. Requires a live `gcloud auth login` for the Firestore
 read; if that lapses the run fails, fires a macOS banner, and retries daily until you re-auth.
 
+## Skip when already synced today (manual import)
+
+Before opening a browser, every runner asks `GET /api/sync-status?source=…` whether the source
+already succeeded **today** (Mac local date). A manual CSV upload in the app stamps
+`sync_runs.lastSuccessAt`, so importing a bank by hand stops the Mac from logging into that bank
+again that day (including retries and wake-from-sleep runs). The runner logs the skip and exits 0.
+Pass `--force` to run anyway (e.g. `npx tsx sync/run-amex.ts --force`). If the check itself fails,
+the runner syncs as normal.
+
 ## Failure reporting (dashboard banner)
 
 Every run reports its outcome to the deployed app via `POST /api/sync-status` (token-authed,

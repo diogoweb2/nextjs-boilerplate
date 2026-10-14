@@ -35,3 +35,24 @@ export async function reportSyncStatus(
     console.error(`  (sync-status report failed: ${err instanceof Error ? err.message : String(err)})`)
   }
 }
+
+/**
+ * True when `source` already synced successfully today (Mac local date) — e.g.
+ * the owner imported its CSV manually, which stamps lastSuccessAt server-side.
+ * The runner skips the bank login in that case. Best-effort: any error returns
+ * false so a flaky status check never blocks the real sync.
+ */
+export async function syncedToday(source: string): Promise<boolean> {
+  try {
+    const token = readSecret('budget-sync-ingest', 'ingest')
+    const res = await fetch(`${statusUrl()}?source=${encodeURIComponent(source)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!res.ok) return false
+    const json = (await res.json()) as { lastSuccessAt?: string | null }
+    if (!json.lastSuccessAt) return false
+    return new Date(json.lastSuccessAt).toDateString() === new Date().toDateString()
+  } catch {
+    return false
+  }
+}

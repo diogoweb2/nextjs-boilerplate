@@ -17,7 +17,7 @@ import { readCredentials } from './keychain'
 import { profileDir, logsDir } from './profile'
 import { postCsv, postAccountBalance, postMortgageBalance, postMortgageRate } from './ingest'
 import { notify } from './notify'
-import { reportSyncStatus } from './status'
+import { reportSyncStatus, syncedToday } from './status'
 import { applyStealth } from './stealth'
 import type { Adapter } from '../adapters/types'
 
@@ -59,6 +59,8 @@ async function waitForMfaApproval(adapter: Adapter, page: Page): Promise<void> {
  * @param startHeadless Whether to launch headless (the launchd wrappers decide).
  * @param manual Debug mode: skip credential auto-fill (you log in by hand),
  *               leave the browser open at the end, and don't process.exit.
+ *               Pass `--force` on the command line to run even if the source
+ *               already synced today (otherwise it's skipped — see syncedToday).
  * @param keepOpenOnFail Debug aid: on failure, leave the browser open (and the
  *               process alive) for inspection instead of closing. Off for the
  *               unattended daily run so it always exits cleanly.
@@ -71,6 +73,13 @@ export async function runSync(
   manual = false,
   keepOpenOnFail = false
 ): Promise<void> {
+  // Already synced today (typically a manual CSV upload) → don't log into the
+  // bank again. `--force` overrides, e.g. to re-run after a manual upload.
+  if (!manual && !process.argv.includes('--force') && (await syncedToday(adapter.importSource))) {
+    console.log(`→ ${label} already synced today (manual import or earlier run) — skipping. Use --force to run anyway.`)
+    process.exit(0)
+  }
+
   const creds = manual
     ? { username: '', password: '' }
     : readCredentials(source) // throws with a setup hint if missing

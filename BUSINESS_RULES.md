@@ -1863,6 +1863,11 @@ places a source can turn 'ok' in `sync_runs`:
 - `importCsv` (`app/actions/import.ts`), after a manual CSV upload's `clearSyncFailure` — this is what
   makes hand-fixing the one bank that failed automatically also trigger it, same day, no waiting.
 
+**Manual import skips that day's auto-sync.** Because a manual upload stamps `sync_runs.lastSuccessAt`,
+the Mac runner (`sync/lib/runner.ts` → `syncedToday`, via `GET /api/sync-status?source=…`) skips the
+bank login for any source that already succeeded today (Mac local date). `--force` overrides; a failed
+check falls through to a normal sync.
+
 `maybeTriggerDigest` first checks `allSourcesFinishedToday()` (every source ran today, Master+Amex 'ok';
 stricter than the Master+Amex-only `allSourcesSyncedToday()` gate `runDailyDigestJob` pushes behind — see
 "Which syncs gate the push" above) and only calls `runDailyDigestJob` once that's true — so the earlier

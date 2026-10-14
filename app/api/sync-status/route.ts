@@ -1,7 +1,7 @@
 import { revalidatePath } from 'next/cache'
 import { after } from 'next/server'
 import type { NextRequest } from 'next/server'
-import { sql } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import { syncRuns } from '@/db/schema'
 import { ingestTokenOk } from '@/app/lib/apiToken'
@@ -23,6 +23,37 @@ import { maybeTriggerDigest } from '@/app/lib/digest'
  */
 const SOURCES = ['master', 'amex', 'tangerine', 'scotia'] as const
 type Source = (typeof SOURCES)[number]
+
+/**
+ * GET ?source=amex → the source's current health row. The runner calls this
+ * before opening a browser: if the source already succeeded today — notably
+ * because the owner uploaded its CSV by hand (importCsv stamps lastSuccessAt) —
+ * it skips the bank login entirely. "Today" is judged by the runner in the
+ * Mac's local timezone, so this just returns the raw timestamps.
+ */
+export async function GET(request: NextRequest): Promise<Response> {
+  if (!process.env.INGEST_TOKEN) {
+    return Response.json({ ok: false, error: 'Endpoint not configured.' }, { status: 503 })
+  }
+  if (!ingestTokenOk(request)) {
+    return Response.json({ ok: false, error: 'Unauthorized.' }, { status: 401 })
+  }
+  const source = request.nextUrl.searchParams.get('source')
+  if (!source || !SOURCES.includes(source as Source)) {
+    return Response.json({ ok: false, error: 'Unknown or missing source.' }, { status: 400 })
+  }
+  const [row] = await db
+    .select({ status: syncRuns.status, lastRunAt: syncRuns.lastRunAt, lastSuccessAt: syncRuns.lastSuccessAt })
+    .from(syncRuns)
+    .where(eq(syncRuns.source, source as Source))
+  return Response.json({
+    ok: true,
+    source,
+    status: row?.status ?? null,
+    lastRunAt: row?.lastRunAt?.toISOString() ?? null,
+    lastSuccessAt: row?.lastSuccessAt?.toISOString() ?? null,
+  })
+}
 
 export async function POST(request: NextRequest): Promise<Response> {
   if (!process.env.INGEST_TOKEN) {
