@@ -1,6 +1,8 @@
-import type { Download, Page } from 'playwright'
+import type { Page } from 'playwright'
+import { writeFileSync } from 'fs'
 import { join } from 'path'
 import { downloadDir } from '../lib/profile'
+import { HARDENED_LAUNCH } from '../lib/stealth'
 import type { Adapter, Credentials, DateRange } from './types'
 
 /**
@@ -18,6 +20,13 @@ import type { Adapter, Credentials, DateRange } from './types'
  * Device MFA ("approve on phone") only appears when the trusted session has
  * expired. Daily runs reuse the persistent profile and skip it; when it does
  * appear the runner pauses for the user (see AUTO_SYNC_PLAN.md §3).
+ *
+ * Bot detection: a plain automated browser (`navigator.webdriver = true`) gets the
+ * credentials rejected with "This feature is not currently available. Please try
+ * again or call the number on the back of your card" — while the same login works
+ * by hand. Same fix as Tangerine: HARDENED_LAUNCH strips the automation flag so
+ * `navigator.webdriver` is false NATURALLY, and we skip the stealth init script
+ * (its faked `navigator.plugins` is itself a fingerprint tell for reCAPTCHA).
  */
 
 const LOGIN_URL = 'https://selfserve.rogersbank.com/sign-in?locale=en'
@@ -131,108 +140,103 @@ async function isMfaChallenge(page: Page): Promise<boolean> {
 }
 
 /**
- * Rogers' export UI is statement-period based (a `#month-select` dropdown), not
- * an arbitrary date range, so `_range` is unused. We pull "Current transactions"
- * — the unbilled, up-to-today activity. Anything statement-based trails the
- * current cycle by up to a month, which is why this is the only option we use.
- * Re-importing is free (dedup on Reference Number), so re-downloading the
- * overlapping window every day is harmless.
+ * Rogers' "Download transactions" dialog is unusable for automation: its CSV
+ * endpoint (`…/activity?format=CSV`) is gated by a reCAPTCHA token, and it
+ * scores the automated browser as a bot → 401 `RECAPTCHA_ERROR`, so no file ever
+ * arrives. The transactions TABLE, though, is fed by `…/transactions?offset=N`
+ * (the newest N×50 activities), which carries no reCAPTCHA. So we let the page
+ * make that call once, borrow its auth headers, fetch a wider window ourselves,
+ * and write a CSV in the exact shape of Rogers' own export — the existing
+ * `master` parser ingests it unchanged.
+ *
+ * Fidelity (checked field-by-field against past exports): the export holds only
+ * posted `TRANS`/`APPROVED` rows, its Reference Numbers are the API's
+ * `referenceNumber` verbatim (payments included) so dedup lines up with earlier
+ * imports, and it strips every comma from text ("PAYMENT, THANK YOU" →
+ * "PAYMENT THANK YOU") — which we mirror so merchant/category rules keep matching.
+ * "Name on Card" is left blank: the parser never reads it, and the repo's privacy
+ * rule says not to keep cardholder names.
+ *
+ * `_range` is unused: offset=3 (~150 rows, about six weeks) comfortably covers
+ * the current cycle plus overlap, and re-importing dedups to zero.
  */
+const PAGES = 3
+
+type RogersActivity = {
+  date: string
+  postedDate?: string
+  referenceNumber?: string
+  activityType: string
+  activityStatus: string
+  cardNumber?: string
+  amount: { value: string }
+  merchant?: {
+    name?: string
+    categoryDescription?: string
+    address?: { city?: string; stateProvince?: string; countryCode?: string; postalCode?: string }
+  }
+}
+
+const CSV_HEADER = [
+  'Date', 'Posted Date', 'Reference Number', 'Activity Type', 'Activity Status', 'Card Number',
+  'Merchant Category Description', 'Merchant Name', 'Merchant City', 'Merchant State or Province',
+  'Merchant Country Code', 'Merchant Postal Code', 'Amount', 'Rewards', 'Name on Card',
+]
+
+/** Rogers' export drops commas (and we drop quotes) so fields never need escaping. */
+const clean = (s: string | undefined) => (s ?? '').replace(/[,"\r\n]/g, '').trim()
+
+function toCsvRow(a: RogersActivity): string {
+  const n = Number(a.amount.value)
+  const amount = `${n < 0 ? '-' : ''}$${Math.abs(n).toFixed(2)}`
+  const addr = a.merchant?.address
+  return [
+    a.date,
+    a.postedDate ?? '',
+    `"${clean(a.referenceNumber)}"`,
+    a.activityType,
+    a.activityStatus,
+    clean(a.cardNumber),
+    clean(a.merchant?.categoryDescription),
+    clean(a.merchant?.name),
+    clean(addr?.city),
+    clean(addr?.stateProvince),
+    clean(addr?.countryCode),
+    clean(addr?.postalCode),
+    amount,
+    '',
+    '',
+  ].join(',')
+}
+
 async function exportCsv(page: Page, _range: DateRange): Promise<string> {
+  // The table's first load is our source of auth: arm the wait before navigating.
+  const tableRequest = page.waitForRequest(
+    (r) => /\/corebank\/v1\/account\/[^/]+\/customer\/[^/]+\/transactions\?offset=/.test(r.url()),
+    { timeout: 30_000 }
+  )
   await page.goto(TRANSACTIONS_URL, { waitUntil: 'domcontentloaded' })
+  const req = await tableRequest.catch(() => {
+    throw new Error('The /transactions page never requested its transactions API — Rogers changed the page.')
+  })
+  const headers = await req.allHeaders()
+  const endpoint = req.url().split('?')[0]
 
-  // The `aria-label="Download transactions"` sits on an inner <p> that is only the
-  // LABEL: the click handler lives on its parent <div>. So anchor on the stable
-  // aria-label but click the parent. Class names are Tailwind soup Rogers reshuffles
-  // freely; never match those.
-  const openDialog = page.locator('[aria-label="Download transactions"]').locator('xpath=..')
-  await openDialog.waitFor({ state: 'visible', timeout: 15_000 })
-
-  const monthSelect = page.locator('#month-select')
-
-  // Open the dialog by DISPATCHING the pointer/mouse sequence onto the element,
-  // rather than with Playwright's real-mouse `.click()`.
-  //
-  // Playwright's click moves a virtual mouse to the element's center and clicks
-  // there; on this page that lands but never opens the dialog. Dispatching the
-  // events directly onto the node — verified by hand in DevTools — does open it.
-  // The trigger is a plain <div> (no `disabled`, no button role), so Playwright's
-  // actionability checks pass regardless and give us no signal either way.
-  //
-  // Retried because React renders the <div> before hydration wires its handler, so
-  // an early dispatch is silently swallowed. Success is defined as "the dialog is
-  // actually on screen", not "the click returned" — the previous version's failure
-  // showed up much later, on a dialog that had never opened. Re-clicking is safe:
-  // the trigger opens the dialog, it doesn't toggle it.
-  for (let attempt = 1; ; attempt++) {
-    await openDialog.evaluate((el) => {
-      const r = el.getBoundingClientRect()
-      const init: MouseEventInit = {
-        bubbles: true,
-        cancelable: true,
-        composed: true,
-        clientX: r.x + r.width / 2,
-        clientY: r.y + r.height / 2,
-        button: 0,
-      }
-      for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
-        el.dispatchEvent(new MouseEvent(type, init))
-      }
-    })
-    try {
-      await monthSelect.waitFor({ state: 'visible', timeout: 2_000 })
-      break
-    } catch {
-      if (attempt >= 10) {
-        throw new Error(
-          'The download dialog never opened after 10 clicks on "Download transactions".'
-        )
-      }
-      await page.waitForTimeout(1_000)
-    }
+  const res = await page.context().request.get(`${endpoint}?offset=${PAGES}`, { headers })
+  const body = await res.json().catch(() => null)
+  const activities: RogersActivity[] | undefined = body?.activitySummary?.activities
+  if (!res.ok() || !Array.isArray(activities)) {
+    throw new Error(`Rogers transactions API returned ${res.status()}: ${JSON.stringify(body).slice(0, 200)}`)
   }
 
-  // Pick "Current transactions" — the entry between the "-Select-" placeholder
-  // ("") and the dated statement options (values like "2026-07-11"). Match on the
-  // option's TEXT rather than hardcoding its value, since the value is Rogers'
-  // internal token and the visible label is the stable contract.
-  const current = await monthSelect.evaluate((el) => {
-    const select = el as HTMLSelectElement
-    return (
-      Array.from(select.options).find((o) => /current transactions/i.test(o.textContent ?? ''))
-        ?.value ?? null
-    )
-  })
-  if (current === null) {
-    throw new Error('No "Current transactions" option found in the #month-select dropdown.')
-  }
-  await monthSelect.selectOption(current)
-
-  // Arm the download listener BEFORE the click that triggers it, and listen on the
-  // whole context rather than just this page: Rogers hands the CSV off through a
-  // brand-new tab, and Playwright fires `download` on the page that actually
-  // receives it — so a plain `page.waitForEvent('download')` waits forever on the
-  // wrong page while the click itself worked fine. The export is also generated
-  // server-side, so give it well over the 30s default.
-  const downloadPromise = new Promise<Download>((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error('No download started within 90s of clicking Download.')),
-      90_000
-    )
-    const settle = (d: Download) => {
-      clearTimeout(timer)
-      resolve(d)
-    }
-    page.once('download', settle)
-    page.context().on('page', (popup) => popup.once('download', settle))
-  })
-
-  await page.getByRole('button', { name: 'Download', exact: true }).click()
-  const download = await downloadPromise
+  const posted = activities.filter(
+    (a) => a.activityType === 'TRANS' && a.activityStatus === 'APPROVED' && a.referenceNumber
+  )
+  const csv = [CSV_HEADER.join(','), ...posted.map(toCsvRow)].join('\n') + '\n'
 
   const stamp = new Date().toISOString().slice(0, 10)
   const dest = join(downloadDir('rogers'), `rogers-current-dl${stamp}.csv`)
-  await download.saveAs(dest)
+  writeFileSync(dest, csv)
   return dest
 }
 
@@ -280,6 +284,8 @@ async function captureAccountBalance(page: Page): Promise<number | null> {
 export const rogers: Adapter = {
   importSource: 'master',
   loginUrl: LOGIN_URL,
+  launchOptions: HARDENED_LAUNCH,
+  applyStealthScript: false,
   needsLogin,
   login,
   isMfaChallenge,

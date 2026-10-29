@@ -227,7 +227,10 @@ only addition is a way to feed a CSV in without clicking the UI:
    wrapper (stable fnm node, prod `INGEST_URL`). macOS notifications on success/failure/MFA +
    failure screenshots to the logs dir. **Key finding:** Rogers login is behind **reCAPTCHA** —
    headless is rejected, so the runner (and cron) must run **headed**; a headed run in the
-   trust-built persistent profile passes. Still TODO: push/email alert (beyond macOS notification)
+   trust-built persistent profile passes. The login also needs the anti-automation launch flags
+   (`HARDENED_LAUNCH`), else it fails with "This feature is not currently available". The CSV
+   *download* endpoint is reCAPTCHA-gated too and 401s automation, so the export now reads the
+   transactions-table API instead and writes an identical CSV (Oct 2026). Still TODO: push/email alert (beyond macOS notification)
    and a per-source status file.
 5. **Hardening.** MFA-detection edge cases, session-expiry re-login, retries, logging, docs for
    re-authorizing a device.

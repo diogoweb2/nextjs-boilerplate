@@ -53,9 +53,10 @@ npx tsx sync/run-rogers.ts             # headed, watch it work
 npx tsx sync/run-rogers.ts --headless  # headless (for the eventual cron)
 ```
 
-It logs in, exports the "Current transactions" period (unbilled activity up to today —
-statement-dated options trail the current cycle by up to a month), and
-prints the parsed row count to prove the download→parse path. Device trust persists in
+It logs in and builds the CSV from the transactions API that feeds the /transactions table
+(the last ~150 posted rows), in the exact shape of Rogers' own export. The "Download
+transactions" dialog can't be automated: its CSV endpoint is gated by reCAPTCHA, which
+401s the automated browser (`RECAPTCHA_ERROR`). See `exportCsv` in `adapters/rogers.ts`. Device trust persists in
 the profile, so MFA is skipped on daily runs.
 
 ## Phase 2 — ingest into the app
