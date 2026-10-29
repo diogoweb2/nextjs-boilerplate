@@ -90,13 +90,11 @@ ${list}`
     return { ok: false, error: e instanceof Error ? e.message.slice(0, 300) : String(e) }
   }
 
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(sliceJson(text, '['))
-  } catch {
+  const parsed = parseSuggestions(text)
+  if (!parsed) {
+    console.error('[suggestCategories] unparseable reply:', text.slice(0, 1000))
     return { ok: false, error: "The model's answer wasn't valid JSON." }
   }
-  if (!Array.isArray(parsed)) return { ok: false, error: 'The model did not return a list.' }
 
   const byId = new Map(pickable.map((c) => [c.id, c.name]))
   const wanted = new Set(txns.map((t) => t.id))
@@ -118,4 +116,36 @@ ${list}`
   }
   if (suggestions.length === 0) return { ok: false, error: 'No usable suggestions came back.' }
   return { ok: true, suggestions, model: DEFAULT_MODEL }
+}
+
+/**
+ * Cheap models often return almost-JSON: a trailing comma, a cut-off array, an
+ * unescaped quote inside `reason`. Try a strict parse first, then fall back to
+ * salvaging each `{...}` row on its own so one bad row can't sink the batch.
+ */
+function parseSuggestions(text: string): unknown[] | null {
+  try {
+    const parsed = JSON.parse(sliceJson(text, '[').replace(/,\s*([\]}])/g, '$1'))
+    if (Array.isArray(parsed)) return parsed
+    // Some models wrap the list: {"suggestions": [...]}.
+    const inner = Object.values(parsed ?? {}).find(Array.isArray)
+    if (inner) return inner
+  } catch {
+    // fall through to per-row salvage
+  }
+
+  const rows: unknown[] = []
+  for (const [obj] of text.matchAll(/\{[^{}]*\}/g)) {
+    try {
+      rows.push(JSON.parse(obj.replace(/,\s*}/g, '}')))
+      continue
+    } catch {
+      // Row itself is broken (usually quotes in `reason`): pull the ids out directly.
+    }
+    const txnId = obj.match(/"txnId"\s*:\s*"?(\d+)/)?.[1]
+    const categoryId = obj.match(/"categoryId"\s*:\s*"?(\d+)/)?.[1]
+    const reason = obj.match(/"reason"\s*:\s*"([\s\S]*)"\s*}?\s*$/)?.[1] ?? ''
+    if (txnId && categoryId) rows.push({ txnId, categoryId, reason })
+  }
+  return rows.length ? rows : null
 }
