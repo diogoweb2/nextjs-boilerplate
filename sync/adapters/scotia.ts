@@ -28,9 +28,12 @@ import type { Adapter, Credentials, DateRange } from './types'
  * adapters for the same pattern, and AUTO_SYNC_PLAN.md §3).
  *
  * Bot detection: Scotia's WAF refuses a plain automated browser ("sorry, we
- * couldn't complete your request… Ref: #…"), so — like Amex — we run the isolated
- * bundled Chromium with anti-automation launch flags + a stealth init script (see
- * lib/stealth.ts). The launchd wrapper runs HEADED, which the hardening needs.
+ * couldn't complete your request… Ref: #…" / a redirect to /generic-error), so we
+ * run the isolated bundled Chromium with anti-automation launch flags (see
+ * lib/stealth.ts) — `navigator.webdriver` becomes false NATURALLY. Like Rogers and
+ * Tangerine we do NOT inject the stealth init script: its faked `navigator` props
+ * are themselves a fingerprint tell. The launchd wrapper runs HEADED, which the
+ * hardening needs.
  */
 
 const HOME_URL = 'https://www.scotiabank.com/ca/en/personal.html'
@@ -240,6 +243,7 @@ export const scotia: Adapter = {
   // Scotia's WAF silently blocks an automated browser; harden the launch and
   // apply the stealth init script (same recipe as Amex — see lib/stealth.ts).
   launchOptions: HARDENED_LAUNCH,
+  applyStealthScript: false,
   needsLogin,
   login,
   isMfaChallenge,
