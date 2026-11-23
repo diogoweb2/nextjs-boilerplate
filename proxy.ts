@@ -18,6 +18,17 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next()
   }
 
+  // The Claude MCP connector (BUSINESS_RULES §28): /api/mcp checks its own OAuth
+  // bearer token; the OAuth metadata, client registration and token endpoints
+  // are public by spec; /oauth/authorize demands the master password itself.
+  if (
+    pathname === '/api/mcp' ||
+    pathname.startsWith('/.well-known/oauth-') ||
+    pathname.startsWith('/oauth/')
+  ) {
+    return NextResponse.next()
+  }
+
   // The push service worker must be a public, non-redirected script — browsers
   // refuse to register a SW that 307s to the login page. It contains no data.
   if (pathname === '/sw.js') {

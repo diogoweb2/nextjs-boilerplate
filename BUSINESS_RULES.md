@@ -2692,3 +2692,54 @@ Rendered as a card inside `/accounts/cobalt`, between §25 and §26.
   choice at once, not to make the owner toggle between them and hold two numbers in their head.
 - **Moves with the point-value slider**, since `cobaltCancelAnnualDelta` is derived from the Cobalt
   analysis priced at the current ¢/point.
+
+---
+
+## 28. Claude connector — ask questions from claude.ai (`/api/mcp`)
+
+A remote **MCP server** so the owner can ask Claude (claude.ai, desktop or mobile apps) free-form
+questions about spending and income ("did I pay the RV storage this month?", "did both cards get
+paid?", "how much did we spend on dining since September?"). **Read-only and deterministic**: the app
+runs no model here. Claude calls tools that return plain numbers and rows.
+
+### Endpoints (all whitelisted in `proxy.ts`, each with its own auth)
+- `POST /api/mcp`: Streamable-HTTP MCP, stateless JSON-RPC (`initialize`, `tools/list`,
+  `tools/call`, `ping`). Without a valid bearer token it returns **401** with
+  `WWW-Authenticate: Bearer resource_metadata=…`, which starts Claude's OAuth flow.
+- `/.well-known/oauth-protected-resource[/api/mcp]` (RFC 9728) and
+  `/.well-known/oauth-authorization-server` (RFC 8414): metadata.
+- `POST /oauth/register` (RFC 7591 dynamic client registration). Only Claude's callbacks
+  (`https://claude.ai|claude.com/api/mcp/auth_callback`) are accepted, plus `http://localhost`
+  outside production for the MCP Inspector.
+- `/oauth/authorize`: consent page. It **always asks for the master password**, even when a session
+  cookie exists, and it shares the login brute-force throttle (`app/lib/rate-limit.ts`).
+- `POST /oauth/token`: `authorization_code` (PKCE S256 mandatory, public client) and
+  `refresh_token` (rotated on every use).
+
+### Tokens (`app/lib/mcp/tokens.ts`): stateless, no table
+client_id, auth code (2 min), access token (1 h) and refresh token (1 yr) are all HMAC-signed JSON.
+The key is **derived** from `SESSION_SECRET` with the label `mcp-oauth-v<MCP_TOKEN_VERSION>`, never
+the raw secret, so an MCP token can never be used as a web-session cookie or the reverse.
+**Revoke every connection** by setting or bumping `MCP_TOKEN_VERSION` (default `1`) in Vercel env and
+redeploying. Claude then has to reconnect and the password is asked again.
+
+### Tools (`app/lib/mcp/tools.ts`), same semantics as §1/§4/§6
+- `get_budget_context`: today, sources, data freshness per source, last sync runs, live balances,
+  cardholder names (from env, §4b), categories.
+- `search_transactions`: row search (date range, text over description/merchant/**note**, merchant,
+  categories, sources, flows, absolute-amount range, direction, cardholder, exclude special).
+  Includes card payments and every flow by default, so "did I pay X" questions work.
+- `summarize_spending`: totals grouped by up to two of category/merchant/month/year/source/
+  cardholder/flow. **Card payments are always excluded**, default flow is `expense`, refunds net
+  (signed sum), effective category = txn override ?? merchant default. For a plain by-category
+  expense summary it also returns **category credits** and `net_after_credits` (§6), so the numbers
+  match the dashboard tiles.
+- `describe_schema` + `run_readonly_sql`: an escape hatch for anything else (goals, projects,
+  investments). One `SELECT`/`WITH` statement, wrapped as a subquery (a data-modifying CTE is
+  illegal there), run in a Neon **READ ONLY** transaction with an 8 s `statement_timeout`, max
+  500 rows.
+- Cardholder only exists for card rows (`master`/`amex`). Bank rows report `null` / `(bank)`.
+
+### Setup
+claude.ai → Settings → Connectors → **Add custom connector** → URL `https://<deployment>/api/mcp`
+→ Connect → enter the master password. No new env vars are required (`MCP_TOKEN_VERSION` is optional).
